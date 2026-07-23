@@ -28,8 +28,9 @@ Core/Metabolism/MetabolicRecordAssembler.swift  day-complete-aware engine input
 Core/Recovery/RecoveryEngine.swift           readiness 0–100
 Core/Nutrition/NutrientProfile.swift         shared nutrient types
 Core/Nutrition/OpenFoodFactsClient.swift     barcode + search, no key
-Core/Nutrition/USDAClient.swift              FDC search, key via xcconfig
-Core/Nutrition/FoodResolver.swift            cache → OFF → USDA, offline caching
+Core/Nutrition/FDCSeedCatalog.swift          bundled 7.8k generic foods, keyless
+Core/Nutrition/FoodResolver.swift            cache → FDC seed → OFF
+Resources/fdc_seed.json                      built by tools/build_fdc_seed.py
 Core/Nutrition/BarcodeScanner.swift          AVFoundation scanner + sim fallback
 Core/Training/TrainingAnalytics.swift        volume aggregator + e1RM progression
 Core/Training/ExerciseLibrary.swift          25-exercise catalog + split templates

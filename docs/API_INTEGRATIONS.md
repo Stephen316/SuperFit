@@ -30,15 +30,18 @@ Patterns:
 - Map `nutriments` (per 100 g) → `Food.per100g`. Coverage is crowd-sourced; treat
   missing fields as nil, not zero.
 
-## Nutrition — USDA FoodData Central (authoritative fallback)
-- `GET https://api.nal.usda.gov/fdc/v1/foods/search?query=...&api_key=KEY`
-- `GET https://api.nal.usda.gov/fdc/v1/food/{fdcId}?api_key=KEY`
-- Requires a free API key. **Not** committed — injected via xcconfig / Keychain,
-  read at runtime. Prefer `Foundation`-labeled entries (lab-analyzed).
+## Nutrition — USDA FoodData Central (bundled, no API)
+Generic whole foods ship **inside the app**: `tools/build_fdc_seed.py` distills
+the public-domain Foundation + SR Legacy datasets (~7,800 lab-analyzed foods)
+into `Resources/fdc_seed.json` (~1 MB). `FDCSeedCatalog` searches it in memory
+with token-AND matching — offline, keyless, no rate limits. Foundation entries
+win name collisions with SR Legacy. Items become `Food` rows only when logged,
+keeping the seed out of CloudKit sync. (USDA's branded dataset is deliberately
+excluded: US-centric, hundreds of MB, and OFF covers branded better.)
 
-Resolution order when logging: local cache → Open Food Facts (branded/barcode) →
-USDA (generic whole foods). Every fetched item is cached as a `Food` row so repeat
-logging is offline.
+Resolution order when logging: local cache → bundled FDC catalog (generic) →
+Open Food Facts (branded/barcode). Every remote fetch is cached as a `Food` row
+so repeat logging is offline.
 
 ## Barcode scanning
 `AVCaptureSession` + `VNBarcodeObservation` (Vision) for EAN-13/UPC-A → OFF lookup.
@@ -49,4 +52,4 @@ Camera use needs `NSCameraUsageDescription`.
 - 10 s timeout, exponential-backoff retry (max 3) on 5xx.
 - Response size cap and JSON schema validation before mapping.
 - Per-host rate limiting; results cached to avoid re-hitting public endpoints.
-- No secrets in source; USDA key from `Secrets.xcconfig` (git-ignored) or Keychain.
+- Zero API keys anywhere in the app.

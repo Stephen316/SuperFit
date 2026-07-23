@@ -19,10 +19,11 @@ The Swift sources are here but the `.xcodeproj`/`.xcworkspace` is not committed
   `iCloud.com.yourorg.superfit`.
 - **Background Modes** → Background fetch + Background processing.
 
-## Secrets
-`cp ios/Secrets.xcconfig.example ios/Secrets.xcconfig`, add your USDA key, and set
-it as the project's config file (Project → Info → Configurations). Open Food Facts
-needs none.
+## API keys
+None. Generic foods ship inside the app (`Resources/fdc_seed.json`, public-domain
+USDA data — make sure it's added to the target's bundle resources); branded
+products come from the keyless Open Food Facts API. Regenerate the seed with
+`python tools/build_fdc_seed.py` when USDA publishes a new release.
 
 ## Run
 - Simulator has no Health data — use a **real device** to exercise the HealthKit

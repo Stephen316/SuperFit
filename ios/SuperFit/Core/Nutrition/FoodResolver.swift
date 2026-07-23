@@ -1,17 +1,18 @@
 import Foundation
 import SwiftData
 
-/// Resolution order: local cache → Open Food Facts (branded/barcode) → USDA
-/// (generic whole foods). Everything fetched is cached as a Food row so repeat
-/// logging works offline. See docs/API_INTEGRATIONS.md.
+/// Resolution order: local cache → bundled FDC catalog (generic whole foods,
+/// offline, keyless) → Open Food Facts (branded/barcode). Remote fetches are
+/// cached as Food rows so repeat logging works offline. See docs/API_INTEGRATIONS.md.
 @MainActor
 final class FoodResolver {
     private let off = OpenFoodFactsClient()
-    private let usda = USDAClient()
+    private let seed: FDCSeedCatalog
     private let context: ModelContext
 
-    init(context: ModelContext) {
+    init(context: ModelContext, seed: FDCSeedCatalog = .shared) {
         self.context = context
+        self.seed = seed
     }
 
     func byBarcode(_ barcode: String) async -> ResolvedFood? {
@@ -26,12 +27,15 @@ final class FoodResolver {
         guard trimmed.count >= 2 else { return [] }
 
         let local = localMatches(trimmed)
-        async let offResults = (try? off.search(trimmed)) ?? []
-        async let usdaResults = (try? usda.search(trimmed)) ?? []
-        let remote = await offResults + usdaResults
+        let generic = seed.search(trimmed)
+        let branded = (try? await off.search(trimmed)) ?? []
 
-        let localIDs = Set(local.map(\.id))
-        return local + remote.filter { !localIDs.contains($0.id) }
+        var seen = Set(local.map(\.id))
+        var out = local
+        for f in generic + branded where seen.insert(f.id).inserted {
+            out.append(f)
+        }
+        return out
     }
 
     /// Persist a remote result locally (dedupes by remoteID).
