@@ -6,9 +6,14 @@ into an **adaptive** model of your true energy expenditure. It never adds exerci
 calories back into your target — it learns your TDEE from the relationship between
 what you eat and what the scale does over rolling 7/14/30-day windows.
 
-- **iOS** · Swift · SwiftUI · HealthKit · SwiftData + CloudKit
-- Portable domain layer (`HealthProvider` protocol) for a future Android /
-  Health Connect port.
+## Repository layout
+- [`ios/`](ios/) — the iOS app · Swift · SwiftUI · HealthKit · SwiftData + CloudKit
+- [`windows/`](windows/) — SuperFit Lite, a standalone Windows TDEE/macro
+  calculator using the same validated algorithms (download from Releases)
+- [`docs/`](docs/) — shared architecture, algorithm, and API documentation
+
+The domain layer is portable by design (`HealthProvider` protocol) for a future
+Android / Health Connect port.
 
 ## Docs
 - [Architecture](docs/ARCHITECTURE.md)

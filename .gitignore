@@ -10,3 +10,10 @@ build/
 
 # SwiftPM
 .build/
+
+# Python (windows/)
+__pycache__/
+*.pyc
+dist/
+*.spec
+.venv/
