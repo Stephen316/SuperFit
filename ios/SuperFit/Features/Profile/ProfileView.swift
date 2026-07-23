@@ -41,7 +41,7 @@ struct ProfileView: View {
                                 Text(a.rawValue.capitalized).tag(a)
                             }
                         }
-                        Text("Used only until your logged data measures your real expenditure.")
+                        Text("Fallback only — replaced by measured Apple Health activity after ~a week of syncing, then by your logged trend data.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -2,38 +2,51 @@ import SwiftUI
 import SwiftData
 
 struct DashboardView: View {
+    @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
     @Query private var nutrition: [NutritionLog]
-    @Query private var statuses: [DayLogStatus]
+    @Query(sort: \MetabolicEstimateRecord.date, order: .reverse) private var estimates: [MetabolicEstimateRecord]
+    @Query(sort: \RecoveryScoreRecord.date, order: .reverse) private var recoveries: [RecoveryScoreRecord]
+    @Query(sort: \DailyEnergy.date, order: .reverse) private var energy: [DailyEnergy]
+    @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
+
+    @State private var syncing = false
 
     private var profile: UserProfile? { profiles.first }
     private var latestWeight: Double? { metrics.first?.weightKg }
 
-    private var estimate: TDEEEstimate? {
-        guard let profile, !metrics.isEmpty else { return nil }
-        let recs = dailyRecords()
-        return MetabolismEngine().estimate(
-            records: recs, windowDays: 30,
-            prior: .init(sex: profile.sex, ageYears: profile.ageYears,
-                         heightCm: profile.heightCm, activity: profile.activity))
+    private var headline: MetabolicEstimateRecord? {
+        estimates.first { $0.windowDays == 30 }
     }
 
     private var macros: MacroTargets? {
-        guard let profile, let estimate, let w = latestWeight else { return nil }
-        let target = MetabolismEngine().calorieTarget(tdee: estimate, goal: profile.goal, bodyweightKg: w)
+        guard let profile, let est = headline, let w = latestWeight else { return nil }
+        let tdee = TDEEEstimate(tdeeKcal: est.tdeeKcal, confidence: est.confidence,
+                                trendSlopeKgPerWeek: est.trendSlopeKgPerWeek,
+                                avgIntakeKcal: est.avgIntakeKcal,
+                                smoothedWeightKg: w, windowDays: est.windowDays)
+        let target = MetabolismEngine().calorieTarget(tdee: tdee, goal: profile.goal, bodyweightKg: w)
         let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
-        return MacroCalculator().targets(kcal: target, goal: profile.goal,
-                                         bodyweightKg: w,
+        return MacroCalculator().targets(kcal: target, goal: profile.goal, bodyweightKg: w,
                                          leanMassKg: metrics.first?.leanMassKg,
                                          proteinPerKg: override)
     }
 
     private var todayIntake: (kcal: Double, protein: Double) {
-        let today = Calendar.current.startOfDay(for: .now)
-        let logs = nutrition.filter { Calendar.current.isDate($0.date, inSameDayAs: today) }
+        let logs = nutrition.filter { Calendar.current.isDateInToday($0.date) }
         return (logs.reduce(0) { $0 + $1.kcal }, logs.reduce(0) { $0 + $1.proteinG })
     }
+
+    private var todayRecovery: RecoveryScoreRecord? {
+        recoveries.first { Calendar.current.isDateInToday($0.date) }
+    }
+
+    private var todayEnergy: DailyEnergy? {
+        energy.first { Calendar.current.isDateInToday($0.date) }
+    }
+
+    private var lastSleep: SleepData? { sleep.first }
 
     var body: some View {
         NavigationStack {
@@ -41,17 +54,31 @@ struct DashboardView: View {
                 VStack(spacing: 12) {
                     if let macros {
                         remainingCard(macros: macros)
-                        tdeeCard
                     } else {
                         emptyState
                     }
+                    if let todayRecovery { recoveryCard(todayRecovery) }
+                    activitySleepCard
+                    tdeeCard
                 }
                 .padding(16)
             }
             .navigationTitle("Today")
             .background(Color(.systemGroupedBackground))
+            .task { await refresh() }
+            .refreshable { await refresh() }
         }
     }
+
+    private func refresh() async {
+        guard !syncing else { return }
+        syncing = true
+        defer { syncing = false }
+        await SyncCoordinator(context: context).syncAll()
+        AggregationService(context: context).runAll()
+    }
+
+    // MARK: - Cards
 
     private func remainingCard(macros: MacroTargets) -> some View {
         Card {
@@ -72,23 +99,81 @@ struct DashboardView: View {
         }
     }
 
+    private func recoveryCard(_ recovery: RecoveryScoreRecord) -> some View {
+        Card {
+            HStack(spacing: 16) {
+                Gauge(value: recovery.score, in: 0...100) {
+                    EmptyView()
+                } currentValueLabel: {
+                    Text("\(Int(recovery.score))")
+                        .font(.title3.weight(.semibold)).monospacedDigit()
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+                .tint(recoveryTint(recovery.score))
+                .frame(width: 64, height: 64)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recovery").font(.subheadline).foregroundStyle(.secondary)
+                    Text(recovery.recommendationRaw.isEmpty ? "—" : recovery.recommendationRaw)
+                        .font(.headline)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private var activitySleepCard: some View {
+        Card {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Activity").font(.subheadline).foregroundStyle(.secondary)
+                    if let e = todayEnergy {
+                        Text("\(e.steps) steps").font(.headline).monospacedDigit()
+                        Text("\(Int(e.activeEnergyKcal)) kcal active")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("No data yet").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Divider().frame(height: 44)
+                Spacer()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sleep").font(.subheadline).foregroundStyle(.secondary)
+                    if let s = lastSleep {
+                        Text("\(s.asleepMinutes / 60) h \(s.asleepMinutes % 60) m")
+                            .font(.headline).monospacedDigit()
+                        Text("\(Int(s.efficiency * 100))% efficiency")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("No data yet").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+        }
+    }
+
     private var tdeeCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Estimated expenditure").font(.subheadline).foregroundStyle(.secondary)
-                if let estimate {
-                    Text("\(Int(estimate.tdeeKcal)) kcal")
+                if let est = headline {
+                    Text("\(Int(est.tdeeKcal)) kcal")
                         .font(.title2.weight(.semibold)).monospacedDigit()
                     HStack {
-                        Text(String(format: "Trend %+.2f kg/wk", estimate.trendSlopeKgPerWeek))
+                        Text(String(format: "Trend %+.2f kg/wk", est.trendSlopeKgPerWeek))
                         Spacer()
-                        Text("Confidence \(Int(estimate.confidence * 100))%")
+                        Text("Confidence \(Int(est.confidence * 100))%")
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                    if estimate.confidence < 0.5 {
-                        Text("Still learning — keep logging weight and food for a sharper estimate.")
+                    if est.confidence < 0.5 {
+                        Text("Still learning — log weight daily and mark food days complete for a sharper estimate.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                } else {
+                    Text("Needs weight entries and complete food days.")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
         }
@@ -101,6 +186,15 @@ struct DashboardView: View {
                 Text("Add your goal in Profile and log your weight to start estimating your energy needs.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func recoveryTint(_ score: Double) -> Color {
+        switch score {
+        case 90...: return .green
+        case 70..<90: return .teal
+        case 50..<70: return .yellow
+        default: return .orange
         }
     }
 
@@ -121,10 +215,6 @@ struct DashboardView: View {
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func dailyRecords() -> [DailyRecord] {
-        MetabolicRecordAssembler.dailyRecords(logs: nutrition, metrics: metrics, statuses: statuses)
     }
 }
 

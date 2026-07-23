@@ -176,6 +176,8 @@ final class SetEntry {
     var weightKg: Double = 0
     var reps: Int = 0
     var rir: Int?
+    var restSeconds: Int?
+    var completedAt: Date?
     var isWarmup: Bool = false
     var session: TrainingSession?
 
@@ -201,6 +203,16 @@ final class SleepData {
     init(date: Date) { self.date = date }
 
     var efficiency: Double { inBedMinutes == 0 ? 0 : Double(asleepMinutes) / Double(inBedMinutes) }
+}
+
+/// One row per day of heart metrics — the recovery engine's baseline inputs.
+@Model
+final class DailyVitals {
+    var date: Date = Date()
+    var restingHR: Double?
+    var hrvSDNN: Double?
+
+    init(date: Date) { self.date = date }
 }
 
 @Model

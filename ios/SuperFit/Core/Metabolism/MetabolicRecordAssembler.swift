@@ -23,4 +23,14 @@ enum MetabolicRecordAssembler {
             DailyRecord(date: $0, intakeKcal: intakeByDay[$0], weightKg: weightByDay[$0])
         }
     }
+
+    /// Mean daily active energy over the last `days`. Requires ≥7 days of data —
+    /// below that a couple of unusual days would skew the prior.
+    static func avgActiveEnergy(energy: [DailyEnergy], days: Int = 30,
+                                asOf: Date = .now) -> Double? {
+        let start = asOf.addingTimeInterval(-Double(days) * 86_400)
+        let window = energy.filter { $0.date >= start && $0.activeEnergyKcal > 0 }
+        guard window.count >= 7 else { return nil }
+        return window.reduce(0) { $0 + $1.activeEnergyKcal } / Double(window.count)
+    }
 }

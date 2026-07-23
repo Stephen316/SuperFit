@@ -7,7 +7,8 @@ enum AppSchema {
         Food.self, NutritionLog.self, DayLogStatus.self,
         SavedMeal.self, SavedMealItem.self,
         Exercise.self, TrainingSession.self, SetEntry.self,
-        SleepData.self, RecoveryScoreRecord.self, MetabolicEstimateRecord.self
+        SleepData.self, DailyVitals.self,
+        RecoveryScoreRecord.self, MetabolicEstimateRecord.self
     ]
 
     /// Offline-first local store with transparent CloudKit sync to the user's

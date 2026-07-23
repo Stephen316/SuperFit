@@ -69,6 +69,19 @@ struct MetabolismEngine: Sendable {
         let ageYears: Double
         let heightCm: Double
         let activity: ActivityBaseline
+        /// Mean daily active energy (HealthKit) over the window. When present,
+        /// the prior becomes passive BMR + measured activity (grossed up for
+        /// TEF) and the guessed activity factor is ignored.
+        var avgActiveEnergyKcal: Double?
+
+        init(sex: BiologicalSex, ageYears: Double, heightCm: Double,
+             activity: ActivityBaseline, avgActiveEnergyKcal: Double? = nil) {
+            self.sex = sex
+            self.ageYears = ageYears
+            self.heightCm = heightCm
+            self.activity = activity
+            self.avgActiveEnergyKcal = avgActiveEnergyKcal
+        }
     }
 
     /// Headline estimate over `windowDays`, blended with a BMR prior by confidence.
@@ -104,8 +117,16 @@ struct MetabolismEngine: Sendable {
         let confidence = (coverage * dataMaturity * weighInDensity)
             .clamped(to: 0...1)
 
-        let priorTDEE = bmr(prior, weightKg: smoothed.last?.value ?? 75)
-            * prior.activity.factor
+        // Prior: passive BMR + measured active energy when HealthKit has it
+        // (÷0.9 grosses up for the ~10% thermic effect of food); otherwise the
+        // coarse activity-factor guess.
+        let passiveBMR = bmr(prior, weightKg: smoothed.last?.value ?? 75)
+        let priorTDEE: Double
+        if let active = prior.avgActiveEnergyKcal {
+            priorTDEE = (passiveBMR + active) / 0.9
+        } else {
+            priorTDEE = passiveBMR * prior.activity.factor
+        }
 
         let blended = intakes.isEmpty
             ? priorTDEE

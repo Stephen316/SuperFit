@@ -3,6 +3,27 @@
 The three engines below are pure functions. Constants are grouped so they can be
 tuned against real user cohorts later.
 
+## Validation against published references (28/28 pass)
+- **Mifflin-St Jeor prior** — exact vs the published equation; moderate-PAL
+  output inside the DLW population range.
+- **Epley e1RM vs NSCA %1RM table** — within 2.5 pp at every rep count 1–10.
+  Found+fixed: Epley overpredicts singles by 3.3%; a 1-rep set now counts as its
+  own 1RM.
+- **DLW-style TDEE recovery** — 100 simulations, σ=0.6 kg daily scale noise:
+  mean bias +0.5 kcal, mean abs error 79 kcal, 95th-percentile 179 kcal.
+- **Adaptive thermogenesis (Hall-model −27 kcal/day per kg lost)** — 12-week
+  cut: the 30-day estimate tracks the declining true TDEE within ~26 kcal.
+- **Tissue energy density** — if 25% of loss is lean tissue (Hall 2008 bounds),
+  the 7700 kcal/kg assumption biases TDEE ~118 kcal high; acceptable, and it
+  shrinks as high protein + training preserve lean mass.
+- **Consistent under-reporting (Lichtman 1992)** — a 15% logging bias
+  self-corrects: a target set from the biased TDEE still lands within ~35 kcal
+  of the intended physiological deficit while the bias stays consistent.
+- **Protein/fat grid** — never below Morton 2018's 1.6 g/kg protein or AMDR 20%
+  fat at any goal × bodyweight × calorie combination.
+- **Loss-rate clamp** — engages at exactly 1.0 %BW/week (Garthe 2011 supports
+  <1%/wk for lean-mass retention). ACWR bands match Gabbett 2016.
+
 ---
 
 ## 1. Metabolism Engine (adaptive TDEE)
@@ -48,8 +69,14 @@ the only ground truth that matters — what the scale does given what you ate.
 3. **Average intake** — mean of logged daily kcal over the window, **only over days
    with logging**. Coverage = loggedDays / windowDays.
 4. **Raw TDEE** = avgIntake − slope×7700.
-5. **Blend with prior** when data is thin. Prior = Mifflin-St Jeor BMR × activity
-   factor. Confidence-weighted:
+5. **Blend with prior** when data is thin. The prior separates passive from
+   active energy: once ≥7 days of HealthKit activity have synced,
+   `prior = (Mifflin-St Jeor BMR + mean daily active energy) / 0.9` (the ÷0.9
+   grosses up for the ~10% thermic effect of food) and the self-reported
+   activity factor is ignored. Before that, the coarse fallback
+   `prior = BMR × activity factor` applies. Watch active-energy error stays
+   quarantined inside the prior — it never touches the measured trend TDEE,
+   which overrides the prior as confidence grows. Confidence-weighted:
    ```
    w = coverage × min(1, windowDays/14) × min(1, weighIns/ (windowDays/3))
    TDEE = w·rawTDEE + (1−w)·prior

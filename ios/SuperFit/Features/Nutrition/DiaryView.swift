@@ -7,6 +7,7 @@ struct DiaryView: View {
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
     @Query private var logs: [NutritionLog]
     @Query private var statuses: [DayLogStatus]
+    @Query private var energy: [DailyEnergy]
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var addingTo: MealSlot?
@@ -33,7 +34,8 @@ struct DiaryView: View {
         let est = MetabolismEngine().estimate(
             records: recs, windowDays: 30,
             prior: .init(sex: profile.sex, ageYears: profile.ageYears,
-                         heightCm: profile.heightCm, activity: profile.activity))
+                         heightCm: profile.heightCm, activity: profile.activity,
+                         avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy)))
         let kcal = MetabolismEngine().calorieTarget(tdee: est, goal: profile.goal, bodyweightKg: w)
         return MacroCalculator().targets(kcal: kcal, goal: profile.goal, bodyweightKg: w,
                                          leanMassKg: metrics.first?.leanMassKg)

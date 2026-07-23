@@ -11,6 +11,8 @@ struct RootView: View {
                 .tabItem { Label("Today", systemImage: "square.grid.2x2") }
             DiaryView()
                 .tabItem { Label("Diary", systemImage: "fork.knife") }
+            TrainingView()
+                .tabItem { Label("Train", systemImage: "dumbbell") }
             WeightView()
                 .tabItem { Label("Weight", systemImage: "scalemass") }
             ProfileView()

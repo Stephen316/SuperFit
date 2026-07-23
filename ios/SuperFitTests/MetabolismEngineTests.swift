@@ -55,6 +55,23 @@ private func records(days: Int, intake: Double, startWeight: Double,
         #expect(est.confidence < 0.3)
     }
 
+    @Test func measuredActiveEnergyReplacesActivityFactorInPrior() {
+        let e = MetabolismEngine()
+        let recs = records(days: 3, intake: 2200, startWeight: 80, kgPerDay: 0)
+        // Passive BMR for 80 kg male 30y 180cm = 1780. Measured 650 active:
+        // prior = (1780 + 650) / 0.9 ≈ 2700, regardless of the activity guess.
+        let sedentaryPlusMeasured = MetabolismEngine.Prior(
+            sex: .male, ageYears: 30, heightCm: 180,
+            activity: .sedentary, avgActiveEnergyKcal: 650)
+        let athletePlusMeasured = MetabolismEngine.Prior(
+            sex: .male, ageYears: 30, heightCm: 180,
+            activity: .athlete, avgActiveEnergyKcal: 650)
+        let a = e.estimate(records: recs, windowDays: 30, prior: sedentaryPlusMeasured)
+        let b = e.estimate(records: recs, windowDays: 30, prior: athletePlusMeasured)
+        #expect(a.tdeeKcal == b.tdeeKcal)          // guess ignored when measured
+        #expect(abs(a.tdeeKcal - 2700) < 60)       // sparse data ≈ pure prior
+    }
+
     @Test func calorieTargetRespectsRecompDeficitBand() {
         let e = MetabolismEngine()
         let est = TDEEEstimate(tdeeKcal: 2800, confidence: 0.9,
@@ -74,6 +91,16 @@ private func records(days: Int, intake: Double, startWeight: Double,
         let target = e.calorieTarget(tdee: est, goal: .fatLoss, bodyweightKg: 60)
         let maxDeficit = 60 * 0.01 * MetabolismEngine.kcalPerKg / 7
         #expect(target >= est.tdeeKcal - maxDeficit - 1)
+    }
+}
+
+@Suite struct TrendFillTests {
+
+    @Test func ewmaStartsAtFirstValueAndDampsSpikes() {
+        let smoothed = TrendFill.ewma([80, 80, 80, 82, 80, 80])
+        #expect(smoothed[0] == 80)
+        #expect(smoothed[3] < 80.5)          // 2 kg spike damped below +0.5
+        #expect(smoothed.count == 6)
     }
 }
 

@@ -108,36 +108,14 @@ struct WeightView: View {
         try? context.save()
     }
 
-    /// Fill trendWeightKg with an EWMA so the chart line matches the engine.
     private func recomputeTrend() {
-        let ordered = metrics.sorted { $0.date < $1.date }
-        let alpha = 2.0 / (10 + 1)
-        var trend: Double?
-        for m in ordered {
-            trend = trend.map { alpha * m.weightKg + (1 - alpha) * $0 } ?? m.weightKg
-            m.trendWeightKg = trend
-        }
+        AggregationService(context: context).fillWeightTrend()
     }
 
     private func syncFromHealth() async {
         syncing = true
         defer { syncing = false }
-        let manager = HealthKitManager()
-        guard manager.isAvailable else { return }
-        let range = DateInterval(start: .now.addingTimeInterval(-365 * 86_400), end: .now)
-        do {
-            try await manager.requestAuthorization()
-            let samples = try await manager.bodyMass(in: range)
-            let existing = Set(metrics.map { Calendar.current.startOfDay(for: $0.date) })
-            for s in samples {
-                let day = Calendar.current.startOfDay(for: s.date)
-                guard !existing.contains(day) else { continue }
-                context.insert(BodyMetrics(date: s.date, weightKg: s.kg, source: .healthKit))
-            }
-            recomputeTrend()
-            try? context.save()
-        } catch {
-            // Surfaced silently in Phase 1; wire to a banner in Phase 2.
-        }
+        await SyncCoordinator(context: context).syncAll(days: 365)
+        AggregationService(context: context).runAll()
     }
 }
