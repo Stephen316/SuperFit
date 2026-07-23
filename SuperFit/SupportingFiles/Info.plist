@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>SuperFit reads your weight, activity, sleep, and heart data to estimate your true energy expenditure and recovery. Your health data stays on your device and your private iCloud. It is never sold or shared.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>SuperFit can save workouts you log back to Apple Health so your fitness data stays in one place.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>SuperFit uses the camera to scan food barcodes for fast, accurate nutrition logging.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+</dict>
+</plist>
