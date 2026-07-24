@@ -204,7 +204,7 @@ private struct SetRow: View {
 
     /// Heavier, lower-RIR sets earn longer rest.
     private var defaultRest: Int {
-        set.reps <= 6 ? 180 : 120
+        return set.reps <= 6 ? 180 : 120
     }
 
     private func field(_ unit: String, value: Binding<Double>) -> some View {
@@ -235,7 +235,7 @@ private struct RestTimerRow: View {
                 Spacer()
                 Button("Skip", action: onDismiss).font(.subheadline)
             }
-            .foregroundStyle(remaining > 0 ? .primary : .green)
+            .foregroundStyle(remaining > 0 ? Color.primary : Color.green)
         }
     }
 }
