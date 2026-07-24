@@ -92,9 +92,14 @@ the only ground truth that matters — what the scale does given what you ate.
 If a user logs weekdays but not weekends *and* eats more on unlogged days, the
 average intake — and therefore TDEE — is biased low (validation: 2600 logged
 weekdays / 3650 unlogged weekends / stable weight → estimated 2642 vs true 2900,
-−258 kcal). Coverage lowers confidence but cannot detect the asymmetry. Phase 2
-mitigation: a per-day "logging complete" flag; only complete days enter the
-intake average, matching MacroFactor's approach.
+−258 kcal). Coverage lowers confidence but cannot detect the asymmetry.
+
+Mitigation (auto-complete at midnight): days finalize automatically — today never
+counts (still being logged); a past day counts only if ≥ 800 kcal was logged
+(`MetabolicRecordAssembler.minPlausibleIntake`). The threshold filters abandoned
+logging days (breakfast-then-quit), which would otherwise drag TDEE low. Days
+that were genuinely under-logged but above the threshold remain a residual bias
+source — inherent to any diary-based system without an explicit user flag.
 
 ### Adaptive target adjustment
 Given goal + current TDEE:

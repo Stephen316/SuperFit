@@ -15,13 +15,10 @@ struct ActiveWorkoutView: View {
     @State private var templateName = ""
 
     private var plannedExercises: [Exercise] {
-        guard let name = session.templateName else { return [] }
-        if let saved = savedTemplates.first(where: { $0.name == name }) {
-            return saved.orderedExerciseIDs.compactMap { id in exercises.first { $0.id == id } }
-        }
-        guard let builtin = ExerciseLibrary.templates.first(where: { $0.name == name })
+        guard let name = session.templateName,
+              let saved = savedTemplates.first(where: { $0.name == name })
         else { return [] }
-        return builtin.exercises.compactMap { n in exercises.first { $0.name == n } }
+        return saved.orderedExerciseIDs.compactMap { id in exercises.first { $0.id == id } }
     }
 
     /// Exercises with logged sets, in first-set order; planned-but-unstarted after.
@@ -56,6 +53,7 @@ struct ActiveWorkoutView: View {
             }
             .navigationTitle(session.templateName ?? "Workout")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
@@ -173,11 +171,15 @@ private struct SetRow: View {
     let onCompleted: (Int) -> Void
 
     @Environment(\.modelContext) private var context
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     var body: some View {
         HStack(spacing: 10) {
-            field("kg", value: Binding(get: { set.weightKg },
-                                       set: { set.weightKg = $0.clamped(to: 0...500) }))
+            field(units.weightUnit,
+                  value: Binding(get: { units.displayWeight(set.weightKg) },
+                                 set: { set.weightKg = units.storeWeight($0).clamped(to: 0...500) }))
             field("reps", value: Binding(get: { Double(set.reps) },
                                          set: { set.reps = Int($0.clamped(to: 0...100)) }))
             Picker("RIR", selection: Binding(get: { set.rir ?? -1 },
@@ -370,6 +372,7 @@ struct CustomExerciseView: View {
             }
             .navigationTitle("New exercise")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {

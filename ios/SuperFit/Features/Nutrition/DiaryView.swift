@@ -6,7 +6,6 @@ struct DiaryView: View {
     @Query private var profiles: [UserProfile]
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
     @Query private var logs: [NutritionLog]
-    @Query private var statuses: [DayLogStatus]
     @Query private var energy: [DailyEnergy]
 
     @State private var day = Calendar.current.startOfDay(for: .now)
@@ -15,10 +14,6 @@ struct DiaryView: View {
     private var dayLogs: [NutritionLog] {
         logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
             .sorted { $0.loggedAt < $1.loggedAt }
-    }
-
-    private var dayStatus: DayLogStatus? {
-        statuses.first { Calendar.current.isDate($0.date, inSameDayAs: day) }
     }
 
     private var totals: NutrientProfile {
@@ -30,7 +25,7 @@ struct DiaryView: View {
 
     private var targets: MacroTargets? {
         guard let profile = profiles.first, let w = metrics.first?.weightKg else { return nil }
-        let recs = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics, statuses: statuses)
+        let recs = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics)
         let est = MetabolismEngine().estimate(
             records: recs, windowDays: 30,
             prior: .init(sex: profile.sex, ageYears: profile.ageYears,
@@ -48,9 +43,9 @@ struct DiaryView: View {
                 ForEach(MealSlot.allCases, id: \.self) { slot in
                     mealSection(slot)
                 }
-                completeSection
             }
             .navigationTitle(day.formatted(.dateTime.weekday(.wide).month().day()))
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { shift(-1) } label: { Image(systemName: "chevron.left") }
@@ -94,23 +89,6 @@ struct DiaryView: View {
                 Label("Add food", systemImage: "plus")
                     .font(.subheadline)
             }
-        }
-    }
-
-    private var completeSection: some View {
-        Section {
-            Toggle("Logging complete for this day", isOn: Binding(
-                get: { dayStatus?.loggingComplete ?? false },
-                set: { newValue in
-                    if let dayStatus {
-                        dayStatus.loggingComplete = newValue
-                    } else {
-                        context.insert(DayLogStatus(date: day, loggingComplete: newValue))
-                    }
-                    try? context.save()
-                }))
-        } footer: {
-            Text("Only complete days are used to estimate your energy expenditure. Mark a day complete once everything you ate is logged.")
         }
     }
 

@@ -112,9 +112,12 @@ struct LogFoodView: View {
                         }
                     }
                     LabeledContent("Amount") {
-                        TextField("g", value: $grams, format: .number)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        HStack(spacing: 4) {
+                            TextField("0", value: $grams, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Text("g").foregroundStyle(.secondary)
+                        }
                     }
                     if let serving = food.servingGrams {
                         Button("Use 1 serving (\(Int(serving)) g)") { grams = serving }
@@ -131,6 +134,7 @@ struct LogFoodView: View {
             }
             .navigationTitle("Log food")
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Back") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {

@@ -79,20 +79,6 @@ enum ExerciseLibrary {
         ("Ab Wheel Rollout", .bodyweight, [.core: 5, .shoulders: 1]),
     ]
 
-    /// Built-in splits → exercise names (resolved against the catalog at start).
-    static let templates: [(name: String, exercises: [String])] = [
-        ("Push", ["Barbell Bench Press", "Overhead Press", "Incline Dumbbell Press",
-                  "Lateral Raise", "Triceps Pushdown"]),
-        ("Pull", ["Deadlift", "Barbell Row", "Lat Pulldown", "Face Pull", "Barbell Curl"]),
-        ("Legs", ["Barbell Squat", "Romanian Deadlift", "Leg Press", "Lying Leg Curl",
-                  "Standing Calf Raise"]),
-        ("Upper", ["Barbell Bench Press", "Barbell Row", "Overhead Press",
-                   "Lat Pulldown", "Barbell Curl", "Triceps Pushdown"]),
-        ("Lower", ["Barbell Squat", "Romanian Deadlift", "Leg Extension",
-                   "Lying Leg Curl", "Standing Calf Raise"]),
-        ("Full Body Strength", ["Barbell Squat", "Barbell Bench Press", "Barbell Row"]),
-    ]
-
     @MainActor
     static func seedIfNeeded(context: ModelContext) {
         let existing = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []

@@ -12,6 +12,10 @@ struct DashboardView: View {
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
 
     @State private var syncing = false
+    @State private var showingSettings = false
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var profile: UserProfile? { profiles.first }
     private var latestWeight: Double? { metrics.first?.weightKg }
@@ -64,7 +68,16 @@ struct DashboardView: View {
                 .padding(16)
             }
             .navigationTitle("Today")
+            .navigationBarTitleDisplayMode(.inline)
             .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingSettings = true } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingSettings) { SettingsView() }
             .task { await refresh() }
             .refreshable { await refresh() }
         }
@@ -162,7 +175,7 @@ struct DashboardView: View {
                     Text("\(Int(est.tdeeKcal)) kcal")
                         .font(.title2.weight(.semibold)).monospacedDigit()
                     HStack {
-                        Text(String(format: "Trend %+.2f kg/wk", est.trendSlopeKgPerWeek))
+                        Text("Trend \(units.weightDeltaString(est.trendSlopeKgPerWeek))")
                         Spacer()
                         Text("Confidence \(Int(est.confidence * 100))%")
                     }

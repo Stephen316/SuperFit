@@ -5,9 +5,12 @@ import Charts
 struct WeightView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     @State private var entry = ""
     @State private var syncing = false
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var chartData: [BodyMetrics] {
         metrics.sorted { $0.date < $1.date }.suffix(90)
@@ -29,14 +32,24 @@ struct WeightView: View {
                         Chart {
                             ForEach(chartData) { m in
                                 PointMark(x: .value("Date", m.date),
-                                          y: .value("Weight", m.weightKg))
+                                          y: .value("Weight", units.displayWeight(m.weightKg)))
                                     .foregroundStyle(.secondary.opacity(0.4))
                                     .symbolSize(18)
                                 if let t = m.trendWeightKg {
                                     LineMark(x: .value("Date", m.date),
-                                             y: .value("Trend", t))
+                                             y: .value("Trend", units.displayWeight(t)))
                                         .foregroundStyle(.primary)
                                         .interpolationMethod(.monotone)
+                                }
+                            }
+                        }
+                        .chartYAxis {
+                            AxisMarks { value in
+                                AxisGridLine()
+                                AxisValueLabel {
+                                    if let v = value.as(Double.self) {
+                                        Text("\(Int(v)) \(units.weightUnit)")
+                                    }
                                 }
                             }
                         }
@@ -52,7 +65,7 @@ struct WeightView: View {
                     HStack {
                         Text(trendLabel).font(.subheadline)
                         Spacer()
-                        Text(String(format: "%+.2f kg/wk", trendSlopePerWeek))
+                        Text(units.weightDeltaString(trendSlopePerWeek))
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                     }
@@ -60,8 +73,9 @@ struct WeightView: View {
 
                 Section("Log weight") {
                     HStack {
-                        TextField("kg", text: $entry)
+                        TextField("Weight in \(units.weightUnit)", text: $entry)
                             .keyboardType(.decimalPad)
+                        Text(units.weightUnit).foregroundStyle(.secondary)
                         Button("Add", action: addEntry)
                             .disabled(Double(entry) == nil)
                     }
@@ -72,18 +86,22 @@ struct WeightView: View {
                         HStack {
                             Text(m.date, format: .dateTime.month().day())
                             Spacer()
-                            Text(String(format: "%.1f kg", m.weightKg)).monospacedDigit()
+                            Text(units.weightString(m.weightKg)).monospacedDigit()
                         }
                     }
                     .onDelete(perform: delete)
                 }
             }
             .navigationTitle("Weight")
+            .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
             .toolbar {
-                Button { Task { await syncFromHealth() } } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await syncFromHealth() } } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(syncing)
                 }
-                .disabled(syncing)
             }
         }
     }
@@ -95,7 +113,9 @@ struct WeightView: View {
     }
 
     private func addEntry() {
-        guard let kg = Double(entry) else { return }
+        guard let value = Double(entry) else { return }
+        let kg = units.storeWeight(value)
+        guard (30...300).contains(kg) else { return }
         context.insert(BodyMetrics(date: .now, weightKg: kg, source: .manual))
         recomputeTrend()
         try? context.save()

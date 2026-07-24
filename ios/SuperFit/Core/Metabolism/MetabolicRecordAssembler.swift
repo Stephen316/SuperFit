@@ -1,21 +1,27 @@
 import Foundation
 
-/// Assembles engine input, honoring the day-complete flag: intake only counts on
-/// days the user marked fully logged (prevents partial-day bias — see
-/// docs/ALGORITHMS.md); weight always counts.
+/// Assembles engine input. A day's intake auto-completes at midnight: past days
+/// count toward the TDEE estimate, today never does (still being logged).
+/// Guard against the partial-day bias found in validation: a past day only
+/// counts if ≥ `minPlausibleIntake` kcal was logged — below that it was almost
+/// certainly an abandoned logging day, and including it would drag TDEE low.
+/// Weight always counts.
 enum MetabolicRecordAssembler {
+    static let minPlausibleIntake = 800.0
+
     static func dailyRecords(logs: [NutritionLog], metrics: [BodyMetrics],
-                             statuses: [DayLogStatus]) -> [DailyRecord] {
+                             asOf: Date = .now) -> [DailyRecord] {
         let cal = Calendar.current
-        let completeDays = Set(statuses.filter(\.loggingComplete)
-            .map { cal.startOfDay(for: $0.date) })
+        let today = cal.startOfDay(for: asOf)
 
         var intakeByDay: [Date: Double] = [:]
         for log in logs {
             let d = cal.startOfDay(for: log.date)
-            guard completeDays.contains(d) else { continue }
+            guard d < today else { continue }
             intakeByDay[d, default: 0] += log.kcal
         }
+        intakeByDay = intakeByDay.filter { $0.value >= minPlausibleIntake }
+
         var weightByDay: [Date: Double] = [:]
         for m in metrics { weightByDay[cal.startOfDay(for: m.date)] = m.weightKg }
 

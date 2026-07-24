@@ -3,7 +3,7 @@
 | Phase | Scope | Status |
 |---|---|---|
 | **1** | App shell + tab nav · SwiftData store · HealthKit read layer · UserProfile · weight tracking + trend chart · **MetabolismEngine + MacroCalculator + RecoveryEngine** (pure, tested, validated) | **done** |
-| **2** | Nutrition DB (OFF/USDA clients) · barcode scan · food logging diary · macro tracking vs targets · custom foods · day-complete flag | **done** |
+| **2** | Nutrition DB (bundled FDC + OFF) · barcode scan · food logging diary · macro tracking vs targets · custom foods · midnight auto-complete | **done** |
 | **3** | Workout tracking · exercises/sets/RIR/rest timer · weekly volume per muscle · e1RM progression · PPL / upper-lower / strength templates | **done** |
 | **3.5** | 56-exercise catalog with 1–5 muscle-tension scores (tension-weighted volume) · custom exercises · save finished workout as reusable template · watch workout visibility (live mirroring hooks + finished-workout observer) | **done** |
 | **4** | HealthKit sync coordinator · aggregation service (weight trend, persisted 7/14/30-day TDEE estimates) · dashboard reads persisted estimates | **done** |
@@ -25,7 +25,7 @@ Core/Health/HealthProvider.swift             platform-agnostic protocol + sample
 Core/Health/HealthKitManager.swift           Apple implementation (actor)
 Core/Metabolism/MetabolismEngine.swift       adaptive TDEE (Theil–Sen slope)
 Core/Metabolism/MacroCalculator.swift        protein/fat/carb split
-Core/Metabolism/MetabolicRecordAssembler.swift  day-complete-aware engine input
+Core/Metabolism/MetabolicRecordAssembler.swift  midnight auto-complete engine input
 Core/Recovery/RecoveryEngine.swift           readiness 0–100
 Core/Nutrition/NutrientProfile.swift         shared nutrient types
 Core/Nutrition/OpenFoodFactsClient.swift     barcode + search, no key
@@ -38,9 +38,11 @@ Core/Training/ExerciseLibrary.swift          56-exercise catalog w/ 1-5 tension 
 Core/Health/WatchWorkoutMonitor.swift        live session mirroring + finished observer
 Core/Services/SyncCoordinator.swift          HealthKit → SwiftData day-keyed upserts
 Core/Services/AggregationService.swift       trend fill, TDEE records, recovery score
-Features/Dashboard/DashboardView.swift
-Features/Profile/ProfileView.swift
-Features/Weight/WeightView.swift             entry + trend chart
+Core/UI/Units.swift                          metric/imperial + keyboard dismiss
+Features/Dashboard/DashboardView.swift       cards + settings gear
+Features/Settings/SettingsView.swift         account/ToS placeholders, units, profile
+Features/Profile/ProfileView.swift           pushed from Settings
+Features/Weight/WeightView.swift             entry + trend chart, unit-aware
 Features/Nutrition/DiaryView.swift           meal sections, targets, complete toggle
 Features/Nutrition/FoodSearchView.swift      search / scan / log portion
 Features/Nutrition/CustomFoodView.swift      custom foods w/ consistency check

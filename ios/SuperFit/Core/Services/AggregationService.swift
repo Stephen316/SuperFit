@@ -46,10 +46,9 @@ final class AggregationService {
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first else { return }
         let logs = (try? context.fetch(FetchDescriptor<NutritionLog>())) ?? []
         let metrics = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
-        let statuses = (try? context.fetch(FetchDescriptor<DayLogStatus>())) ?? []
         guard !metrics.isEmpty else { return }
 
-        let records = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics, statuses: statuses)
+        let records = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics)
         let energy = (try? context.fetch(FetchDescriptor<DailyEnergy>())) ?? []
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,

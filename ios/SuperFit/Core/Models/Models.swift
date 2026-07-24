@@ -111,20 +111,6 @@ final class NutritionLog {
     }
 }
 
-/// Per-day logging status. Only days explicitly marked complete feed the
-/// metabolism engine's intake average — prevents the partial-day bias found in
-/// validation (see docs/ALGORITHMS.md "Known limitation").
-@Model
-final class DayLogStatus {
-    var date: Date = Date()
-    var loggingComplete: Bool = false
-
-    init(date: Date, loggingComplete: Bool = false) {
-        self.date = date
-        self.loggingComplete = loggingComplete
-    }
-}
-
 /// Named meal template: re-log a whole meal in one tap.
 @Model
 final class SavedMeal {

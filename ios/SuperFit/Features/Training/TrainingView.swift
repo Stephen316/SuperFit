@@ -9,6 +9,9 @@ struct TrainingView: View {
 
     @State private var activeSession: TrainingSession?
     @State private var watch = WatchWorkoutMonitor()
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var allRecords: [LiftRecord] {
         sessions.flatMap { s in
@@ -37,24 +40,28 @@ struct TrainingView: View {
         NavigationStack {
             List {
                 Section {
-                    Menu {
-                        if !savedTemplates.isEmpty {
+                    if savedTemplates.isEmpty {
+                        Button { start(named: nil) } label: {
+                            Label("Start workout", systemImage: "plus.circle.fill")
+                                .font(.headline)
+                        }
+                    } else {
+                        Menu {
                             Section("My workouts") {
                                 ForEach(savedTemplates) { template in
                                     Button(template.name) { start(named: template.name) }
                                 }
                             }
+                            Divider()
+                            Button("Empty workout") { start(named: nil) }
+                        } label: {
+                            Label("Start workout", systemImage: "plus.circle.fill")
+                                .font(.headline)
                         }
-                        Section("Built-in") {
-                            ForEach(ExerciseLibrary.templates, id: \.name) { template in
-                                Button(template.name) { start(named: template.name) }
-                            }
-                        }
-                        Divider()
-                        Button("Empty workout") { start(named: nil) }
-                    } label: {
-                        Label("Start workout", systemImage: "plus.circle.fill")
-                            .font(.headline)
+                    }
+                } footer: {
+                    if savedTemplates.isEmpty {
+                        Text("Finish a workout to save it as a reusable template.")
                     }
                 }
 
@@ -80,7 +87,7 @@ struct TrainingView: View {
                             HStack {
                                 Text(exercises.first { $0.id == p.exerciseID }?.name ?? "Exercise")
                                 Spacer()
-                                Text("\(Int(p.currentE1RM)) kg e1RM")
+                                Text("\(Int(units.displayWeight(p.currentE1RM))) \(units.weightUnit) e1RM")
                                     .font(.caption).foregroundStyle(.secondary)
                                 Text(p.change, format: .percent.precision(.fractionLength(0...1)).sign(strategy: .always()))
                                     .monospacedDigit()
@@ -107,6 +114,7 @@ struct TrainingView: View {
                 }
             }
             .navigationTitle("Train")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)
                 await watch.start()
@@ -172,6 +180,9 @@ struct SessionRow: View {
     let session: TrainingSession
     let exercises: [Exercise]
 
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
     private var workingSets: [SetEntry] { (session.sets ?? []).filter { !$0.isWarmup } }
 
     var body: some View {
@@ -194,6 +205,7 @@ struct SessionRow: View {
             exercises.first { $0.id == set.exerciseID }?.name
         })
         let list = names.prefix(3).joined(separator: ", ")
-        return "\(workingSets.count) sets · \(Int(tonnage)) kg total" + (list.isEmpty ? "" : " · \(list)")
+        return "\(workingSets.count) sets · \(Int(units.displayWeight(tonnage))) \(units.weightUnit) total"
+            + (list.isEmpty ? "" : " · \(list)")
     }
 }
