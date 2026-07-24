@@ -204,7 +204,9 @@ private struct SetRow: View {
         }
     }
 
-    /// Heavier, lower-RIR sets earn longer rest.
+    /// Heavier, lower-rep sets earn longer rest. (`return` is required: the
+    /// property is named `set`, so a body starting with `set.` parses as a
+    /// setter declaration.)
     private var defaultRest: Int {
         return set.reps <= 6 ? 180 : 120
     }
