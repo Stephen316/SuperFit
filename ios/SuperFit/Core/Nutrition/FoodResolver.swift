@@ -64,11 +64,15 @@ final class FoodResolver {
     }
 
     private func localMatches(_ term: String) -> [ResolvedFood] {
-        var d = FetchDescriptor<Food>(
-            predicate: #Predicate { $0.name.localizedStandardContains(term) },
-            sortBy: [SortDescriptor(\.isFavorite, order: .reverse)])
-        d.fetchLimit = 25
-        return ((try? context.fetch(d)) ?? []).map(\.resolved)
+        let d = FetchDescriptor<Food>(
+            predicate: #Predicate { $0.name.localizedStandardContains(term) })
+        return ((try? context.fetch(d)) ?? [])
+            .sorted {
+                if $0.isFavorite != $1.isFavorite { return $0.isFavorite }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+            .prefix(25)
+            .map(\.resolved)
     }
 }
 
