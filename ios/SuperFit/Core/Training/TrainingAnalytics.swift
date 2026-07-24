@@ -10,26 +10,23 @@ struct LiftRecord: Sendable {
     let isWarmup: Bool
 }
 
-struct ExerciseMuscles: Sendable {
-    let primary: MuscleGroup
-    let secondary: [MuscleGroup]
-}
-
-/// Weekly working-set volume per muscle group. Primary muscle counts a full
-/// set, secondaries half — the standard hypertrophy-literature accounting.
+/// Weekly working-set volume per muscle group, weighted by tension score:
+/// a set contributes score/5 sets to each muscle (5 = full set, 2 = 0.4 sets).
+/// Finer-grained than the classic primary=1/secondary=0.5 accounting.
 struct VolumeAggregator: Sendable {
 
     static let weeklySetTargets: ClosedRange<Double> = 10...20
 
-    /// Sets per muscle group within `week` (fractional: secondary = 0.5).
+    /// Sets per muscle group within `week`, tension-weighted.
     func weeklySets(records: [LiftRecord],
-                    muscles: [UUID: ExerciseMuscles],
+                    muscles: [UUID: [MuscleGroup: Int]],
                     week: DateInterval) -> [MuscleGroup: Double] {
         var out: [MuscleGroup: Double] = [:]
         for r in records where !r.isWarmup && week.contains(r.date) {
-            guard let m = muscles[r.exerciseID] else { continue }
-            out[m.primary, default: 0] += 1
-            for s in m.secondary { out[s, default: 0] += 0.5 }
+            guard let tension = muscles[r.exerciseID] else { continue }
+            for (muscle, score) in tension {
+                out[muscle, default: 0] += Double(score) / 5
+            }
         }
         return out
     }

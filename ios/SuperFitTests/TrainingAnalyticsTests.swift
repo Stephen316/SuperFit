@@ -5,9 +5,9 @@ import Foundation
 private let benchID = UUID()
 private let squatID = UUID()
 
-private let muscles: [UUID: ExerciseMuscles] = [
-    benchID: .init(primary: .chest, secondary: [.triceps, .shoulders]),
-    squatID: .init(primary: .quads, secondary: [.glutes, .core]),
+private let muscles: [UUID: [MuscleGroup: Int]] = [
+    benchID: [.chest: 5, .triceps: 3, .shoulders: 2],
+    squatID: [.quads: 5, .glutes: 4, .core: 2],
 ]
 
 private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
@@ -21,19 +21,21 @@ private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
     private let week = DateInterval(start: Date().addingTimeInterval(-6 * 86_400),
                                     end: Date().addingTimeInterval(3600))
 
-    @Test func primaryFullSecondaryHalfWarmupsExcluded() {
+    @Test func tensionWeightedSetsWarmupsExcluded() {
         let records = [
             lift(1, benchID, 100, 8), lift(1, benchID, 100, 8), lift(1, benchID, 100, 7),
             lift(2, squatID, 60, 5, warmup: true), lift(2, squatID, 80, 5, warmup: true),
             lift(2, squatID, 140, 5), lift(2, squatID, 140, 5), lift(2, squatID, 140, 4),
         ]
         let v = VolumeAggregator().weeklySets(records: records, muscles: muscles, week: week)
+        // 3 working bench sets: chest 3×5/5, triceps 3×3/5, shoulders 3×2/5
         #expect(v[.chest] == 3)
-        #expect(v[.triceps] == 1.5)
-        #expect(v[.shoulders] == 1.5)
+        #expect(abs(v[.triceps]! - 1.8) < 0.001)
+        #expect(abs(v[.shoulders]! - 1.2) < 0.001)
+        // 3 working squat sets (warmups ignored): quads 3, glutes 2.4, core 1.2
         #expect(v[.quads] == 3)
-        #expect(v[.glutes] == 1.5)
-        #expect(v[.core] == 1.5)
+        #expect(abs(v[.glutes]! - 2.4) < 0.001)
+        #expect(abs(v[.core]! - 1.2) < 0.001)
         #expect(v[.back] == nil)
     }
 

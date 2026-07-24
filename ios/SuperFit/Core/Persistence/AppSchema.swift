@@ -7,6 +7,7 @@ enum AppSchema {
         Food.self, NutritionLog.self, DayLogStatus.self,
         SavedMeal.self, SavedMealItem.self,
         Exercise.self, TrainingSession.self, SetEntry.self,
+        WorkoutTemplate.self, WorkoutTemplateItem.self,
         SleepData.self, DailyVitals.self,
         RecoveryScoreRecord.self, MetabolicEstimateRecord.self
     ]

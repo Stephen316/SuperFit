@@ -5,8 +5,10 @@ struct TrainingView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \TrainingSession.startedAt, order: .reverse) private var sessions: [TrainingSession]
     @Query private var exercises: [Exercise]
+    @Query(sort: \WorkoutTemplate.createdAt, order: .reverse) private var savedTemplates: [WorkoutTemplate]
 
     @State private var activeSession: TrainingSession?
+    @State private var watch = WatchWorkoutMonitor()
 
     private var allRecords: [LiftRecord] {
         sessions.flatMap { s in
@@ -22,7 +24,7 @@ struct TrainingView: View {
     private var thisWeekVolume: [MuscleGroup: Double] {
         let cal = Calendar(identifier: .iso8601)
         guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
-        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.muscles) })
+        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
         return VolumeAggregator().weeklySets(records: allRecords, muscles: muscles, week: week)
     }
 
@@ -36,24 +38,35 @@ struct TrainingView: View {
             List {
                 Section {
                     Menu {
-                        ForEach(ExerciseLibrary.templates, id: \.name) { template in
-                            Button(template.name) { start(template: template) }
+                        if !savedTemplates.isEmpty {
+                            Section("My workouts") {
+                                ForEach(savedTemplates) { template in
+                                    Button(template.name) { start(named: template.name) }
+                                }
+                            }
+                        }
+                        Section("Built-in") {
+                            ForEach(ExerciseLibrary.templates, id: \.name) { template in
+                                Button(template.name) { start(named: template.name) }
+                            }
                         }
                         Divider()
-                        Button("Empty workout") { start(template: nil) }
+                        Button("Empty workout") { start(named: nil) }
                     } label: {
                         Label("Start workout", systemImage: "plus.circle.fill")
                             .font(.headline)
                     }
                 }
 
+                watchSection
+
                 if !thisWeekVolume.isEmpty {
                     Section("This week — sets per muscle") {
                         ForEach(thisWeekVolume.sorted { $0.value > $1.value }, id: \.key) { muscle, sets in
                             HStack {
-                                Text(muscle.rawValue.capitalized)
+                                Text(muscle.displayName)
                                 Spacer()
-                                Text(sets.formatted(.number.precision(.fractionLength(0...1))))
+                                Text("\(Int(sets.rounded())) sets")
                                     .monospacedDigit()
                                     .foregroundStyle(volumeColor(sets))
                             }
@@ -94,9 +107,48 @@ struct TrainingView: View {
                 }
             }
             .navigationTitle("Train")
-            .task { ExerciseLibrary.seedIfNeeded(context: context) }
+            .task {
+                ExerciseLibrary.seedIfNeeded(context: context)
+                await watch.start()
+            }
             .fullScreenCover(item: $activeSession) { session in
                 ActiveWorkoutView(session: session)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var watchSection: some View {
+        if let live = watch.liveWorkout {
+            Section("On your watch") {
+                HStack {
+                    Image(systemName: "applewatch.radiowaves.left.and.right")
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(live.activityName) in progress")
+                            .font(.subheadline.weight(.medium))
+                        Text(live.startedAt, style: .timer)
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let hr = live.heartRate {
+                        Label("\(Int(hr))", systemImage: "heart.fill")
+                            .font(.subheadline).foregroundStyle(.red).monospacedDigit()
+                    }
+                }
+            }
+        } else if !watch.todaysWorkouts.isEmpty {
+            Section("Today from Apple Watch") {
+                ForEach(watch.todaysWorkouts.indices, id: \.self) { i in
+                    let w = watch.todaysWorkouts[i]
+                    HStack {
+                        Image(systemName: "applewatch")
+                        Text(w.activityName)
+                        Spacer()
+                        Text("\(Int(w.end.timeIntervalSince(w.start) / 60)) min · \(Int(w.activeEnergyKcal)) kcal")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -108,8 +160,8 @@ struct TrainingView: View {
         return .green
     }
 
-    private func start(template: (name: String, exercises: [String])?) {
-        let session = TrainingSession(templateName: template?.name)
+    private func start(named templateName: String?) {
+        let session = TrainingSession(templateName: templateName)
         context.insert(session)
         try? context.save()
         activeSession = session

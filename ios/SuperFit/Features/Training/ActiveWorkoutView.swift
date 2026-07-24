@@ -7,15 +7,21 @@ struct ActiveWorkoutView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query private var exercises: [Exercise]
+    @Query private var savedTemplates: [WorkoutTemplate]
 
     @State private var pickingExercise = false
     @State private var restEndsAt: Date?
+    @State private var savingTemplate = false
+    @State private var templateName = ""
 
     private var plannedExercises: [Exercise] {
-        guard let name = session.templateName,
-              let template = ExerciseLibrary.templates.first(where: { $0.name == name })
+        guard let name = session.templateName else { return [] }
+        if let saved = savedTemplates.first(where: { $0.name == name }) {
+            return saved.orderedExerciseIDs.compactMap { id in exercises.first { $0.id == id } }
+        }
+        guard let builtin = ExerciseLibrary.templates.first(where: { $0.name == name })
         else { return [] }
-        return template.exercises.compactMap { n in exercises.first { $0.name == n } }
+        return builtin.exercises.compactMap { n in exercises.first { $0.name == n } }
     }
 
     /// Exercises with logged sets, in first-set order; planned-but-unstarted after.
@@ -64,11 +70,41 @@ struct ActiveWorkoutView: View {
                     addSet(for: exercise)
                 }
             }
+            .alert("Save as workout", isPresented: $savingTemplate) {
+                TextField("Name", text: $templateName)
+                Button("Save") { saveTemplate() }
+                Button("Not now", role: .cancel) { dismiss() }
+            } message: {
+                Text("Reuse this exercise list from the start menu anytime.")
+            }
         }
     }
 
     private func startRest(_ seconds: Int) {
         restEndsAt = Date().addingTimeInterval(TimeInterval(seconds))
+    }
+
+    /// Distinct exercises in first-set order — what a saved template captures.
+    private var performedExerciseIDs: [UUID] {
+        var seen: [UUID] = []
+        for s in (session.sets ?? []).sorted(by: { $0.order < $1.order }) {
+            if let id = s.exerciseID, !seen.contains(id) { seen.append(id) }
+        }
+        return seen
+    }
+
+    private func saveTemplate() {
+        let name = templateName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { dismiss(); return }
+        let template = WorkoutTemplate(name: String(name.prefix(50)))
+        context.insert(template)
+        for (i, id) in performedExerciseIDs.enumerated() {
+            let item = WorkoutTemplateItem(order: i, exerciseID: id)
+            item.template = template
+            context.insert(item)
+        }
+        try? context.save()
+        dismiss()
     }
 
     private func addSet(for exercise: Exercise) {
@@ -84,9 +120,16 @@ struct ActiveWorkoutView: View {
     }
 
     private func finish() {
-        if session.endedAt == nil { session.endedAt = .now }
+        let firstFinish = session.endedAt == nil
+        if firstFinish { session.endedAt = .now }
         try? context.save()
-        dismiss()
+        // Offer template save only when finishing a non-template session with sets.
+        if firstFinish, session.templateName == nil, !performedExerciseIDs.isEmpty {
+            templateName = ""
+            savingTemplate = true
+        } else {
+            dismiss()
+        }
     }
 }
 
@@ -203,10 +246,14 @@ struct ExercisePickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Exercise.name) private var exercises: [Exercise]
     @State private var query = ""
+    @State private var muscleFilter: MuscleGroup?
+    @State private var creatingCustom = false
 
     private var filtered: [Exercise] {
-        query.isEmpty ? exercises
-            : exercises.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        exercises.filter { e in
+            (query.isEmpty || e.name.localizedCaseInsensitiveContains(query))
+            && (muscleFilter == nil || (e.tension[muscleFilter!] ?? 0) >= 3)
+        }
     }
 
     var body: some View {
@@ -216,10 +263,17 @@ struct ExercisePickerView: View {
                     onPick(exercise)
                     dismiss()
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(exercise.name).foregroundStyle(.primary)
-                        Text(exercise.primaryMuscle.rawValue.capitalized)
-                            .font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(exercise.name).foregroundStyle(.primary)
+                            if exercise.isCustom {
+                                Text("Custom").font(.caption2)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color(.tertiarySystemFill))
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                        }
+                        TensionRow(tension: exercise.tension)
                     }
                 }
             }
@@ -228,7 +282,110 @@ struct ExercisePickerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("All muscles") { muscleFilter = nil }
+                        ForEach(MuscleGroup.allCases, id: \.self) { m in
+                            Button(m.displayName) { muscleFilter = m }
+                        }
+                    } label: {
+                        Image(systemName: muscleFilter == nil
+                              ? "line.3.horizontal.decrease.circle"
+                              : "line.3.horizontal.decrease.circle.fill")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { creatingCustom = true } label: { Image(systemName: "plus") }
+                }
+            }
+            .sheet(isPresented: $creatingCustom) {
+                CustomExerciseView { exercise in
+                    onPick(exercise)
+                    dismiss()
+                }
             }
         }
+    }
+}
+
+/// "Chest 5 · Triceps 3 · Shoulders 2" — the per-muscle tension breakdown.
+struct TensionRow: View {
+    let tension: [MuscleGroup: Int]
+
+    var body: some View {
+        Text(tension.sorted { $0.value > $1.value }
+            .map { "\($0.key.displayName) \($0.value)" }
+            .joined(separator: " · "))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+}
+
+struct CustomExerciseView: View {
+    let onCreated: (Exercise) -> Void
+
+    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var category = ExerciseCategory.barbell
+    @State private var scores: [MuscleGroup: Int] = [:]
+
+    private var isValid: Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed.count <= 60 && scores.values.contains { $0 > 0 }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Exercise name", text: $name)
+                    Picker("Equipment", selection: $category) {
+                        Text("Barbell").tag(ExerciseCategory.barbell)
+                        Text("Dumbbell").tag(ExerciseCategory.dumbbell)
+                        Text("Machine").tag(ExerciseCategory.machine)
+                        Text("Cable").tag(ExerciseCategory.cable)
+                        Text("Bodyweight").tag(ExerciseCategory.bodyweight)
+                    }
+                }
+                Section {
+                    ForEach(MuscleGroup.allCases, id: \.self) { muscle in
+                        Stepper(value: Binding(get: { scores[muscle] ?? 0 },
+                                               set: { scores[muscle] = $0 }),
+                                in: 0...5) {
+                            HStack {
+                                Text(muscle.displayName)
+                                Spacer()
+                                Text("\(scores[muscle] ?? 0)")
+                                    .monospacedDigit()
+                                    .foregroundStyle((scores[muscle] ?? 0) > 0 ? .primary : .secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Muscle tension (0–5)")
+                } footer: {
+                    Text("5 = prime mover under maximal tension, 1 = lightly involved, 0 = not trained. Drives weekly volume tracking.")
+                }
+            }
+            .navigationTitle("New exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") { save() }.disabled(!isValid)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let tension = scores.filter { $0.value > 0 }
+        let exercise = Exercise(name: name.trimmingCharacters(in: .whitespaces),
+                                category: category, tension: tension, isCustom: true)
+        context.insert(exercise)
+        try? context.save()
+        dismiss()
+        onCreated(exercise)
     }
 }

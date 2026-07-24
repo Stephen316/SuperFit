@@ -8,7 +8,15 @@ enum MetricSource: String, Codable, Sendable { case manual, healthKit }
 enum MealSlot: String, Codable, CaseIterable, Sendable { case breakfast, lunch, dinner, snack }
 enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom }
 enum MuscleGroup: String, Codable, CaseIterable, Sendable {
-    case chest, back, quads, hamstrings, glutes, shoulders, biceps, triceps, calves, core
+    case chest, back, lowerBack, traps, shoulders, biceps, triceps, forearms
+    case quads, hamstrings, glutes, calves, core
+
+    var displayName: String {
+        switch self {
+        case .lowerBack: return "Lower back"
+        default: return rawValue.capitalized
+        }
+    }
 }
 enum ExerciseCategory: String, Codable, Sendable { case barbell, dumbbell, machine, cable, bodyweight }
 
@@ -143,14 +151,67 @@ final class SavedMealItem {
 final class Exercise {
     var id: UUID = UUID()
     var name: String = ""
-    var primaryMuscleRaw: String = MuscleGroup.chest.rawValue
-    var secondaryMusclesRaw: [String] = []
+    /// Muscle tension map, "muscle:score" with score 1–5 (5 = prime mover under
+    /// maximal tension, 1 = lightly involved). CloudKit-safe string encoding.
+    var tensionRaw: [String] = []
     var categoryRaw: String = ExerciseCategory.barbell.rawValue
+    var isCustom: Bool = false
 
-    init(name: String, primary: MuscleGroup, category: ExerciseCategory) {
+    init(name: String, category: ExerciseCategory, tension: [MuscleGroup: Int], isCustom: Bool = false) {
         self.name = name
-        self.primaryMuscleRaw = primary.rawValue
         self.categoryRaw = category.rawValue
+        self.isCustom = isCustom
+        self.tension = tension
+    }
+
+    var tension: [MuscleGroup: Int] {
+        get {
+            var out: [MuscleGroup: Int] = [:]
+            for entry in tensionRaw {
+                let parts = entry.split(separator: ":")
+                guard parts.count == 2, let m = MuscleGroup(rawValue: String(parts[0])),
+                      let s = Int(parts[1]) else { continue }
+                out[m] = s.clamped(to: 1...5)
+            }
+            return out
+        }
+        set {
+            tensionRaw = newValue
+                .filter { $0.value > 0 }
+                .sorted { $0.value > $1.value }
+                .map { "\($0.key.rawValue):\($0.value.clamped(to: 1...5))" }
+        }
+    }
+
+    var primaryMuscle: MuscleGroup {
+        tension.max { $0.value < $1.value }?.key ?? .core
+    }
+}
+
+/// User-saved reusable workout (built-ins live in ExerciseLibrary.templates).
+@Model
+final class WorkoutTemplate {
+    var id: UUID = UUID()
+    var name: String = ""
+    var createdAt: Date = Date()
+    @Relationship(deleteRule: .cascade) var items: [WorkoutTemplateItem]? = []
+
+    init(name: String) { self.name = name }
+
+    var orderedExerciseIDs: [UUID] {
+        (items ?? []).sorted { $0.order < $1.order }.compactMap(\.exerciseID)
+    }
+}
+
+@Model
+final class WorkoutTemplateItem {
+    var order: Int = 0
+    var exerciseID: UUID?
+    var template: WorkoutTemplate?
+
+    init(order: Int, exerciseID: UUID) {
+        self.order = order
+        self.exerciseID = exerciseID
     }
 }
 

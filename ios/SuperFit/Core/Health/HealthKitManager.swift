@@ -99,7 +99,7 @@ actor HealthKitManager: HealthProvider {
             let kcal = $0.statistics(for: HKQuantityType(.activeEnergyBurned))?
                 .sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
             return WorkoutSample(start: $0.startDate, end: $0.endDate,
-                                 activityName: $0.workoutActivityType.name,
+                                 activityName: $0.workoutActivityType.displayName,
                                  activeEnergyKcal: kcal, avgHeartRate: nil)
         }
     }
@@ -193,18 +193,6 @@ private struct SleepSampleBuilder {
     }
 }
 
-private extension HKWorkoutActivityType {
-    var name: String {
-        switch self {
-        case .traditionalStrengthTraining, .functionalStrengthTraining: return "Strength"
-        case .running: return "Running"
-        case .cycling: return "Cycling"
-        case .walking: return "Walking"
-        case .highIntensityIntervalTraining: return "HIIT"
-        default: return "Workout"
-        }
-    }
-}
 
 #else
 
