@@ -7,11 +7,15 @@ import SwiftData
 @MainActor
 final class SyncCoordinator {
     private let health: any HealthProvider
+    private let garmin: any RecoveryProvider
     private let context: ModelContext
     private let cal = Calendar(identifier: .gregorian)
 
-    init(health: any HealthProvider = HealthKitManager(), context: ModelContext) {
+    init(health: any HealthProvider = HealthKitManager(),
+         garmin: any RecoveryProvider = GarminProvider(),
+         context: ModelContext) {
         self.health = health
+        self.garmin = garmin
         self.context = context
     }
 
@@ -31,7 +35,51 @@ final class SyncCoordinator {
         upsertActivity(await activity ?? [])
         upsertSleep(await sleep ?? [])
         upsertVitals(rhr: await rhr ?? [], hrv: await hrv ?? [])
+
+        // Garmin last so its HRV / staged sleep overwrite HealthKit's — Garmin
+        // Connect doesn't export those to Apple Health, so its values are the
+        // only real readings when a Garmin watch is the wearable.
+        if await garmin.isLinked,
+           let metrics = try? await garmin.recoveryMetrics(in: range) {
+            applyGarmin(metrics)
+        }
         try? context.save()
+    }
+
+    private func applyGarmin(_ metrics: [RecoveryMetrics]) {
+        let vitalRows = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
+        var vitalsByDay = Dictionary(vitalRows.map { (cal.startOfDay(for: $0.date), $0) },
+                                     uniquingKeysWith: { a, _ in a })
+        let sleepRows = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
+        var sleepByDay = Dictionary(sleepRows.map { (cal.startOfDay(for: $0.date), $0) },
+                                    uniquingKeysWith: { a, _ in a })
+
+        for m in metrics {
+            let day = cal.startOfDay(for: m.day)
+            if m.hrvSDNN != nil || m.restingHR != nil {
+                let row = vitalsByDay[day] ?? {
+                    let r = DailyVitals(date: day)
+                    context.insert(r)
+                    vitalsByDay[day] = r
+                    return r
+                }()
+                if let hrv = m.hrvSDNN { row.hrvSDNN = hrv }
+                if let rhr = m.restingHR { row.restingHR = rhr }
+            }
+            if let s = m.sleep {
+                let row = sleepByDay[day] ?? {
+                    let r = SleepData(date: day)
+                    context.insert(r)
+                    sleepByDay[day] = r
+                    return r
+                }()
+                row.inBedMinutes = s.inBedMinutes
+                row.asleepMinutes = s.asleepMinutes
+                row.deepMinutes = s.deepMinutes
+                row.remMinutes = s.remMinutes
+                row.coreMinutes = s.coreMinutes
+            }
+        }
     }
 
     private func upsertBodyMass(_ samples: [BodyMassSample]) {

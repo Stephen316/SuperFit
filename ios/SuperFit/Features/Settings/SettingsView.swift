@@ -64,6 +64,14 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
 
+                Section("Data sources") {
+                    NavigationLink {
+                        ConnectedServicesView()
+                    } label: {
+                        Label("Connected services", systemImage: "link")
+                    }
+                }
+
                 Section("Legal") {
                     Label("Terms of service", systemImage: "doc.text")
                         .foregroundStyle(.secondary)

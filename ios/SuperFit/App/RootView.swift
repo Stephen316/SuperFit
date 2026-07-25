@@ -21,6 +21,7 @@ struct RootView: View {
     @Query private var profiles: [UserProfile]
     @State private var tab = AppTab.today
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @State private var garmin = GarminProvider()
 
     var body: some View {
         TabView(selection: $tab) {
@@ -32,6 +33,7 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
         .preferredColorScheme((AppearanceMode(rawValue: appearanceRaw) ?? .system).colorScheme)
+        .onOpenURL { url in handleDeepLink(url) }
         .task { ensureProfile() }
     }
 
@@ -65,6 +67,14 @@ struct RootView: View {
         guard profiles.isEmpty else { return }
         context.insert(UserProfile())
         try? context.save()
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme == "superfit", url.host == "garmin",
+              let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                  .queryItems?.first(where: { $0.name == "token" })?.value
+        else { return }
+        Task { await garmin.completeLinking(sessionToken: token) }
     }
 }
 

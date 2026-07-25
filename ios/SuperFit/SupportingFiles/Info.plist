@@ -37,5 +37,18 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.superfit.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>superfit</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
