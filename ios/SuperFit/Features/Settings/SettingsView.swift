@@ -4,6 +4,7 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,16 @@ struct SettingsView: View {
                     } label: {
                         Label("Goal, body details, activity", systemImage: "person.text.rectangle")
                     }
+                }
+
+                Section("Appearance") {
+                    Picker("Appearance", selection: $appearanceRaw) {
+                        ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.displayName).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
 
                 Section("Units") {

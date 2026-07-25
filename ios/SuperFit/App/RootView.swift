@@ -20,6 +20,7 @@ struct RootView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
     @State private var tab = AppTab.today
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
 
     var body: some View {
         TabView(selection: $tab) {
@@ -30,6 +31,7 @@ struct RootView: View {
             FriendsView().tag(AppTab.friends).toolbar(.hidden, for: .tabBar)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+        .preferredColorScheme((AppearanceMode(rawValue: appearanceRaw) ?? .system).colorScheme)
         .task { ensureProfile() }
     }
 

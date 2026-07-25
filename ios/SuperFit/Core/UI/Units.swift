@@ -22,6 +22,21 @@ enum UnitSystem: String, CaseIterable {
     }
 }
 
+enum AppearanceMode: String, CaseIterable {
+    case system, light, dark
+    static let storageKey = "appearanceMode"
+
+    var displayName: String { rawValue.capitalized }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
 extension View {
     /// "Done" bar above the keyboard — the numeric pads have no return key.
     func keyboardDoneButton() -> some View {
