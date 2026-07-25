@@ -105,22 +105,34 @@ struct DashboardView: View {
     }
 
     private func recoveryCard(_ recovery: RecoveryScoreRecord) -> some View {
-        Card {
+        let hasData = recovery.dataCompleteness > 0
+        return Card {
             HStack(spacing: 16) {
-                Gauge(value: recovery.score, in: 0...100) {
+                Gauge(value: hasData ? recovery.score : 0, in: 0...100) {
                     EmptyView()
                 } currentValueLabel: {
-                    Text("\(Int(recovery.score))")
+                    Text(hasData ? "\(Int(recovery.score))" : "–")
                         .font(.title3.weight(.semibold)).monospacedDigit()
+                        .foregroundStyle(hasData ? .primary : .secondary)
                 }
                 .gaugeStyle(.accessoryCircularCapacity)
-                .tint(recoveryTint(recovery.score))
+                .tint(hasData ? recoveryTint(recovery.score) : Color.secondary)
                 .frame(width: 64, height: 64)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Recovery").font(.subheadline).foregroundStyle(.secondary)
-                    Text(recovery.recommendationRaw.isEmpty ? "—" : recovery.recommendationRaw)
-                        .font(.headline)
+                    if hasData {
+                        Text(recovery.recommendationRaw.isEmpty ? "—" : recovery.recommendationRaw)
+                            .font(.headline)
+                        if recovery.dataCompleteness < 0.5 {
+                            Text("Partial data — improves as sleep and heart history build up.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("No data available").font(.headline).foregroundStyle(.secondary)
+                        Text("Needs sleep or heart data from Apple Health.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
             }

@@ -267,6 +267,10 @@ final class RecoveryScoreRecord {
     var date: Date = Date()
     var score: Double = 0
     var recommendationRaw: String = ""
+    /// Fraction of the four inputs (sleep/HRV/RHR/load) that were available.
+    /// 0 means the score is the neutral 50 fallback, not a real reading.
+    var dataCompleteness: Double = 0
+
     init(date: Date, score: Double, recommendation: String) {
         self.date = date; self.score = score; self.recommendationRaw = recommendation
     }

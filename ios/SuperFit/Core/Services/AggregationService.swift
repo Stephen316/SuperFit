@@ -87,6 +87,7 @@ final class AggregationService {
             }()
         row.score = result.score
         row.recommendationRaw = result.recommendation.rawValue
+        row.dataCompleteness = result.dataCompleteness
     }
 
     func recoveryInputs(for day: Date) -> RecoveryInputs {
