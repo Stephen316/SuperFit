@@ -13,6 +13,7 @@ struct ActiveWorkoutView: View {
     @State private var restEndsAt: Date?
     @State private var savingTemplate = false
     @State private var templateName = ""
+    @State private var confirmingOverwrite = false
 
     private var plannedExercises: [Exercise] {
         guard let name = session.templateName,
@@ -75,6 +76,14 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Reuse this exercise list from the start menu anytime.")
             }
+            .alert("\"\(trimmedTemplateName)\" already exists", isPresented: $confirmingOverwrite) {
+                Button("Overwrite", role: .destructive) { overwriteTemplate() }
+                Button("Cancel", role: .cancel) {
+                    Task { @MainActor in savingTemplate = true }   // back to naming
+                }
+            } message: {
+                Text("Replace the existing workout with this one, or cancel to pick a different name.")
+            }
         }
     }
 
@@ -91,18 +100,41 @@ struct ActiveWorkoutView: View {
         return seen
     }
 
+    private var trimmedTemplateName: String {
+        String(templateName.trimmingCharacters(in: .whitespaces).prefix(50))
+    }
+
+    private var existingTemplate: WorkoutTemplate? {
+        savedTemplates.first { $0.name.caseInsensitiveCompare(trimmedTemplateName) == .orderedSame }
+    }
+
     private func saveTemplate() {
-        let name = templateName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { dismiss(); return }
-        let template = WorkoutTemplate(name: String(name.prefix(50)))
+        guard !trimmedTemplateName.isEmpty else { dismiss(); return }
+        if existingTemplate != nil {
+            confirmingOverwrite = true
+            return
+        }
+        let template = WorkoutTemplate(name: trimmedTemplateName)
         context.insert(template)
+        setItems(on: template)
+        try? context.save()
+        dismiss()
+    }
+
+    private func overwriteTemplate() {
+        guard let existing = existingTemplate else { dismiss(); return }
+        for item in existing.items ?? [] { context.delete(item) }
+        setItems(on: existing)
+        try? context.save()
+        dismiss()
+    }
+
+    private func setItems(on template: WorkoutTemplate) {
         for (i, id) in performedExerciseIDs.enumerated() {
             let item = WorkoutTemplateItem(order: i, exerciseID: id)
             item.template = template
             context.insert(item)
         }
-        try? context.save()
-        dismiss()
     }
 
     private func addSet(for exercise: Exercise) {
