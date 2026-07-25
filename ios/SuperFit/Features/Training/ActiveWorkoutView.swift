@@ -54,6 +54,7 @@ struct ActiveWorkoutView: View {
             }
             .navigationTitle(session.templateName ?? "Workout")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -305,7 +306,7 @@ struct ExercisePickerView: View {
                             if exercise.isCustom {
                                 Text("Custom").font(.caption2)
                                     .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color(.tertiarySystemFill))
+                                    .background(Color.white.opacity(0.12))
                                     .clipShape(RoundedRectangle(cornerRadius: 4))
                             }
                         }
@@ -316,6 +317,7 @@ struct ExercisePickerView: View {
             .searchable(text: $query, prompt: "Search exercises")
             .navigationTitle("Add exercise")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -406,6 +408,7 @@ struct CustomExerciseView: View {
             }
             .navigationTitle("New exercise")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }

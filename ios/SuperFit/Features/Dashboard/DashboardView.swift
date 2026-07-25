@@ -12,16 +12,10 @@ struct DashboardView: View {
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
 
     @State private var syncing = false
-    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
-
-    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var profile: UserProfile? { profiles.first }
     private var latestWeight: Double? { metrics.first?.weightKg }
-
-    private var headline: MetabolicEstimateRecord? {
-        estimates.first { $0.windowDays == 30 }
-    }
+    private var headline: MetabolicEstimateRecord? { estimates.first { $0.windowDays == 30 } }
 
     private var macros: MacroTargets? {
         guard let profile, let est = headline, let w = latestWeight else { return nil }
@@ -36,9 +30,8 @@ struct DashboardView: View {
                                          proteinPerKg: override)
     }
 
-    private var todayIntake: (kcal: Double, protein: Double) {
-        let logs = nutrition.filter { Calendar.current.isDateInToday($0.date) }
-        return (logs.reduce(0) { $0 + $1.kcal }, logs.reduce(0) { $0 + $1.proteinG })
+    private var todayLogs: [NutritionLog] {
+        nutrition.filter { Calendar.current.isDateInToday($0.date) }
     }
 
     private var todayRecovery: RecoveryScoreRecord? {
@@ -53,25 +46,18 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    if let macros {
-                        remainingCard(macros: macros)
-                    } else {
-                        emptyState
-                    }
-                    if let todayRecovery { recoveryCard(todayRecovery) }
-                    activitySleepCard
-                    tdeeCard
-                }
-                .padding(16)
+            ThemedScreen(title: "") {
+                recoveryHeader
+                burnedCard
+                consumedCard
+                activitySleepCard
+                macrosCard
             }
-            .navigationTitle("Today")
-            .navigationBarTitleDisplayMode(.inline)
-            .background(Color(.systemGroupedBackground))
-            .settingsToolbar()
-            .task { await refresh() }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { SettingsGear() }
+            }
             .refreshable { await refresh() }
+            .task { await refresh() }
         }
     }
 
@@ -85,163 +71,134 @@ struct DashboardView: View {
 
     // MARK: - Cards
 
-    private func remainingCard(macros: MacroTargets) -> some View {
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                metricRow("Calories remaining",
-                          value: "\(Int(macros.kcal - todayIntake.kcal))",
-                          sub: "of \(Int(macros.kcal)) kcal")
-                Divider()
-                metricRow("Protein remaining",
-                          value: "\(max(0, Int(macros.proteinG - todayIntake.protein))) g",
-                          sub: "of \(Int(macros.proteinG)) g")
-                HStack(spacing: 16) {
-                    macroPill("Carbs", "\(Int(macros.carbG)) g")
-                    macroPill("Fat", "\(Int(macros.fatG)) g")
-                    macroPill("Fibre", "\(Int(macros.fibreG)) g")
+    private var recoveryHeader: some View {
+        let recovery = todayRecovery
+        let hasData = (recovery?.dataCompleteness ?? 0) > 0
+        let score = recovery?.score ?? 0
+        return VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .stroke(Theme.gold.opacity(hasData ? 0.30 : 0.15), lineWidth: 14)
+                    .frame(width: 190, height: 190)
+                if hasData {
+                    Circle()
+                        .trim(from: 0, to: score / 100)
+                        .stroke(Theme.gold, style: .init(lineWidth: 14, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 190, height: 190)
                 }
+                Text(hasData ? "\(Int(score))" : "–")
+                    .font(Theme.font(64, .regular))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            Text("Recovery")
+                .font(Theme.font(30))
+                .foregroundStyle(Theme.textSecondary)
+            Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
+                .font(Theme.font(20))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+    }
+
+    private var burnedCard: some View {
+        ThemeCard {
+            if let e = todayEnergy, e.activeEnergyKcal > 0 {
+                StatBlock(title: "Calories burned today",
+                          value: "\(Int(e.activeEnergyKcal))",
+                          suffix: "/\(Int(e.activeEnergyKcal + e.basalEnergyKcal)) kcal")
+            } else {
+                StatBlock(title: "Calories burned today", value: "No data yet", valueSize: 20)
             }
         }
     }
 
-    private func recoveryCard(_ recovery: RecoveryScoreRecord) -> some View {
-        let hasData = recovery.dataCompleteness > 0
-        return Card {
-            HStack(spacing: 16) {
-                Gauge(value: hasData ? recovery.score : 0, in: 0...100) {
-                    EmptyView()
-                } currentValueLabel: {
-                    Text(hasData ? "\(Int(recovery.score))" : "–")
-                        .font(.title3.weight(.semibold)).monospacedDigit()
-                        .foregroundStyle(hasData ? .primary : .secondary)
-                }
-                .gaugeStyle(.accessoryCircularCapacity)
-                .tint(hasData ? recoveryTint(recovery.score) : Color.secondary)
-                .frame(width: 64, height: 64)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Recovery").font(.subheadline).foregroundStyle(.secondary)
-                    if hasData {
-                        Text(recovery.recommendationRaw.isEmpty ? "—" : recovery.recommendationRaw)
-                            .font(.headline)
-                        if recovery.dataCompleteness < 0.5 {
-                            Text("Partial data — improves as sleep and heart history build up.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text("No data available").font(.headline).foregroundStyle(.secondary)
-                        Text("Needs sleep or heart data from Apple Health.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-            }
+    private var consumedCard: some View {
+        ThemeCard(padding: 22) {
+            StatBlock(title: "Calories consumed",
+                      value: "\(Int(todayLogs.reduce(0) { $0 + $1.kcal }))",
+                      caption: macros.map { "of \(Int($0.kcal)) kcal" } ?? "set a goal to see a target",
+                      valueSize: 42)
         }
     }
 
     private var activitySleepCard: some View {
-        Card {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Activity").font(.subheadline).foregroundStyle(.secondary)
-                    if let e = todayEnergy {
-                        Text("\(e.steps) steps").font(.headline).monospacedDigit()
-                        Text("\(Int(e.activeEnergyKcal)) kcal active")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("No data yet").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                Divider().frame(height: 44)
-                Spacer()
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sleep").font(.subheadline).foregroundStyle(.secondary)
-                    if let s = lastSleep {
-                        Text("\(s.asleepMinutes / 60) h \(s.asleepMinutes % 60) m")
-                            .font(.headline).monospacedDigit()
-                        Text("\(Int(s.efficiency * 100))% efficiency")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("No data yet").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
+        ThemeCard(padding: 22) {
+            HStack(spacing: 0) {
+                splitBlock(title: "Activity",
+                           value: todayEnergy.map { "\($0.steps) steps" },
+                           caption: todayEnergy.map { "\(Int($0.activeEnergyKcal)) kcal active" })
+                Rectangle()
+                    .fill(Theme.divider)
+                    .frame(width: 1, height: 92)
+                splitBlock(title: "Sleep",
+                           value: lastSleep.map { "\($0.asleepMinutes / 60) h \($0.asleepMinutes % 60) m" },
+                           caption: lastSleep.map { "\(Int($0.efficiency * 100))% efficiency" })
             }
         }
     }
 
-    private var tdeeCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Estimated expenditure").font(.subheadline).foregroundStyle(.secondary)
-                if let est = headline {
-                    Text("\(Int(est.tdeeKcal)) kcal")
-                        .font(.title2.weight(.semibold)).monospacedDigit()
-                    HStack {
-                        Text("Trend \(units.weightDeltaString(est.trendSlopeKgPerWeek))")
-                        Spacer()
-                        Text("Confidence \(Int(est.confidence * 100))%")
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
-                    if est.confidence < 0.5 {
-                        Text("Still learning — log weight daily and mark food days complete for a sharper estimate.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("Needs weight entries and complete food days.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+    private var macrosCard: some View {
+        ThemeCard(padding: 20) {
+            VStack(spacing: 12) {
+                Text("Macros")
+                    .font(Theme.font(15))
+                    .foregroundStyle(Theme.textPrimary)
+                HStack(spacing: 0) {
+                    macroColumn("Protein", todayLogs.reduce(0) { $0 + $1.proteinG })
+                    Rectangle().fill(Theme.divider).frame(width: 1, height: 70)
+                    macroColumn("Carbs", todayLogs.reduce(0) { $0 + $1.carbsG })
+                    Rectangle().fill(Theme.divider).frame(width: 1, height: 70)
+                    macroColumn("Fats", todayLogs.reduce(0) { $0 + $1.fatG })
                 }
             }
         }
     }
 
-    private var emptyState: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Set up your day").font(.headline)
-                Text("Add your goal in Profile and log your weight to start estimating your energy needs.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+    // MARK: - Pieces
+
+    private func splitBlock(title: String, value: String?, caption: String?) -> some View {
+        VStack(spacing: 6) {
+            Text(title)
+                .font(Theme.font(20))
+                .foregroundStyle(Theme.textPrimary)
+            Text(value ?? "No data yet")
+                .font(Theme.font(value == nil ? 15 : 18))
+                .foregroundStyle(value == nil ? Theme.textSecondary : Theme.textPrimary)
+            if let caption {
+                Text(caption)
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private func recoveryTint(_ score: Double) -> Color {
-        switch score {
-        case 90...: return .green
-        case 70..<90: return .teal
-        case 50..<70: return .yellow
-        default: return .orange
-        }
-    }
-
-    private func metricRow(_ title: String, value: String, sub: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.subheadline)
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-                Text(sub).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func macroPill(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.subheadline.weight(.medium)).monospacedDigit()
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+    private func macroColumn(_ label: String, _ grams: Double) -> some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(Theme.font(16))
+                .foregroundStyle(Theme.textPrimary)
+            Text("\(Int(grams)) g")
+                .font(Theme.font(30))
+                .foregroundStyle(Theme.textPrimary)
         }
         .frame(maxWidth: .infinity)
     }
 }
 
-struct Card<Content: View>: View {
-    @ViewBuilder var content: Content
+/// Gear used by every screen's trailing toolbar slot.
+struct SettingsGear: View {
+    @State private var showing = false
+
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        Button { showing = true } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 20))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .accessibilityLabel("Settings")
+        .sheet(isPresented: $showing) { SettingsView() }
     }
 }

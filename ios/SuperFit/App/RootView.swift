@@ -2,16 +2,20 @@ import SwiftUI
 import SwiftData
 
 enum AppTab: String, CaseIterable {
-    case diary, train, today, weight, sleep
+    case diet, train, home, weight, sleep
 
     var title: String { rawValue.capitalized }
+
+    /// Center tab is the anchor and carries no label, matching the design.
+    var showsLabel: Bool { self != .home }
+
     var icon: String {
         switch self {
-        case .today: return "square.grid.2x2"
-        case .diary: return "fork.knife"
+        case .diet: return "fork.knife"
         case .train: return "dumbbell"
+        case .home: return "house"
         case .weight: return "scalemass"
-        case .sleep: return "moon.zzz"
+        case .sleep: return "moon.stars"
         }
     }
 }
@@ -19,48 +23,28 @@ enum AppTab: String, CaseIterable {
 struct RootView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
-    @State private var tab = AppTab.today
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @State private var tab = AppTab.home
     @State private var garmin = GarminProvider()
 
     var body: some View {
-        TabView(selection: $tab) {
-            DiaryView().tag(AppTab.diary).toolbar(.hidden, for: .tabBar)
-            TrainingView().tag(AppTab.train).toolbar(.hidden, for: .tabBar)
-            DashboardView().tag(AppTab.today).toolbar(.hidden, for: .tabBar)
-            WeightView().tag(AppTab.weight).toolbar(.hidden, for: .tabBar)
-            SleepView().tag(AppTab.sleep).toolbar(.hidden, for: .tabBar)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
-        .preferredColorScheme((AppearanceMode(rawValue: appearanceRaw) ?? .system).colorScheme)
-        .onOpenURL { url in handleDeepLink(url) }
-        .task { ensureProfile() }
-    }
+        ZStack(alignment: .bottom) {
+            Theme.background
 
-    /// Compact custom bar: Today sits center and slightly larger.
-    private var tabBar: some View {
-        HStack {
-            ForEach(AppTab.allCases, id: \.self) { t in
-                Button {
-                    tab = t
-                } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: t.icon)
-                            .font(.system(size: t == .today ? 24 : 18))
-                        Text(t.title)
-                            .font(.system(size: t == .today ? 11 : 9))
-                    }
-                    .fontWeight(t == .today ? .semibold : .regular)
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(tab == t ? Color.accentColor : .secondary)
-                }
-                .buttonStyle(.plain)
+            TabView(selection: $tab) {
+                DiaryView().tag(AppTab.diet)
+                TrainingView().tag(AppTab.train)
+                DashboardView().tag(AppTab.home)
+                WeightView().tag(AppTab.weight)
+                SleepView().tag(AppTab.sleep)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea(.keyboard)
+
+            TabBar(selection: $tab)
         }
-        .padding(.top, 6)
-        .padding(.bottom, 2)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .preferredColorScheme(.dark)
+        .onOpenURL { handleDeepLink($0) }
+        .task { ensureProfile() }
     }
 
     private func ensureProfile() {
@@ -75,5 +59,64 @@ struct RootView: View {
                   .queryItems?.first(where: { $0.name == "token" })?.value
         else { return }
         Task { await garmin.completeLinking(sessionToken: token) }
+    }
+}
+
+/// Five tabs on a dark rounded bar. The centre well is a fixed part of the bar,
+/// not a selection indicator — it stays put while the gold moves to whichever
+/// tab is active.
+private struct TabBar: View {
+    @Binding var selection: AppTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases, id: \.self) { tab in
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { selection = tab }
+                } label: {
+                    item(tab)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 6)
+        .background(
+            UnevenRoundedRectangle(topLeadingRadius: Theme.tabBarRadius,
+                                   topTrailingRadius: Theme.tabBarRadius,
+                                   style: .continuous)
+                .fill(Theme.tabBar)
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    @ViewBuilder
+    private func item(_ tab: AppTab) -> some View {
+        let active = selection == tab
+        let tint = active ? Theme.gold : Theme.textPrimary
+
+        if tab == .home {
+            ZStack {
+                Circle()
+                    .fill(Theme.surface)
+                    .frame(width: 74, height: 74)
+                Image(systemName: tab.icon)
+                    .font(.system(size: 32, weight: .regular))
+                    .foregroundStyle(tint)
+            }
+            .frame(height: 62)
+            .offset(y: -12)
+        } else {
+            VStack(spacing: 5) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(tint)
+                Text(tab.title)
+                    .font(Theme.font(13))
+                    .foregroundStyle(tint)
+            }
+            .frame(height: 62)
+        }
     }
 }

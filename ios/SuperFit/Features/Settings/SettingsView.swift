@@ -3,17 +3,10 @@ import SwiftData
 
 /// Gear in the top-right of every tab. Conflicting controls live top-left.
 struct SettingsToolbarModifier: ViewModifier {
-    @State private var showing = false
-
     func body(content: Content) -> some View {
-        content
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showing = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
-                }
-            }
-            .sheet(isPresented: $showing) { SettingsView() }
+        content.toolbar {
+            ToolbarItem(placement: .topBarTrailing) { SettingsGear() }
+        }
     }
 }
 
@@ -83,6 +76,7 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }

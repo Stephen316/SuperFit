@@ -115,6 +115,7 @@ struct TrainingView: View {
             }
             .navigationTitle("Train")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .settingsToolbar()
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)

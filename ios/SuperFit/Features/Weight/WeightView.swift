@@ -33,12 +33,12 @@ struct WeightView: View {
                             ForEach(chartData) { m in
                                 PointMark(x: .value("Date", m.date),
                                           y: .value("Weight", units.displayWeight(m.weightKg)))
-                                    .foregroundStyle(.secondary.opacity(0.4))
+                                    .foregroundStyle(Color.white.opacity(0.30))
                                     .symbolSize(18)
                                 if let t = m.trendWeightKg {
                                     LineMark(x: .value("Date", m.date),
                                              y: .value("Trend", units.displayWeight(t)))
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(Theme.gold)
                                         .interpolationMethod(.monotone)
                                 }
                             }
@@ -104,6 +104,7 @@ struct WeightView: View {
                     .accessibilityLabel("Sync with Apple Health")
                 }
             }
+            .themedList()
             .settingsToolbar()
         }
     }

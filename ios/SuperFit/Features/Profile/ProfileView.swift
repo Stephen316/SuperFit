@@ -54,6 +54,7 @@ struct ProfileView: View {
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .keyboardDoneButton()
         } else {
             ProgressView()

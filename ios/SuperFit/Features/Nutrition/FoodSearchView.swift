@@ -49,6 +49,7 @@ struct FoodSearchView: View {
             .overlay { if searching { ProgressView() } }
             .navigationTitle("Add to \(meal.rawValue.capitalized)")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
@@ -83,6 +84,7 @@ struct FoodSearchView: View {
             }
             .navigationTitle("Scan barcode")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
 
@@ -143,6 +145,7 @@ struct LogFoodView: View {
             }
             .navigationTitle("Log food")
             .navigationBarTitleDisplayMode(.inline)
+            .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Back") { dismiss() } }

@@ -54,6 +54,7 @@ struct SleepView: View {
                     }
                 }
             }
+            .themedList()
             .settingsToolbar()
         }
     }
@@ -87,7 +88,7 @@ struct SleepView: View {
                     BarMark(x: .value("Date", n.date, unit: .day),
                             y: .value("Hours", Double(n.asleepMinutes) / 60))
                         .foregroundStyle(n.asleepMinutes >= SleepAnalytics.defaultNeedMinutes
-                                         ? Color.accentColor : Color.secondary.opacity(0.6))
+                                         ? Theme.gold : Color.white.opacity(0.25))
                 }
                 RuleMark(y: .value("Need", Double(SleepAnalytics.defaultNeedMinutes) / 60))
                     .lineStyle(.init(lineWidth: 1, dash: [4, 3]))
@@ -119,9 +120,9 @@ struct SleepView: View {
         let core = staged.reduce(0) { $0 + $1.coreMinutes }
         let total = Double(max(1, deep + rem + core))
         return Section {
-            stageRow("Deep", minutes: deep / staged.count, share: Double(deep) / total, tint: .indigo)
-            stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: .teal)
-            stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: .secondary)
+            stageRow("Deep", minutes: deep / staged.count, share: Double(deep) / total, tint: Theme.gold)
+            stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: Theme.gold.opacity(0.65))
+            stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Color.white.opacity(0.35))
         } header: {
             Text("Stages — nightly average")
         } footer: {
@@ -205,7 +206,7 @@ struct SleepView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color(.tertiarySystemFill))
+                    Capsule().fill(Color.white.opacity(0.12))
                     Capsule().fill(tint).frame(width: geo.size.width * share)
                 }
             }

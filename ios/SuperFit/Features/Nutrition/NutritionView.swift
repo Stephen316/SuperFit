@@ -121,6 +121,7 @@ struct NutritionView: View {
                     .accessibilityLabel(averaging ? "Show single day" : "Show 7-day average")
                 }
             }
+            .themedList()
             .settingsToolbar()
         }
     }
@@ -227,8 +228,8 @@ struct NutrientBar: View {
 
     private var tint: Color {
         if isLimit { return over ? .red : (fraction > 0.85 ? .orange : .secondary) }
-        if over { return .green }
-        return fraction >= 0.7 ? .accentColor : .orange
+        if over { return Theme.gold }
+        return fraction >= 0.7 ? Theme.gold : Theme.gold.opacity(0.5)
     }
 
     var body: some View {
@@ -241,7 +242,7 @@ struct NutrientBar: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color(.tertiarySystemFill))
+                    Capsule().fill(Color.white.opacity(0.12))
                     Capsule().fill(tint).frame(width: geo.size.width * fraction)
                 }
             }

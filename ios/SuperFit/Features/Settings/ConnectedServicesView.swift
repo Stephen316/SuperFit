@@ -79,6 +79,7 @@ struct ConnectedServicesView: View {
         }
         .navigationTitle("Connected services")
         .navigationBarTitleDisplayMode(.inline)
+            .themedList()
         .keyboardDoneButton()
         .task { await refresh() }
         .onOpenURL { url in

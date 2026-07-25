@@ -55,6 +55,7 @@ struct DiaryView: View {
                         .accessibilityLabel("Next day")
                 }
             }
+            .themedList()
             .settingsToolbar()
             .sheet(item: $addingTo) { slot in
                 FoodSearchView(day: day, meal: slot)
