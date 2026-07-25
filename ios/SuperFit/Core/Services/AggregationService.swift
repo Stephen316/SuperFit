@@ -11,6 +11,33 @@ enum TrendFill {
             return trend!
         }
     }
+
+    /// Time-aware EWMA: the smoothing weight decays with the *elapsed days*
+    /// between readings, not their position in the array. Index-based smoothing
+    /// treats a reading three months after the last one as the next step, so a
+    /// stale trend leaks into a fresh measurement and the chart shows a slow
+    /// drift the user never lived through.
+    ///
+    /// `dates` must be sorted ascending and the same length as `values`.
+    static func ewma(_ values: [Double], dates: [Date], n: Double = 10) -> [Double] {
+        guard values.count == dates.count else { return ewma(values, n: n) }
+        let alpha = 2 / (n + 1)
+        var trend: Double?
+        var previous: Date?
+        return zip(values, dates).map { value, date in
+            defer { previous = date }
+            guard let last = trend, let prior = previous else {
+                trend = value
+                return value
+            }
+            let gapDays = max(1, date.timeIntervalSince(prior) / 86_400)
+            // Compounding one day's decay over the gap; a long gap drives the
+            // effective alpha to 1, i.e. start fresh from this reading.
+            let effectiveAlpha = 1 - pow(1 - alpha, gapDays)
+            trend = effectiveAlpha * value + (1 - effectiveAlpha) * last
+            return trend!
+        }
+    }
 }
 
 /// Recomputes all derived state: weight trend, metabolic estimates, today's
@@ -27,6 +54,7 @@ final class AggregationService {
     func runAll() {
         fillWeightTrend()
         upsertMetabolicEstimates()
+        refreshCyclicalPatterns()
         upsertTodayRecovery()
         try? context.save()
     }
@@ -36,7 +64,7 @@ final class AggregationService {
     func fillWeightTrend() {
         let metrics = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
             .sorted { $0.date < $1.date }
-        let smoothed = TrendFill.ewma(metrics.map(\.weightKg))
+        let smoothed = TrendFill.ewma(metrics.map(\.weightKg), dates: metrics.map(\.date))
         for (m, t) in zip(metrics, smoothed) { m.trendWeightKg = t }
     }
 
@@ -69,7 +97,88 @@ final class AggregationService {
             row.confidence = est.confidence
             row.trendSlopeKgPerWeek = est.trendSlopeKgPerWeek
             row.avgIntakeKcal = est.avgIntakeKcal
+            row.basalKcal = est.basalKcal
         }
+    }
+
+    // MARK: - Cyclical baselines
+
+    /// Marker names, kept as constants so the persisted `markerRaw` can't drift.
+    private enum Marker {
+        static let hrv = "hrv"
+        static let restingHR = "restingHR"
+    }
+
+    /// Looks for a recurring 21–35 day rhythm in HRV and resting HR, and records
+    /// it when the evidence bar is met (≥3 complete cycles across ≥90 days).
+    ///
+    /// Detection runs regardless of profile — the maths doesn't care who you are,
+    /// and running it for everyone keeps one code path. Whether the correction is
+    /// *applied* is decided in `recoveryInputs`.
+    func refreshCyclicalPatterns() {
+        let vitals = ((try? context.fetch(FetchDescriptor<DailyVitals>())) ?? [])
+            .sorted { $0.date < $1.date }
+        guard let origin = vitals.first?.date else { return }
+        let cutoff = Date.now.addingTimeInterval(-240 * 86_400)
+        let window = vitals.filter { $0.date >= cutoff }
+
+        func samples(_ value: (DailyVitals) -> Double?) -> [CyclicalSample] {
+            window.compactMap { row in
+                value(row).map {
+                    CyclicalSample(day: Int(cal.startOfDay(for: row.date)
+                        .timeIntervalSince(cal.startOfDay(for: origin)) / 86_400),
+                                   value: $0)
+                }
+            }
+        }
+
+        store(CyclicalBaseline.detect(samples(\.hrvSDNN)), marker: Marker.hrv)
+        store(CyclicalBaseline.detect(samples(\.restingHR)), marker: Marker.restingHR)
+    }
+
+    private func store(_ pattern: CyclicalPattern?, marker: String) {
+        let existing = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
+            .first { $0.markerRaw == marker }
+        guard let pattern else {
+            existing?.isActive = false     // kept, so a flickering pattern is visible
+            return
+        }
+        let row = existing ?? {
+            let r = CyclicalPatternRecord(marker: marker)
+            context.insert(r)
+            return r
+        }()
+        row.detectedAt = .now
+        row.periodDays = pattern.periodDays
+        row.cyclesObserved = pattern.cyclesObserved
+        row.strength = pattern.strength
+        row.amplitude = pattern.amplitude
+        row.profile = pattern.profile
+        row.isActive = true
+    }
+
+    /// The stored pattern for a marker, if it currently qualifies *and* applies
+    /// to this user.
+    ///
+    /// Gated on a female profile by product decision. The detector itself is
+    /// blind — a 21–35 day rhythm could show up in anyone's data from shift work
+    /// or training blocks — so restricting the correction avoids "fixing"
+    /// baselines on a coincidence for the population where no such physiology is
+    /// expected. `.other` is excluded because it carries no information either
+    /// way, and silently reshaping someone's recovery scores on an assumption is
+    /// worse than leaving them alone.
+    private func activePattern(_ marker: String) -> CyclicalPattern? {
+        guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first,
+              profile.sex == .female,
+              let row = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
+                  .first(where: { $0.markerRaw == marker && $0.isActive }),
+              row.profile.count == row.periodDays, row.periodDays > 0
+        else { return nil }
+        return CyclicalPattern(periodDays: row.periodDays,
+                               cyclesObserved: row.cyclesObserved,
+                               strength: row.strength,
+                               amplitude: row.amplitude,
+                               profile: row.profile)
     }
 
     // MARK: - Recovery
@@ -103,34 +212,76 @@ final class AggregationService {
             .sorted { $0.date < $1.date }
         let baselineStart = day.addingTimeInterval(-60 * 86_400)
         let baseline = vitals.filter { $0.date >= baselineStart && $0.date < day }
-        if let todayVitals = vitals.first(where: { cal.isDate($0.date, inSameDayAs: day) }) {
-            inputs.hrv = todayVitals.hrvSDNN
-            inputs.restingHR = todayVitals.restingHR
+        let todayVitals = vitals.first { cal.isDate($0.date, inSameDayAs: day) }
+
+        // Level both sides by the same rhythm before comparing. Correcting only
+        // today's reading would shift it against an uncorrected baseline and
+        // invert the very error being fixed.
+        let origin = vitals.first.map { cal.startOfDay(for: $0.date) }
+        func dayIndex(_ date: Date) -> Int {
+            guard let origin else { return 0 }
+            return Int(cal.startOfDay(for: date).timeIntervalSince(origin) / 86_400)
         }
-        let hrvs = baseline.compactMap(\.hrvSDNN)
+
+        func levelled(_ values: [(Date, Double)], _ pattern: CyclicalPattern?) -> [Double] {
+            guard let pattern else { return values.map(\.1) }
+            return values.map { $0.1 - pattern.offset(forDay: dayIndex($0.0)) }
+        }
+
+        let hrvPattern = activePattern(Marker.hrv)
+        let rhrPattern = activePattern(Marker.restingHR)
+
+        if let todayVitals {
+            inputs.hrv = todayVitals.hrvSDNN.map {
+                $0 - (hrvPattern?.offset(forDay: dayIndex(todayVitals.date)) ?? 0)
+            }
+            inputs.restingHR = todayVitals.restingHR.map {
+                $0 - (rhrPattern?.offset(forDay: dayIndex(todayVitals.date)) ?? 0)
+            }
+        }
+
+        let hrvs = levelled(baseline.compactMap { v in v.hrvSDNN.map { (v.date, $0) } }, hrvPattern)
         if hrvs.count >= 5 {
             inputs.hrvBaselineMean = mean(hrvs)
             inputs.hrvBaselineSD = sd(hrvs)
         }
-        let rhrs = baseline.compactMap(\.restingHR)
+        let rhrs = levelled(baseline.compactMap { v in v.restingHR.map { (v.date, $0) } }, rhrPattern)
         if rhrs.count >= 5 {
             inputs.rhrBaselineMean = mean(rhrs)
             inputs.rhrBaselineSD = sd(rhrs)
         }
 
-        let sessions = (try? context.fetch(FetchDescriptor<TrainingSession>())) ?? []
+        // Only the ACWR window is needed; fetching all history grows unbounded.
+        let chronicStart = day.addingTimeInterval(-28 * 86_400)
+        let sessionQuery = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.startedAt >= chronicStart })
+        let sessions = (try? context.fetch(sessionQuery)) ?? []
+
+        let fractions = Dictionary(
+            ((try? context.fetch(FetchDescriptor<Exercise>())) ?? [])
+                .map { ($0.id, $0.bodyweightFraction) },
+            uniquingKeysWith: { a, _ in a })
         let records = sessions.flatMap { s in
             (s.sets ?? []).compactMap { set -> LiftRecord? in
                 guard let id = set.exerciseID else { return nil }
                 return LiftRecord(date: s.startedAt, exerciseID: id,
-                                  weightKg: set.weightKg, reps: set.reps, isWarmup: set.isWarmup)
+                                  weightKg: set.weightKg, reps: set.reps, isWarmup: set.isWarmup,
+                                  bodyweightFraction: fractions[id] ?? 0)
             }
         }
+        // Bodyweight makes unweighted work count toward load. Trend weight, not
+        // the latest reading, so a water-weight spike can't move training load.
+        let bodyweight = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
+            .sorted { $0.date > $1.date }
+            .first
+            .map { $0.trendWeightKg ?? $0.weightKg } ?? 0
+
         let agg = VolumeAggregator()
         let acuteWindow = DateInterval(start: day.addingTimeInterval(-7 * 86_400), end: day)
-        let chronicWindow = DateInterval(start: day.addingTimeInterval(-28 * 86_400), end: day)
-        let acute = agg.tonnage(records: records, in: acuteWindow)
-        let chronicWeekly = agg.tonnage(records: records, in: chronicWindow) / 4
+        let chronicWindow = DateInterval(start: chronicStart, end: day)
+        let acute = agg.tonnage(records: records, in: acuteWindow, bodyweightKg: bodyweight)
+        let chronicWeekly = agg.tonnage(records: records, in: chronicWindow,
+                                        bodyweightKg: bodyweight) / 4
         if chronicWeekly > 0 {
             inputs.acuteLoad = acute
             inputs.chronicLoad = chronicWeekly

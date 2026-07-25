@@ -10,13 +10,15 @@ struct SleepNight: Sendable {
     let bedtime: Date?
     let wakeTime: Date?
 
-    var efficiency: Double { inBedMinutes == 0 ? 0 : Double(asleepMinutes) / Double(inBedMinutes) }
+    var efficiency: Double? {
+        inBedMinutes > 0 ? Double(asleepMinutes) / Double(inBedMinutes) : nil
+    }
     var hasStages: Bool { deepMinutes + remMinutes + coreMinutes > 0 }
 }
 
 struct SleepSummary: Sendable {
     let averageAsleepMinutes: Double
-    let averageEfficiency: Double
+    let averageEfficiency: Double?   // nil when no night recorded time in bed
     let debtMinutes: Double            // cumulative shortfall vs need, 0 if none
     let consistencySD: Double?         // SD of bedtime in minutes; nil if unknown
     let nights: Int
@@ -45,9 +47,9 @@ struct SleepAnalytics: Sendable {
         guard !slept.isEmpty else { return nil }
 
         let avgAsleep = Double(slept.reduce(0) { $0 + $1.asleepMinutes }) / Double(slept.count)
-        let withBed = slept.filter { $0.inBedMinutes > 0 }
-        let avgEff = withBed.isEmpty ? 0
-            : withBed.reduce(0.0) { $0 + $1.efficiency } / Double(withBed.count)
+        let efficiencies = slept.compactMap(\.efficiency)
+        let avgEff = efficiencies.isEmpty ? nil
+            : efficiencies.reduce(0, +) / Double(efficiencies.count)
         let debt = slept.reduce(0.0) { $0 + max(0, Double(needMinutes - $1.asleepMinutes)) }
 
         return SleepSummary(averageAsleepMinutes: avgAsleep,

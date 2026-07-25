@@ -66,7 +66,7 @@ struct SleepView: View {
             HStack {
                 stat("Average", duration(s.averageAsleepMinutes))
                 Divider().frame(height: 34)
-                stat("Efficiency", "\(Int(s.averageEfficiency * 100))%")
+                stat("Efficiency", s.averageEfficiency.map { "\(Int($0 * 100))%" } ?? "—")
                 Divider().frame(height: 34)
                 if let sd = s.consistencySD {
                     stat("Consistency", "±\(Int(sd)) m")
@@ -163,8 +163,8 @@ struct SleepView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(duration(Double(n.asleepMinutes))).monospacedDigit()
-                        if n.inBedMinutes > 0 {
-                            Text("\(Int(n.efficiency * 100))%")
+                        if let eff = n.efficiency {
+                            Text("\(Int(eff * 100))%")
                                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }

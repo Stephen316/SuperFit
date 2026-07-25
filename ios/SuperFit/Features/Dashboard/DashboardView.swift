@@ -14,7 +14,7 @@ struct DashboardView: View {
     @State private var syncing = false
 
     private var profile: UserProfile? { profiles.first }
-    private var latestWeight: Double? { metrics.first?.weightKg }
+    private var latestWeight: Double? { metrics.first?.basisWeightKg }
     private var headline: MetabolicEstimateRecord? { estimates.first { $0.windowDays == 30 } }
 
     private var macros: MacroTargets? {
@@ -22,7 +22,8 @@ struct DashboardView: View {
         let tdee = TDEEEstimate(tdeeKcal: est.tdeeKcal, confidence: est.confidence,
                                 trendSlopeKgPerWeek: est.trendSlopeKgPerWeek,
                                 avgIntakeKcal: est.avgIntakeKcal,
-                                smoothedWeightKg: w, windowDays: est.windowDays)
+                                smoothedWeightKg: w, windowDays: est.windowDays,
+                                basalKcal: est.basalKcal)
         let target = MetabolismEngine().calorieTarget(tdee: tdee, goal: profile.goal, bodyweightKg: w)
         let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
         return MacroCalculator().targets(kcal: target, goal: profile.goal, bodyweightKg: w,
@@ -134,7 +135,7 @@ struct DashboardView: View {
                     .frame(width: 1, height: 92)
                 splitBlock(title: "Sleep",
                            value: lastSleep.map { "\($0.asleepMinutes / 60) h \($0.asleepMinutes % 60) m" },
-                           caption: lastSleep.map { "\(Int($0.efficiency * 100))% efficiency" })
+                           caption: lastSleep?.efficiency.map { "\(Int($0 * 100))% efficiency" })
             }
         }
     }

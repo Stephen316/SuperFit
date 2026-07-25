@@ -41,16 +41,9 @@ struct USDAClient: Sendable {
             .init(name: "api_key", value: key),
         ]
 
-        let response: SearchResponse = try await session.getJSON(comps.url!)
+        guard let url = comps.url else { throw URLError(.badURL) }
+        let response: SearchResponse = try await session.getJSON(url)
         return response.foods.compactMap(\.resolved)
-    }
-
-    func food(fdcID: Int) async throws -> ResolvedFood? {
-        guard let key = USDAKeyStore.key else { return nil }
-        var comps = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/food/\(fdcID)")!
-        comps.queryItems = [.init(name: "api_key", value: key)]
-        let food: SearchResponse.Food = try await session.getJSON(comps.url!)
-        return food.resolved
     }
 
     /// Cheap round trip used by Settings to confirm a pasted key works.
@@ -82,7 +75,9 @@ struct USDAClient: Sendable {
             struct Nutrient: Decodable {
                 let nutrientId: Int?
                 let value: Double?
-                // The detail endpoint nests these differently from search.
+                // FDC returns either flat (nutrientId/value) or nested
+                // (nutrient.id/amount) shapes depending on dataType. Decoding
+                // both keeps a shape change from silently zeroing every macro.
                 let nutrient: Inner?
                 let amount: Double?
 

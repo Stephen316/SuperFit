@@ -4,6 +4,7 @@ import SwiftData
 /// Full nutrient picture for a day: macros and micros against goal-derived
 /// targets. The Diary tab stays the logging surface; this is the analysis.
 struct NutritionView: View {
+    @Environment(\.dismiss) private var dismiss
     @Query private var profiles: [UserProfile]
     @Query private var logs: [NutritionLog]
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
@@ -23,23 +24,33 @@ struct NutritionView: View {
     /// have — one liver dinner covers a week of vitamin A.
     private var windowLogs: [NutritionLog] {
         guard averaging else { return dayLogs }
-        let start = Calendar.current.date(byAdding: .day, value: -6, to: day) ?? day
+        let start = Calendar.current.date(byAdding: .day, value: -(Self.averagingWindowDays - 1), to: day) ?? day
         return logs.filter { $0.date >= start && $0.date <= day }
     }
 
+    private static let averagingWindowDays = 7
+
+    /// Days in the averaging window that actually have logs — reported, not
+    /// used as the divisor.
+    private var loggedDaysInWindow: Int {
+        Set(windowLogs.map { Calendar.current.startOfDay(for: $0.date) }).count
+    }
+
+    /// Dividing by days-logged would turn "two logged days out of seven" into a
+    /// flattering two-day average wearing a weekly label. The window is seven
+    /// days, so the divisor is seven; sparse logging correctly reads as low.
     private var divisor: Double {
-        guard averaging else { return 1 }
-        let days = Set(windowLogs.map { Calendar.current.startOfDay(for: $0.date) }).count
-        return Double(max(1, days))
+        averaging ? Double(Self.averagingWindowDays) : 1
     }
 
     private var macroTargets: MacroTargets? {
-        guard let profile, let w = metrics.first?.weightKg,
+        guard let profile, let w = metrics.first?.basisWeightKg,
               let est = estimates.first(where: { $0.windowDays == 30 }) else { return nil }
         let tdee = TDEEEstimate(tdeeKcal: est.tdeeKcal, confidence: est.confidence,
                                 trendSlopeKgPerWeek: est.trendSlopeKgPerWeek,
                                 avgIntakeKcal: est.avgIntakeKcal,
-                                smoothedWeightKg: w, windowDays: est.windowDays)
+                                smoothedWeightKg: w, windowDays: est.windowDays,
+                                basalKcal: est.basalKcal)
         let kcal = MetabolismEngine().calorieTarget(tdee: tdee, goal: profile.goal, bodyweightKg: w)
         let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
         return MacroCalculator().targets(kcal: kcal, goal: profile.goal, bodyweightKg: w,
@@ -108,6 +119,7 @@ struct NutritionView: View {
             .navigationTitle(averaging ? "Nutrition — 7-day average" : "Nutrition")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 ToolbarItemGroup(placement: .topBarLeading) {
                     Button { shift(-1) } label: { Image(systemName: "chevron.left") }
                         .accessibilityLabel("Previous day")
@@ -122,7 +134,6 @@ struct NutritionView: View {
                 }
             }
             .themedList()
-            .settingsToolbar()
         }
     }
 
@@ -144,8 +155,13 @@ struct NutritionView: View {
         } header: {
             Text(averaging ? "Macros — daily average" : "Macros")
         } footer: {
-            if let profile, macroTargets != nil {
-                Text(goalExplanation(profile.goal))
+            VStack(alignment: .leading, spacing: 4) {
+                if averaging {
+                    Text("Averaged over \(Self.averagingWindowDays) days; \(loggedDaysInWindow) had food logged. Unlogged days count as zero, so patchy logging reads low.")
+                }
+                if let profile, macroTargets != nil {
+                    Text(goalExplanation(profile.goal))
+                }
             }
         }
     }

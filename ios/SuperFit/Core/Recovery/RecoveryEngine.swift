@@ -56,12 +56,15 @@ struct RecoveryEngine: Sendable {
         if let s = load { parts.append(("load", s)) }
 
         let totalWeight = parts.reduce(0) { $0 + (Self.weights[$1.key] ?? 0) }
-        let score: Double = totalWeight == 0
+        let raw: Double = totalWeight == 0
             ? 50
             : parts.reduce(0) { $0 + (Self.weights[$1.key] ?? 0) * $1.value } / totalWeight * 100
+        // Band the rounded value, not the raw one: 89.5 displays as 90, and a
+        // "90" next to "Normal training" contradicts the documented bands.
+        let score = raw.rounded()
 
         return RecoveryResult(
-            score: score.rounded(),
+            score: score,
             recommendation: recommendation(for: score),
             sleepScore: sleep.map { ($0 * 100).rounded() },
             hrvScore: hrv.map { ($0 * 100).rounded() },
@@ -73,10 +76,13 @@ struct RecoveryEngine: Sendable {
 
     // MARK: - Sub-scores (0…1)
 
+    /// Duration (70%) and efficiency (30%). When efficiency is unknown — phone-only
+    /// sleep tracking reports duration but not time in bed — it defaults to 0.9,
+    /// roughly a normal healthy night, so the missing component neither rewards
+    /// nor punishes. It must stay nil rather than 0 upstream; see SleepData.efficiency.
     private func sleepScore(_ i: RecoveryInputs) -> Double? {
         guard let asleep = i.asleepMinutes else { return nil }
-        let durationRatio = (Double(asleep) / Double(i.sleepNeedMinutes)).clamped(to: 0...1.1)
-        let duration = min(durationRatio, 1)            // no bonus for oversleeping
+        let duration = min(Double(asleep) / Double(i.sleepNeedMinutes), 1)  // no oversleep bonus
         let efficiency = i.sleepEfficiency?.clamped(to: 0...1) ?? 0.9
         return (0.7 * duration + 0.3 * efficiency).clamped(to: 0...1)
     }
@@ -102,10 +108,12 @@ struct RecoveryEngine: Sendable {
         guard let acute = i.acuteLoad, let chronic = i.chronicLoad, chronic > 0
         else { return nil }
         let acwr = acute / chronic
+        // Half-open bounds: `0.8...1.3` followed by `1.3...1.5` overlaps at 1.3,
+        // and relying on first-match-wins to resolve it hides the intent.
         switch acwr {
         case ..<0.8: return 0.9                      // detraining, but recovered
-        case 0.8...1.3: return 1.0
-        case 1.3...1.5: return 0.7
+        case 0.8..<1.3: return 1.0
+        case 1.3..<1.5: return 0.7
         default: return max(0, 1.0 - (acwr - 1.5))
         }
     }

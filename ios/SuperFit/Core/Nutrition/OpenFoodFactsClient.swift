@@ -30,7 +30,8 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "page", value: String(page)),
             .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity"),
         ]
-        let response: OFFSearchResponse = try await session.getJSON(comps.url!)
+        guard let url = comps.url else { throw URLError(.badURL) }
+        let response: OFFSearchResponse = try await session.getJSON(url)
         return response.products.compactMap { p in
             guard let code = p.code else { return nil }
             return p.resolved(id: code)

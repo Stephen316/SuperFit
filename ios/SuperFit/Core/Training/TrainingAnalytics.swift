@@ -5,9 +5,21 @@ import Foundation
 struct LiftRecord: Sendable {
     let date: Date
     let exerciseID: UUID
+    /// External load only. Zero for unweighted bodyweight work — the body's own
+    /// contribution comes from `bodyweightFraction`.
     let weightKg: Double
     let reps: Int
     let isWarmup: Bool
+    /// Share of bodyweight moved by this exercise (0 for machine/barbell work,
+    /// 1.0 for a pull-up, ~0.65 for a push-up). Without it a calisthenics
+    /// session scores zero training load and the recovery engine reads the
+    /// athlete as fully rested.
+    var bodyweightFraction: Double = 0
+
+    /// Load actually moved per rep.
+    func effectiveLoadKg(bodyweightKg: Double) -> Double {
+        weightKg + bodyweightFraction * bodyweightKg
+    }
 }
 
 /// Weekly working-set volume per muscle group, weighted by tension score:
@@ -32,10 +44,12 @@ struct VolumeAggregator: Sendable {
     }
 
     /// Total tonnage (kg lifted) in an interval — the training-load input for
-    /// the recovery engine's ACWR.
-    func tonnage(records: [LiftRecord], in interval: DateInterval) -> Double {
+    /// the recovery engine's ACWR. `bodyweightKg` lets unweighted work count;
+    /// pass the user's current weight.
+    func tonnage(records: [LiftRecord], in interval: DateInterval,
+                 bodyweightKg: Double = 0) -> Double {
         records.filter { !$0.isWarmup && interval.contains($0.date) }
-            .reduce(0) { $0 + $1.weightKg * Double($1.reps) }
+            .reduce(0) { $0 + $1.effectiveLoadKg(bodyweightKg: bodyweightKg) * Double($1.reps) }
     }
 
     /// Distinct training days in an interval.

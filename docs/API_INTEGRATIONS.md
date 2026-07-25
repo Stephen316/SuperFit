@@ -32,7 +32,6 @@ Patterns:
 
 ## Nutrition — USDA FoodData Central API
 - Search: `GET https://api.nal.usda.gov/fdc/v1/foods/search?query=…&api_key=…`
-- Detail: `GET https://api.nal.usda.gov/fdc/v1/food/{fdcId}?api_key=…`
 - `dataType=Foundation,SR Legacy,Branded` — lab-analyzed generics plus USDA's
   branded set, all carrying full micronutrient data.
 - Nutrient ids are the 1000-series (1008 kcal, 1003 protein, 1089 iron, …);

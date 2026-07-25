@@ -6,7 +6,6 @@ enum Theme {
 
     // MARK: Colour
 
-    static let brand = Color(hex: 0x164D50)
     static let gold = Color(hex: 0xBDA632)
     static let backgroundTop = Color(hex: 0x0C2526)
     static let backgroundBottom = Color.black
@@ -15,7 +14,6 @@ enum Theme {
 
     static let textPrimary = Color.white
     static let textSecondary = Color.white.opacity(0.55)
-    static let textFaint = Color.white.opacity(0.38)
     static let hairline = Color.white.opacity(0.55)
     static let divider = Color.white.opacity(0.35)
 

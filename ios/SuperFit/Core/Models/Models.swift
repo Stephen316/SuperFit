@@ -51,6 +51,11 @@ final class BodyMetrics {
     var leanMassKg: Double?
     var sourceRaw: String = MetricSource.manual.rawValue
 
+    /// Weight to drive targets from. The smoothed trend where available:
+    /// a single reading carries 1–2 kg of water noise, and letting that move
+    /// the day's calorie and protein targets makes them jitter for no reason.
+    var basisWeightKg: Double { trendWeightKg ?? weightKg }
+
     init(date: Date, weightKg: Double, source: MetricSource = .manual) {
         self.date = date
         self.weightKg = weightKg
@@ -161,11 +166,16 @@ final class Exercise {
     var tensionRaw: [String] = []
     var categoryRaw: String = ExerciseCategory.barbell.rawValue
     var isCustom: Bool = false
+    /// Share of bodyweight moved (0 for externally loaded lifts). Feeds training
+    /// load so unweighted work isn't scored as zero effort.
+    var bodyweightFraction: Double = 0
 
-    init(name: String, category: ExerciseCategory, tension: [MuscleGroup: Int], isCustom: Bool = false) {
+    init(name: String, category: ExerciseCategory, tension: [MuscleGroup: Int],
+         bodyweightFraction: Double = 0, isCustom: Bool = false) {
         self.name = name
         self.categoryRaw = category.rawValue
         self.isCustom = isCustom
+        self.bodyweightFraction = bodyweightFraction
         self.tension = tension
     }
 
@@ -272,7 +282,12 @@ final class SleepData {
 
     init(date: Date) { self.date = date }
 
-    var efficiency: Double { inBedMinutes == 0 ? 0 : Double(asleepMinutes) / Double(inBedMinutes) }
+    /// Nil when time-in-bed is unknown. Must not collapse to 0 — the recovery
+    /// engine treats a present value as measured, so a false 0 would read as
+    /// "awake all night" and strip 30% off the sleep component.
+    var efficiency: Double? {
+        inBedMinutes > 0 ? Double(asleepMinutes) / Double(inBedMinutes) : nil
+    }
 
     /// Staged data only exists when a watch was worn; phone-only sleep has none.
     var hasStages: Bool { deepMinutes + remMinutes + coreMinutes > 0 }
@@ -302,6 +317,27 @@ final class RecoveryScoreRecord {
     }
 }
 
+/// Internal flag: a recurring multi-week rhythm found in a recovery marker.
+/// Stays on-device like everything else; it exists so the baseline can be
+/// levelled, and so the detection is inspectable rather than invisible magic.
+@Model
+final class CyclicalPatternRecord {
+    /// "hrv" or "restingHR" — which marker the rhythm was found in.
+    var markerRaw: String = ""
+    var detectedAt: Date = Date()
+    var periodDays: Int = 0
+    var cyclesObserved: Int = 0
+    var strength: Double = 0
+    var amplitude: Double = 0
+    /// Per-phase offsets, index = phase position.
+    var profile: [Double] = []
+    /// False once the evidence bar stops being met; kept rather than deleted so
+    /// a pattern that comes and goes doesn't silently churn.
+    var isActive: Bool = true
+
+    init(marker: String) { self.markerRaw = marker }
+}
+
 @Model
 final class MetabolicEstimateRecord {
     var date: Date = Date()
@@ -310,5 +346,8 @@ final class MetabolicEstimateRecord {
     var confidence: Double = 0
     var trendSlopeKgPerWeek: Double = 0
     var avgIntakeKcal: Double = 0
+    /// BMR behind this estimate — the calorie-target floor. 0 on rows written
+    /// before this field existed; calorieTarget falls back to 1200 then.
+    var basalKcal: Double = 0
     init(date: Date, window: Int) { self.date = date; self.windowDays = window }
 }

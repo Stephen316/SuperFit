@@ -88,18 +88,91 @@ the only ground truth that matters — what the scale does given what you ate.
    TDEE (most stable); the 7-day flags fast metabolic shifts (adaptive
    thermogenesis during a long cut).
 
-### Known limitation: partial-day logging bias
-If a user logs weekdays but not weekends *and* eats more on unlogged days, the
-average intake — and therefore TDEE — is biased low (validation: 2600 logged
-weekdays / 3650 unlogged weekends / stable weight → estimated 2642 vs true 2900,
-−258 kcal). Coverage lowers confidence but cannot detect the asymmetry.
+### Confidence
 
-Mitigation (auto-complete at midnight): days finalize automatically — today never
-counts (still being logged); a past day counts only if ≥ 800 kcal was logged
-(`MetabolicRecordAssembler.minPlausibleIntake`). The threshold filters abandoned
-logging days (breakfast-then-quit), which would otherwise drag TDEE low. Days
-that were genuinely under-logged but above the threshold remain a residual bias
-source — inherent to any diary-based system without an explicit user flag.
+`confidence = coverage x dataMaturity x weighInDensity`, clamped to 0-1.
+
+No day of the week is treated specially. All days are assumed exchangeable for
+intake and training, so *which* days are missing never changes the estimate --
+only how many.
+
+### Imputing unlogged days
+
+The energy-balance identity differences average intake against the weight slope,
+but the slope spans every day in the window while logged intake covers only some.
+Unlogged days are therefore filled in from the intake trend rather than dropped:
+
+```
+slope, intercept = Theil-Sen fit over logged daily intake
+imputed(day)     = clamp(intercept + slope x day, observedMin ... observedMax)
+avgIntake        = mean over all window days (observed + imputed)
+```
+
+Under exchangeability the mean of logged days is already unbiased, and flat
+mean-imputation would return the same number. What this adds is **time**: when
+intake drifts across the window *and* the gaps cluster in time -- an unlogged
+first week, say -- the flat average describes the wrong part of the window. That
+matters here because the app moves the calorie target as TDEE shifts, so drifting
+intake is the normal case, not the exception.
+
+Two guards keep the fit honest:
+
+- **Significance.** The drift across the window must exceed one residual standard
+  deviation, otherwise the flat mean is used. Fitting noise and extrapolating it
+  is worse than not trying.
+- **Extrapolation.** Imputed values are clamped to the observed min/max, so a long
+  unlogged stretch cannot run the line away to implausible numbers.
+
+Mean absolute error against true window intake, 300 simulated windows of 30 days,
+8 days unlogged, sigma = 180 kcal:
+
+| Intake pattern | Gaps | Logged-days mean | Imputed |
+|---|---|---|---|
+| Flat | random | 14.6 | 15.3 |
+| Flat | clustered | 14.5 | 20.5 |
+| Rising 600 kcal/30 d | random | 22.9 | 16.7 |
+| Rising 600 kcal/30 d | clustered | 70.9 | 25.3 |
+| Falling 600 kcal/30 d | clustered | 69.1 | 25.3 |
+
+The trade is deliberate: about 6 kcal worse when intake is genuinely flat and the
+gaps happen to cluster, against 45 kcal better whenever intake is actually moving.
+
+Coverage still discounts confidence -- imputed days are inference, not
+measurement, and a mostly-imputed window deserves less weight against the prior
+even though the imputation itself is unbiased.
+
+### Calorie-target guardrails
+
+Weekly change is capped at 1% of bodyweight lost / 0.5% gained, **and the target
+never falls below basal metabolic rate** (`TDEEEstimate.basalKcal`, persisted so
+it survives relaunch; falls back to 1200 kcal on pre-migration rows). The relative
+guardrail alone is a fraction of *bodyweight*, not of metabolic rate, so it can
+prescribe sub-basal intake to a small or low-TDEE user — the point at which
+lean-mass loss and adaptive suppression stop being avoidable.
+
+### Known limitation: under-reporting
+
+Imputation fixes *missing* days. It cannot fix days that were logged
+inaccurately: if a portion goes unrecorded or is underestimated, the logged value
+is wrong rather than absent, and no amount of interpolation recovers it.
+
+A **consistent** bias largely cancels. Validation against Lichtman (1992) shows a
+15% systematic under-report still lands a target within ~35 kcal of the intended
+physiological deficit, because the same bias sits on both sides of the
+adjustment: TDEE reads low, and so does the target derived from it.
+
+An **inconsistent** bias does not cancel -- logging carefully on ordinary days and
+loosely on unusual ones biases the average downward with nothing to detect it
+from. This is inherent to any diary-based system.
+
+Two guards limit the damage:
+
+- Days finalize automatically at midnight; today never counts toward the estimate
+  while it is still being logged.
+- A past day counts only if at least 800 kcal was recorded
+  (`MetabolicRecordAssembler.minPlausibleIntake`), which filters abandoned
+  logging days -- breakfast entered, then nothing -- that would otherwise be
+  treated as a genuine low-intake day and drag TDEE down.
 
 ### Adaptive target adjustment
 Given goal + current TDEE:
@@ -130,6 +203,26 @@ minimum and the deficit is reported as protein-driven, not carb-starved.
 
 ---
 
+### Reconciliation
+
+Protein and the fat floor are set first, then carbs take the remainder. When that
+remainder falls under the 50 g carb floor the split would otherwise overspend the
+calorie target — 120 kg cutting at 1760 kcal produced 2024 kcal of macros — so the
+calculator trims back in priority order: **fat down to 0.5 g/kg** (essential-fat
+floor), then **protein down to 1.2 g/kg**, protein last because it is the macro
+most worth defending in a deficit. `MacroTargets.macroKcal` exposes the total for
+assertion; it matches `kcal` to within rounding across the whole plausible input
+grid. Targets below the sum of the floors can't be balanced at all, and are
+prevented upstream by the BMR floor.
+
+### Protein basis
+
+The literature's 1.8–2.2 g/kg figures are referenced to **bodyweight**. Applying
+them to lean mass under-prescribes by the body-fat fraction (82 kg at 65 kg LBM →
+130 g instead of 164 g), so the lean-mass basis carries its own higher values —
+2.4 g/kg cutting, 2.2 g/kg otherwise (Helms et al. 2014 give 2.3–3.1 g/kg LBM;
+the top of that range is contest prep, so this stays conservative).
+
 ## 3. Recovery Engine (readiness 0–100)
 
 Weighted composite of four normalized sub-scores. Each metric is scored against the
@@ -156,6 +249,92 @@ score = 100 × (0.35·sleep + 0.30·hrv + 0.20·rhr + 0.15·load)
 50–69  : Reduce volume ~30%, keep intensity
 <50    : Recovery focus — mobility / zone-2 / rest
 ```
+
+The recommendation is banded on the **rounded** score, not the raw one: 89.5
+displays as 90, and a 90 shown beside "Normal training" contradicts the table above.
+
+Sleep scores duration (70%) and efficiency (30%). Efficiency defaults to **0.9**
+when unknown — phone-only tracking reports duration but not time in bed — so the
+missing component neither rewards nor punishes. It must reach the engine as `nil`,
+never 0: `SleepData.efficiency` is optional for exactly this reason, since a false
+zero reads as "awake all night" and strips 30% off the component.
+
+Training load counts bodyweight work. Tonnage is `(externalLoad + bodyweight ×
+bodyweightFraction) × reps`; without the second term a calisthenics session scores
+zero load and ACWR reports the athlete as fully rested.
+
+### Cyclical baselines
+
+HRV and resting heart rate are z-scored against a flat 60-day mean and SD. For
+anyone with a genuine multi-week physiological rhythm -- most obviously the
+menstrual cycle, where HRV falls and resting HR rises 2-5 bpm through the luteal
+phase -- that flat baseline does two harmful things. It inflates the SD, blunting
+real signal all month; and it pushes one phase systematically negative, so the app
+recommends reducing volume on schedule every month for no physiological reason.
+Acting on that advice means cutting training every cycle without cause.
+
+`CyclicalBaseline` finds the rhythm in the marker data itself, so it needs nothing
+extra from the user and works for people who don't log periods. It detects only
+that a marker repeats on a 21-35 day period; nothing identifies what the rhythm
+is.
+
+**Method.** Robustly detrend (Theil-Sen, so months of rising fitness don't read as
+rhythm), then for each candidate period fold the series onto one cycle, take the
+median at each phase position, and smooth circularly. The winning period is the
+one whose profile explains the most variance (adjusted R², since a longer period
+fits more freely and would otherwise always win).
+
+Period selection by *variance explained* rather than autocorrelation peak matters
+more than it sounds: on realistic noise the autocorrelation peak recovered the
+true period 0% of the time -- a 28-day cycle read as 25 -- while this recovers it
+exactly on 82-99% of windows of six or more cycles. A period off by even one day
+drifts a day out of phase per cycle, so a wrong period makes the correction worse
+than none.
+
+**Evidence bar before anything is adjusted:**
+
+| Gate | Value |
+|---|---|
+| Complete cycles observed | >= 3 |
+| Span of history | >= 90 days |
+| Adjusted R² of the profile | >= 0.10 |
+| Amplitude vs residual SD | >= 0.33 |
+| Every phase position | >= 2 observations |
+
+Measured false-positive rate on rhythm-free data -- flat, drifting, and
+weak-signal (2-3 ms in 6 ms noise): **0%**.
+
+**Correction is shrunk toward zero** until enough cycles are in:
+`confidence = min(1, cyclesObserved / 6)`. Three cycles applies half the offset,
+six or more applies all of it. Simulation showed partial correction beating full
+at short windows and matching it once six cycles are in -- a confidently
+misaligned correction is worse than a timid one.
+
+Residual cyclical error on the most recent 28 days, where accumulated phase drift
+is worst (true 28-day rhythm, 9 ms amplitude, 6 ms nightly noise):
+
+| History | Detects | Uncorrected | Corrected |
+|---|---|---|---|
+| 120 d | 88% | 2.85 ms | 1.50 ms |
+| 180 d | 92% | 2.85 ms | 1.35 ms |
+| 240 d | 98% | 2.85 ms | 1.16 ms |
+| 300 d | 99% | 2.85 ms | 0.86 ms |
+
+Both the day's reading *and* the baseline it is compared against are levelled by
+the same profile. Correcting only one side would shift the reading against an
+uncorrected baseline and invert the error being fixed.
+
+**Application is gated on a female profile** by product decision. The detector
+itself is blind -- a 21-35 day rhythm could appear in anyone's data from shift
+work or training blocks -- so restricting the correction avoids reshaping
+baselines on a coincidence where no such physiology is expected. `.other` is
+excluded: it carries no information either way, and silently altering someone's
+recovery scores on an assumption is worse than leaving them alone.
+
+Detection results persist to `CyclicalPatternRecord` (on-device, like all health
+data) so the inference is inspectable rather than invisible. A pattern that stops
+qualifying is marked inactive rather than deleted, so one that comes and goes is
+visible instead of silently churning.
 
 Missing inputs degrade gracefully: a component with no data is dropped and the
 remaining weights renormalize, with a `dataCompleteness` flag surfaced in the UI so

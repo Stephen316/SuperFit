@@ -42,6 +42,17 @@ struct RootView: View {
 
             TabBar(selection: $tab)
         }
+        .overlay(alignment: .top) {
+            if AppSchema.isEphemeral {
+                Text("Storage unavailable — nothing logged this session will be saved.")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.85), in: Capsule())
+                    .padding(.top, 4)
+            }
+        }
         .preferredColorScheme(.dark)
         .onOpenURL { handleDeepLink($0) }
         .task { ensureProfile() }

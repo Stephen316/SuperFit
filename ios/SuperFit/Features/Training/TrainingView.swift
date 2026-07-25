@@ -14,12 +14,15 @@ struct TrainingView: View {
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var allRecords: [LiftRecord] {
-        sessions.flatMap { s in
+        let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
+                                   uniquingKeysWith: { a, _ in a })
+        return sessions.flatMap { s in
             (s.sets ?? []).compactMap { set -> LiftRecord? in
                 guard let id = set.exerciseID else { return nil }
                 return LiftRecord(date: s.startedAt, exerciseID: id,
                                   weightKg: set.weightKg, reps: set.reps,
-                                  isWarmup: set.isWarmup)
+                                  isWarmup: set.isWarmup,
+                                  bodyweightFraction: fractions[id] ?? 0)
             }
         }
     }
@@ -34,6 +37,17 @@ struct TrainingView: View {
     private var progressions: [ExerciseProgression] {
         let window = DateInterval(start: .now.addingTimeInterval(-60 * 86_400), end: .now)
         return ProgressionAnalyzer().progressions(records: allRecords, window: window)
+    }
+
+    /// Top gainers *and* anything going backwards. `progressions` is sorted by
+    /// change descending, so a plain `prefix` would hide every regression once
+    /// more than a handful of lifts are tracked — losing exactly the lifts worth
+    /// acting on.
+    private var shownProgressions: [ExerciseProgression] {
+        guard progressions.count > 6 else { return progressions }
+        let declining = progressions.filter { $0.change < 0 }
+        let gaining = progressions.filter { $0.change >= 0 }
+        return Array(gaining.prefix(4)) + Array(declining.suffix(3))
     }
 
     var body: some View {
@@ -83,7 +97,7 @@ struct TrainingView: View {
 
                 if !progressions.isEmpty {
                     Section("Strength — last 60 days") {
-                        ForEach(progressions.prefix(6), id: \.exerciseID) { p in
+                        ForEach(shownProgressions, id: \.exerciseID) { p in
                             HStack {
                                 Text(exercises.first { $0.id == p.exerciseID }?.name ?? "Exercise")
                                 Spacer()

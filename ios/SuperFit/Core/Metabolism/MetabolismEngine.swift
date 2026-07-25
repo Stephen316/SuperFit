@@ -14,11 +14,20 @@ enum FitnessGoal: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    var defaultProteinPerKg: Double {
-        switch self {
-        case .fatLoss, .recomposition: return 2.0
-        case .maintenance: return 1.8
-        case .muscleGain: return 1.8
+    /// Protein target in g per kg of the chosen basis.
+    ///
+    /// The literature's 1.8–2.2 g/kg figures are referenced to *bodyweight*.
+    /// Applying them to lean mass under-prescribes by roughly the body-fat
+    /// fraction (82 kg at 65 kg LBM → 130 g instead of 164 g), so the lean-mass
+    /// basis carries its own, higher values (Helms et al. 2014 give 2.3–3.1
+    /// g/kg LBM for lifters in a deficit; the upper end is for very lean
+    /// contest prep, so this stays conservative).
+    func defaultProtein(perLeanMass: Bool) -> Double {
+        switch (self, perLeanMass) {
+        case (.fatLoss, false), (.recomposition, false): return 2.0
+        case (.fatLoss, true), (.recomposition, true): return 2.4
+        case (.maintenance, false), (.muscleGain, false): return 1.8
+        case (.maintenance, true), (.muscleGain, true): return 2.2
         }
     }
 }
@@ -55,6 +64,9 @@ struct TDEEEstimate: Sendable {
     let avgIntakeKcal: Double
     let smoothedWeightKg: Double
     let windowDays: Int
+    /// Mifflin-St Jeor basal rate for the profile behind this estimate. Carried
+    /// so `calorieTarget` can refuse to prescribe below it.
+    var basalKcal: Double = 0
 }
 
 /// Adaptive TDEE from the relationship between logged intake and the smoothed
@@ -106,7 +118,10 @@ struct MetabolismEngine: Sendable {
         let slopePerWeek = slopePerDay * 7
 
         let intakes = window.compactMap(\.intakeKcal)
-        let avgIntake = intakes.isEmpty ? 0 : intakes.reduce(0, +) / Double(intakes.count)
+        // Averaged over every day in the window, unlogged days imputed from the
+        // intake trend — the weight slope it's differenced against covers all of
+        // them, so the intake side has to as well.
+        let avgIntake = imputedAverageIntake(window)
 
         let rawTDEE = avgIntake - slopePerDay * Self.kcalPerKg
 
@@ -114,6 +129,9 @@ struct MetabolismEngine: Sendable {
         let weighIns = smoothed.count
         let dataMaturity = min(1, Double(windowDays) / 14)
         let weighInDensity = min(1, Double(weighIns) / (Double(windowDays) / 3))
+        // Coverage still discounts: imputed days are inference, not measurement,
+        // and a window that is mostly imputed deserves less weight against the
+        // prior — even though the imputation itself is unbiased.
         let confidence = (coverage * dataMaturity * weighInDensity)
             .clamped(to: 0...1)
 
@@ -138,25 +156,112 @@ struct MetabolismEngine: Sendable {
             trendSlopeKgPerWeek: slopePerWeek,
             avgIntakeKcal: avgIntake.rounded(),
             smoothedWeightKg: smoothed.last?.value ?? 0,
-            windowDays: windowDays
+            windowDays: windowDays,
+            basalKcal: passiveBMR.rounded()
         )
     }
 
     /// Calorie target for a goal, guard-railed so weekly weight change stays in a
-    /// muscle-retention / lean-gain safe band relative to bodyweight.
+    /// muscle-retention / lean-gain safe band relative to bodyweight, and never
+    /// below basal metabolic rate.
     func calorieTarget(tdee: TDEEEstimate, goal: FitnessGoal, bodyweightKg: Double) -> Double {
         let raw = tdee.tdeeKcal * (1 + goal.calorieOffset)
 
         let maxLossKcal = bodyweightKg * 0.01 * Self.kcalPerKg / 7   // 1%/wk
         let maxGainKcal = bodyweightKg * 0.005 * Self.kcalPerKg / 7  // 0.5%/wk
-        let floor = tdee.tdeeKcal - maxLossKcal
+
+        // Relative guardrails alone can prescribe below BMR for a small or
+        // low-TDEE user: a 1%/wk deficit is a fixed fraction of bodyweight, not
+        // of metabolic rate. Eating under basal is the point at which lean-mass
+        // loss and adaptive suppression stop being avoidable, so it's a floor,
+        // not a preference. Falls back to a conservative absolute minimum when
+        // BMR is unknown (estimates built from persisted records pre-migration).
+        let basalFloor = tdee.basalKcal > 0 ? tdee.basalKcal : 1200
+        let relativeFloor = tdee.tdeeKcal - maxLossKcal
+        let floor = max(relativeFloor, basalFloor)
         let ceiling = tdee.tdeeKcal + maxGainKcal
+
+        // A very low TDEE can put the floor above the ceiling; the floor wins.
+        guard floor <= ceiling else { return floor.rounded() }
         return raw.clamped(to: floor...ceiling).rounded()
     }
 
     // MARK: - Internals
 
     private struct Point: Sendable { let day: Double; let value: Double }
+
+    /// Mean daily intake across **every** day in the window, with unlogged days
+    /// imputed from the intake trend of the days that were logged.
+    ///
+    /// All days are treated as exchangeable — no day-of-week structure is assumed
+    /// or looked for. Under that assumption the mean of logged days is already an
+    /// unbiased estimate of the window mean, and mean-imputing gaps would give an
+    /// identical answer. What imputation adds is *time*: when intake drifts across
+    /// the window and the gaps cluster in time — the first week unlogged, say —
+    /// the flat average of logged days describes the wrong part of the window,
+    /// while the weight trend it's differenced against covers all of it.
+    ///
+    /// Theil–Sen again, for the same reason as the weight slope: a couple of
+    /// outlier days (a blowout, a fast) shouldn't tilt the fitted line.
+    private func imputedAverageIntake(_ window: [DailyRecord]) -> Double {
+        let cal = Calendar(identifier: .gregorian)
+        var byDay: [Date: Double] = [:]
+        var allDays: Set<Date> = []
+        for r in window {
+            let day = cal.startOfDay(for: r.date)
+            allDays.insert(day)
+            if let kcal = r.intakeKcal { byDay[day] = kcal }
+        }
+        let observed = Array(byDay.values)
+        guard !observed.isEmpty else { return 0 }
+
+        let flatMean = observed.reduce(0, +) / Double(observed.count)
+        // Under three logged days a trend is noise; fall back to the flat mean.
+        guard byDay.count >= 3, let origin = allDays.min() else { return flatMean }
+
+        let points = byDay
+            .map { Point(day: $0.key.timeIntervalSince(origin) / 86_400, value: $0.value) }
+            .sorted { $0.day < $1.day }
+        let slope = theilSenSlopePerDay(points)
+        guard slope != 0 else { return flatMean }
+
+        // Theil–Sen intercept: median residual once the slope is removed.
+        var residuals = points.map { $0.value - slope * $0.day }
+        residuals.sort()
+        let mid = residuals.count / 2
+        let intercept = residuals.count.isMultiple(of: 2)
+            ? (residuals[mid - 1] + residuals[mid]) / 2
+            : residuals[mid]
+
+        // Only project a trend that stands clear of day-to-day noise. Fitting
+        // noise and extrapolating it across an unlogged stretch is worse than
+        // not trying: in simulation an unguarded fit turned a 14 kcal error into
+        // 26 on genuinely flat intake. Requiring the drift across the window to
+        // exceed one residual SD keeps ~90% of the benefit on real trends
+        // (71 → 25 kcal) while costing ~6 kcal when there is no trend.
+        let spread = points.map { $0.value - (intercept + slope * $0.day) }
+        let residualMean = spread.reduce(0, +) / Double(spread.count)
+        let residualSD = (spread.reduce(0) { $0 + ($1 - residualMean) * ($1 - residualMean) }
+                          / Double(max(1, spread.count - 1))).squareRoot()
+        let drift = abs(slope) * ((points.last?.day ?? 0) - (points.first?.day ?? 0))
+        guard drift >= residualSD else { return flatMean }
+
+        // Extrapolating a trend across a long unlogged stretch can still run
+        // away, so imputed values are held inside the range actually observed.
+        let low = observed.min() ?? flatMean
+        let high = observed.max() ?? flatMean
+
+        var total = 0.0
+        for day in allDays {
+            if let logged = byDay[day] {
+                total += logged
+            } else {
+                let x = day.timeIntervalSince(origin) / 86_400
+                total += (intercept + slope * x).clamped(to: low...high)
+            }
+        }
+        return total / Double(allDays.count)
+    }
 
     /// Raw daily weight means (multiple same-day weigh-ins averaged).
     private func dailyWeightSeries(_ window: [DailyRecord]) -> [Point] {

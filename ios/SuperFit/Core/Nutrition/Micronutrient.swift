@@ -1,7 +1,7 @@
 import Foundation
 
 /// Micronutrients and health markers tracked alongside macros. Raw values are
-/// the short keys used in the bundled FDC seed.
+/// the keys used in NutrientProfile.micros and USDAClient's nutrient map.
 enum Micronutrient: String, CaseIterable, Sendable {
     case saturatedFat = "sat"
     case sugar = "sug"

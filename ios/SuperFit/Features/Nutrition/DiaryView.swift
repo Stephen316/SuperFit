@@ -10,6 +10,7 @@ struct DiaryView: View {
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var addingTo: MealSlot?
+    @State private var showingNutrients = false
 
     private var dayLogs: [NutritionLog] {
         logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
@@ -24,7 +25,7 @@ struct DiaryView: View {
     }
 
     private var targets: MacroTargets? {
-        guard let profile = profiles.first, let w = metrics.first?.weightKg else { return nil }
+        guard let profile = profiles.first, let w = metrics.first?.basisWeightKg else { return nil }
         let recs = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics)
         let est = MetabolismEngine().estimate(
             records: recs, windowDays: 30,
@@ -60,6 +61,7 @@ struct DiaryView: View {
             .sheet(item: $addingTo) { slot in
                 FoodSearchView(day: day, meal: slot)
             }
+            .sheet(isPresented: $showingNutrients) { NutritionView() }
         }
     }
 
@@ -74,8 +76,10 @@ struct DiaryView: View {
                 Text("Log your weight and set a goal to get targets.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
-            NavigationLink {
-                NutritionView()
+            // Presented, not pushed: this tab lives inside a paged TabView, and
+            // a pushed stack would make the back-swipe fight the tab swipe.
+            Button {
+                showingNutrients = true
             } label: {
                 Label("Vitamins and minerals", systemImage: "chart.bar.doc.horizontal")
                     .font(.subheadline)

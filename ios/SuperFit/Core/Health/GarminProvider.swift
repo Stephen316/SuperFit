@@ -71,7 +71,8 @@ actor GarminProvider: RecoveryProvider {
             .init(name: "start", value: ISO8601DateFormatter().string(from: range.start)),
             .init(name: "end", value: ISO8601DateFormatter().string(from: range.end)),
         ]
-        var request = URLRequest(url: comps.url!)
+        guard let url = comps.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
 

@@ -42,11 +42,6 @@ final class FoodResolver {
         return out
     }
 
-    /// Distinguishes "no results" from "cannot reach the food databases", so
-    /// the UI can tell the user which it is.
-    var isSearchOnlineOnly: Bool { true }
-    var hasUSDAKey: Bool { usda.hasKey }
-
     /// Persist a remote result locally (dedupes by remoteID).
     @discardableResult
     func cache(_ resolved: ResolvedFood) -> Food {
@@ -59,8 +54,8 @@ final class FoodResolver {
         food.carbsPer100g = resolved.per100g.carbsG
         food.fatPer100g = resolved.per100g.fatG
         food.fibrePer100g = resolved.per100g.fibreG
-        // Without this the cached copy outranks the seed on the next search and
-        // the food would re-log with macros only.
+        // Without this the cached copy returned by localMatches on the next
+        // search would re-log the food with macros only.
         food.microsJSON = resolved.per100g.micros.isEmpty
             ? nil : try? JSONEncoder().encode(resolved.per100g.micros)
         context.insert(food)

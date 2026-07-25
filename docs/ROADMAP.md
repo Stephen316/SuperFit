@@ -29,6 +29,7 @@ Core/Metabolism/MetabolismEngine.swift       adaptive TDEE (Theil–Sen slope)
 Core/Metabolism/MacroCalculator.swift        protein/fat/carb split
 Core/Metabolism/MetabolicRecordAssembler.swift  midnight auto-complete engine input
 Core/Recovery/RecoveryEngine.swift           readiness 0–100
+Core/Recovery/CyclicalBaseline.swift          detects multi-week rhythms, levels baselines
 Core/Sleep/SleepAnalytics.swift              debt, bedtime consistency, sleep→HRV impact
 Core/Health/RecoveryDataSource.swift         provider-agnostic recovery metrics
 Core/Health/GarminProvider.swift             Garmin via own backend (see GARMIN.md)
@@ -63,4 +64,6 @@ SuperFitTests/NutritionClientTests.swift     fixture-based decode tests
 SuperFitTests/TrainingAnalyticsTests.swift   volume + progression math
 SuperFitTests/SleepAnalyticsTests.swift      debt, midnight-wrap consistency, impact
 SuperFitTests/NutrientTargetsTests.swift     RDA values + training/goal adjustments
+SuperFitTests/CyclicalBaselineTests.swift    detection gates, levelling, shrinkage
+SuperFitTests/QARegressionTests.swift        review findings, pinned
 ```
