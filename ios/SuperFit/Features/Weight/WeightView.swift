@@ -96,13 +96,15 @@ struct WeightView: View {
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button { Task { await syncFromHealth() } } label: {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
                     .disabled(syncing)
+                    .accessibilityLabel("Sync with Apple Health")
                 }
             }
+            .settingsToolbar()
         }
     }
 

@@ -47,12 +47,15 @@ struct DiaryView: View {
             .navigationTitle(day.formatted(.dateTime.weekday(.wide).month().day()))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button { shift(-1) } label: { Image(systemName: "chevron.left") }
+                        .accessibilityLabel("Previous day")
                     Button { shift(1) } label: { Image(systemName: "chevron.right") }
                         .disabled(Calendar.current.isDateInToday(day))
+                        .accessibilityLabel("Next day")
                 }
             }
+            .settingsToolbar()
             .sheet(item: $addingTo) { slot in
                 FoodSearchView(day: day, meal: slot)
             }

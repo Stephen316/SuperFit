@@ -12,7 +12,6 @@ struct DashboardView: View {
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
 
     @State private var syncing = false
-    @State private var showingSettings = false
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -70,14 +69,7 @@ struct DashboardView: View {
             .navigationTitle("Today")
             .navigationBarTitleDisplayMode(.inline)
             .background(Color(.systemGroupedBackground))
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .settingsToolbar()
             .task { await refresh() }
             .refreshable { await refresh() }
         }

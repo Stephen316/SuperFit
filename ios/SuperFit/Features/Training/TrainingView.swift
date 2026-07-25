@@ -115,6 +115,7 @@ struct TrainingView: View {
             }
             .navigationTitle("Train")
             .navigationBarTitleDisplayMode(.inline)
+            .settingsToolbar()
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)
                 await watch.start()

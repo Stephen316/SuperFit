@@ -85,6 +85,7 @@ struct FriendsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Friends")
             .navigationBarTitleDisplayMode(.inline)
+            .settingsToolbar()
         }
     }
 }
