@@ -48,12 +48,41 @@ private let offProductJSON = """
 }
 """.data(using: .utf8)!
 
-private let seedJSON = """
-[
-  {"i":171077,"n":"Chicken, broilers or fryers, breast, meat only, cooked, roasted","k":165,"p":31.0,"c":0,"f":3.6,"b":0},
-  {"i":173944,"n":"Chicken, canned, meat only, with broth","k":185,"p":25.3,"c":0,"f":8.1,"b":0},
-  {"i":168917,"n":"Rice, white, long-grain, regular, cooked","k":130,"p":2.69,"c":28.17,"f":0.28,"b":0.4}
-]
+private let usdaSearchJSON = """
+{
+  "foods": [
+    {
+      "fdcId": 171077,
+      "description": "Chicken, broilers or fryers, breast, meat only, cooked, roasted",
+      "foodNutrients": [
+        {"nutrientId": 1008, "value": 165},
+        {"nutrientId": 1003, "value": 31.0},
+        {"nutrientId": 1004, "value": 3.57},
+        {"nutrientId": 1005, "value": 0},
+        {"nutrientId": 1079, "value": 0},
+        {"nutrientId": 1089, "value": 1.04},
+        {"nutrientId": 1092, "value": 256},
+        {"nutrientId": 1093, "value": 74}
+      ]
+    },
+    {
+      "fdcId": 999001,
+      "description": "Protein Bar, Chocolate",
+      "brandName": "SomeBrand",
+      "servingSize": 60,
+      "servingSizeUnit": "g",
+      "foodNutrients": [
+        {"nutrientId": 1008, "value": 380},
+        {"nutrientId": 1003, "value": 33}
+      ]
+    },
+    {
+      "fdcId": 999002,
+      "description": "Broken entry with no energy",
+      "foodNutrients": [{"nutrientId": 1003, "value": 12}]
+    }
+  ]
+}
 """.data(using: .utf8)!
 
 @Suite(.serialized) struct NutritionClientTests {
@@ -79,26 +108,54 @@ private let seedJSON = """
         #expect(try await client.product(barcode: "abcdefgh") == nil)
     }
 
-    @Test func seedCatalogDecodesAndMapsFields() {
-        let catalog = FDCSeedCatalog(data: seedJSON)
-        #expect(catalog.count == 3)
-        let hits = catalog.search("chicken breast")
-        let f = hits.first { $0.id == "fdc:171077" }
-        #expect(f?.per100g.kcal == 165)
-        #expect(f?.per100g.proteinG == 31.0)
-        #expect(f?.source == .usda)
+    @Test func usdaDecodesMacrosAndMicros() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        StubProtocol.responder = { _ in (200, usdaSearchJSON) }
+        let client = USDAClient(session: StubProtocol.session())
+
+        let foods = try await client.search("chicken breast")
+        let chicken = try #require(foods.first { $0.id == "fdc:171077" })
+        #expect(chicken.per100g.kcal == 165)
+        #expect(chicken.per100g.proteinG == 31.0)
+        #expect(chicken.source == .usda)
+        #expect(chicken.per100g.micros[Micronutrient.iron.rawValue] == 1.04)
+        #expect(chicken.per100g.micros[Micronutrient.potassium.rawValue] == 256)
+        #expect(chicken.per100g.micros[Micronutrient.sodium.rawValue] == 74)
     }
 
-    @Test func seedSearchRanksPrefixThenShorter() {
-        let catalog = FDCSeedCatalog(data: seedJSON)
-        let hits = catalog.search("chicken")
-        #expect(hits.count == 2)
-        #expect(hits[0].id == "fdc:173944")     // both prefix; shorter name first
+    @Test func usdaKeepsBrandAndGramServing() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        StubProtocol.responder = { _ in (200, usdaSearchJSON) }
+        let bar = try await USDAClient(session: StubProtocol.session())
+            .search("protein bar").first { $0.id == "fdc:999001" }
+        #expect(bar?.brand == "SomeBrand")
+        #expect(bar?.servingGrams == 60)
     }
 
-    @Test func seedRejectsShortQueriesAndGarbageData() {
-        #expect(FDCSeedCatalog(data: seedJSON).search("c").isEmpty)
-        #expect(FDCSeedCatalog(data: Data("not json".utf8)).count == 0)
+    /// An entry with no energy value is unusable for logging — drop it rather
+    /// than surfacing a food that reads as 0 kcal.
+    @Test func usdaDropsEntriesWithoutEnergy() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        StubProtocol.responder = { _ in (200, usdaSearchJSON) }
+        let foods = try await USDAClient(session: StubProtocol.session()).search("broken")
+        #expect(!foods.contains { $0.id == "fdc:999002" })
+        #expect(foods.count == 2)
+    }
+
+    @Test func usdaReturnsNothingWithoutAKey() async throws {
+        USDAKeyStore.clear()
+        StubProtocol.responder = { _ in (200, usdaSearchJSON) }
+        #expect(try await USDAClient(session: StubProtocol.session()).search("chicken").isEmpty)
+    }
+
+    @Test func usdaRejectsShortQueries() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        StubProtocol.responder = { _ in (200, usdaSearchJSON) }
+        #expect(try await USDAClient(session: StubProtocol.session()).search("c").isEmpty)
     }
 
     @Test func serverErrorThrowsInsteadOfDecodingGarbage() async {

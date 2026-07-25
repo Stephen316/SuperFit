@@ -160,3 +160,44 @@ score = 100 × (0.35·sleep + 0.30·hrv + 0.20·rhr + 0.15·load)
 Missing inputs degrade gracefully: a component with no data is dropped and the
 remaining weights renormalize, with a `dataCompleteness` flag surfaced in the UI so
 the user knows the score is partial.
+
+## 4. Sleep Analytics
+
+Sleep is stored per wake-day with duration, stages, and — from `SleepSampleBuilder`
+— the clock bounds of the *asleep* segments. In-bed bounds are deliberately not
+used for bedtime: they include lying awake reading, which blurs the consistency
+signal.
+
+- **Debt** is one-directional: `Σ max(0, need − asleep)`. A long Sunday cannot
+  repay a short Monday, because sleep loss is not a bank balance.
+- **Consistency** is the SD of bedtime, with times mapped onto an axis centred on
+  midnight (evening times become negative) so 23:50 and 00:10 read as 20 minutes
+  apart rather than 23 hours. Reported only with ≥3 known bedtimes.
+- **Sleep → HRV impact** splits nights at 7 h 30 m and compares mean next-morning
+  HRV. Withheld below 4 nights per side, where one outlier would dominate.
+  Correlational, and labelled as such in the UI.
+
+## 5. Nutrient Targets
+
+Macros come from §2. Micronutrient targets start from published reference intakes
+(NIH ODS adult RDAs; WHO/US Dietary Guidelines for the ceilings) and adjust for the
+demands training actually creates:
+
+| Adjustment | Trigger | Rationale |
+|---|---|---|
+| Sodium 2300 → 3000 mg | ≥3 sessions/wk | Sweat loses ~1 g Na/L; the sedentary ceiling under-serves athletes |
+| Potassium +15% | ≥3 sessions/wk | Sweat losses; commonly under-consumed |
+| Iron +30% | ≥3 sessions/wk | Foot-strike haemolysis and sweat losses |
+| Calcium 1000 → 1200 mg | fat-loss goal | Bone-turnover risk rises in a deficit |
+| Iron 8 → 18 mg | female, ≤50 | Menstrual losses |
+| Calcium → 1200 mg, vitamin D → 20 µg | age >50 | Absorption declines |
+
+Ceilings (saturated fat, sugar) are proportions of energy — 10% each — so they
+scale with the calorie target rather than sitting at a fixed gram figure.
+
+**Coverage caveat:** ~87–98% of bundled FDC foods carry each micronutrient, but
+custom foods and most branded (OFF) items carry macros only. The UI reports the
+share of logged energy backed by full nutrient data, because otherwise a day of
+branded food reads as a deficiency. Micronutrient intake is also genuinely spiky —
+one portion of liver covers a week of vitamin A — so a 7-day average view is
+offered and is the more honest read.

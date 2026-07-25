@@ -78,6 +78,8 @@ final class SyncCoordinator {
                 row.deepMinutes = s.deepMinutes
                 row.remMinutes = s.remMinutes
                 row.coreMinutes = s.coreMinutes
+                if let bedtime = s.bedtime { row.bedtime = bedtime }
+                if let wakeTime = s.wakeTime { row.wakeTime = wakeTime }
             }
         }
     }
@@ -108,16 +110,27 @@ final class SyncCoordinator {
         }
     }
 
+    /// Overwrites rather than skipping existing days, so rows written before
+    /// bedtime/wake capture backfill their clock times on the next sync.
     private func upsertSleep(_ samples: [SleepSample]) {
-        let existing = fetchDays(SleepData.self, dateKey: \.date)
-        for s in samples where !existing.contains(cal.startOfDay(for: s.day)) {
-            let row = SleepData(date: s.day)
+        let rows = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
+        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
+                               uniquingKeysWith: { a, _ in a })
+        for s in samples {
+            let key = cal.startOfDay(for: s.day)
+            let row = byDay[key] ?? {
+                let r = SleepData(date: key)
+                context.insert(r)
+                byDay[key] = r
+                return r
+            }()
             row.inBedMinutes = s.inBedMinutes
             row.asleepMinutes = s.asleepMinutes
             row.deepMinutes = s.deepMinutes
             row.remMinutes = s.remMinutes
             row.coreMinutes = s.coreMinutes
-            context.insert(row)
+            row.bedtime = s.bedtime
+            row.wakeTime = s.wakeTime
         }
     }
 

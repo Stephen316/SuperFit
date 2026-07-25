@@ -125,7 +125,8 @@ actor HealthKitManager: HealthProvider {
         for s in samples {
             let day = cal.startOfDay(for: s.endDate)
             let minutes = Int(s.endDate.timeIntervalSince(s.startDate) / 60)
-            byDay[day, default: SleepSampleBuilder()].add(value: s.value, minutes: minutes)
+            byDay[day, default: SleepSampleBuilder()].add(value: s.value, minutes: minutes,
+                                                          start: s.startDate, end: s.endDate)
         }
         return byDay.map { $0.value.build(day: $0.key) }.sorted { $0.day < $1.day }
     }
@@ -177,19 +178,30 @@ actor HealthKitManager: HealthProvider {
 
 private struct SleepSampleBuilder {
     var inBed = 0, asleep = 0, deep = 0, rem = 0, core = 0
-    mutating func add(value: Int, minutes: Int) {
+    /// Bounds of the asleep segments only — `inBed` brackets the night more
+    /// loosely (reading, lying awake) and would blur bedtime consistency.
+    var firstAsleep: Date?
+    var lastAsleep: Date?
+
+    mutating func add(value: Int, minutes: Int, start: Date, end: Date) {
         switch HKCategoryValueSleepAnalysis(rawValue: value) {
-        case .inBed: inBed += minutes
+        case .inBed:
+            inBed += minutes
+            return
         case .asleepDeep: deep += minutes; asleep += minutes
         case .asleepREM: rem += minutes; asleep += minutes
         case .asleepCore: core += minutes; asleep += minutes
         case .asleepUnspecified, .asleep: asleep += minutes
-        default: break
+        default: return
         }
+        firstAsleep = min(start, firstAsleep ?? start)
+        lastAsleep = max(end, lastAsleep ?? end)
     }
+
     func build(day: Date) -> SleepSample {
         SleepSample(day: day, inBedMinutes: max(inBed, asleep),
-                    asleepMinutes: asleep, deepMinutes: deep, remMinutes: rem, coreMinutes: core)
+                    asleepMinutes: asleep, deepMinutes: deep, remMinutes: rem, coreMinutes: core,
+                    bedtime: firstAsleep, wakeTime: lastAsleep)
     }
 }
 

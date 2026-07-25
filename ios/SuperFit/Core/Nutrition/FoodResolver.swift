@@ -1,18 +1,19 @@
 import Foundation
 import SwiftData
 
-/// Resolution order: local cache → bundled FDC catalog (generic whole foods,
-/// offline, keyless) → Open Food Facts (branded/barcode). Remote fetches are
-/// cached as Food rows so repeat logging works offline. See docs/API_INTEGRATIONS.md.
+/// Resolution order: local cache → USDA FoodData Central → Open Food Facts.
+/// Anything fetched is cached as a Food row, so previously logged foods still
+/// resolve offline even though search itself needs a connection.
+/// See docs/API_INTEGRATIONS.md.
 @MainActor
 final class FoodResolver {
     private let off = OpenFoodFactsClient()
-    private let seed: FDCSeedCatalog
+    private let usda: USDAClient
     private let context: ModelContext
 
-    init(context: ModelContext, seed: FDCSeedCatalog = .shared) {
+    init(context: ModelContext, usda: USDAClient = USDAClient()) {
         self.context = context
-        self.seed = seed
+        self.usda = usda
     }
 
     func byBarcode(_ barcode: String) async -> ResolvedFood? {
@@ -22,21 +23,29 @@ final class FoodResolver {
         return remote
     }
 
+    /// Cache first so results appear instantly and offline; the two networks
+    /// run concurrently and either failing leaves the others intact.
     func search(_ term: String) async -> [ResolvedFood] {
         let trimmed = term.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
 
         let local = localMatches(trimmed)
-        let generic = seed.search(trimmed)
-        let branded = (try? await off.search(trimmed)) ?? []
+        async let usdaResults = try? usda.search(trimmed)
+        async let offResults = try? off.search(trimmed)
 
         var seen = Set(local.map(\.id))
         var out = local
-        for f in generic + branded where seen.insert(f.id).inserted {
+        for f in (await usdaResults ?? []) + (await offResults ?? [])
+        where seen.insert(f.id).inserted {
             out.append(f)
         }
         return out
     }
+
+    /// Distinguishes "no results" from "cannot reach the food databases", so
+    /// the UI can tell the user which it is.
+    var isSearchOnlineOnly: Bool { true }
+    var hasUSDAKey: Bool { usda.hasKey }
 
     /// Persist a remote result locally (dedupes by remoteID).
     @discardableResult
@@ -50,6 +59,10 @@ final class FoodResolver {
         food.carbsPer100g = resolved.per100g.carbsG
         food.fatPer100g = resolved.per100g.fatG
         food.fibrePer100g = resolved.per100g.fibreG
+        // Without this the cached copy outranks the seed on the next search and
+        // the food would re-log with macros only.
+        food.microsJSON = resolved.per100g.micros.isEmpty
+            ? nil : try? JSONEncoder().encode(resolved.per100g.micros)
         context.insert(food)
         try? context.save()
         return food
@@ -85,7 +98,9 @@ extension Food {
                                               proteinG: proteinPer100g,
                                               carbsG: carbsPer100g,
                                               fatG: fatPer100g,
-                                              fibreG: fibrePer100g),
+                                              fibreG: fibrePer100g,
+                                              micros: microsJSON
+                                                  .flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) } ?? [:]),
                      servingGrams: nil)
     }
 }

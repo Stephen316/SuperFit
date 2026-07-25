@@ -73,6 +73,12 @@ struct DiaryView: View {
                 Text("Log your weight and set a goal to get targets.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
+            NavigationLink {
+                NutritionView()
+            } label: {
+                Label("Vitamins and minerals", systemImage: "chart.bar.doc.horizontal")
+                    .font(.subheadline)
+            }
         }
     }
 

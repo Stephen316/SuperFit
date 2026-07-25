@@ -27,6 +27,7 @@ extension ResolvedFood {
                                proteinG: per100g.proteinG * f,
                                carbsG: per100g.carbsG * f,
                                fatG: per100g.fatG * f,
-                               fibreG: per100g.fibreG * f)
+                               fibreG: per100g.fibreG * f,
+                               micros: per100g.micros.mapValues { $0 * f })
     }
 }

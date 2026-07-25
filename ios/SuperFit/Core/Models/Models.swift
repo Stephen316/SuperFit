@@ -104,10 +104,29 @@ final class NutritionLog {
     var fatG: Double = 0
     var fibreG: Double = 0
     var mealRaw: String = MealSlot.snack.rawValue
+    /// Micronutrients snapshotted at log time, "key:amount" (CloudKit-safe).
+    /// Absent keys mean the source had no value — not zero.
+    var microsRaw: [String] = []
 
     init(date: Date, meal: MealSlot) {
         self.date = date
         self.mealRaw = meal.rawValue
+    }
+
+    var micros: [Micronutrient: Double] {
+        get {
+            var out: [Micronutrient: Double] = [:]
+            for entry in microsRaw {
+                let parts = entry.split(separator: ":")
+                guard parts.count == 2, let m = Micronutrient(rawValue: String(parts[0])),
+                      let v = Double(parts[1]) else { continue }
+                out[m] = v
+            }
+            return out
+        }
+        set {
+            microsRaw = newValue.map { "\($0.key.rawValue):\(($0.value * 1000).rounded() / 1000)" }
+        }
     }
 }
 
@@ -246,10 +265,17 @@ final class SleepData {
     var deepMinutes: Int = 0
     var remMinutes: Int = 0
     var coreMinutes: Int = 0
+    /// Clock times of the main sleep block. Nil for rows synced before these
+    /// were captured; they backfill on the next 90-day sync.
+    var bedtime: Date?
+    var wakeTime: Date?
 
     init(date: Date) { self.date = date }
 
     var efficiency: Double { inBedMinutes == 0 ? 0 : Double(asleepMinutes) / Double(inBedMinutes) }
+
+    /// Staged data only exists when a watch was worn; phone-only sleep has none.
+    var hasStages: Bool { deepMinutes + remMinutes + coreMinutes > 0 }
 }
 
 /// One row per day of heart metrics — the recovery engine's baseline inputs.

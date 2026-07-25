@@ -84,7 +84,9 @@ actor GarminProvider: RecoveryProvider {
         guard (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         guard data.count < 5_000_000 else { throw URLError(.dataLengthExceedsMaximum) }
 
-        return try JSONDecoder().decode([RecoveryDTO].self, from: data).map(\.metrics)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([RecoveryDTO].self, from: data).map(\.metrics)
     }
 }
 
@@ -102,6 +104,8 @@ private struct RecoveryDTO: Decodable {
         let deepMinutes: Int
         let remMinutes: Int
         let lightMinutes: Int
+        let bedtime: Date?
+        let wakeTime: Date?
     }
 
     var metrics: RecoveryMetrics {
@@ -116,7 +120,9 @@ private struct RecoveryDTO: Decodable {
                             asleepMinutes: $0.asleepMinutes,
                             deepMinutes: $0.deepMinutes,
                             remMinutes: $0.remMinutes,
-                            coreMinutes: $0.lightMinutes)
+                            coreMinutes: $0.lightMinutes,
+                            bedtime: $0.bedtime,
+                            wakeTime: $0.wakeTime)
             },
             bodyBattery: bodyBattery)
     }

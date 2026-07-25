@@ -30,18 +30,30 @@ Patterns:
 - Map `nutriments` (per 100 g) → `Food.per100g`. Coverage is crowd-sourced; treat
   missing fields as nil, not zero.
 
-## Nutrition — USDA FoodData Central (bundled, no API)
-Generic whole foods ship **inside the app**: `tools/build_fdc_seed.py` distills
-the public-domain Foundation + SR Legacy datasets (~7,800 lab-analyzed foods)
-into `Resources/fdc_seed.json` (~1 MB). `FDCSeedCatalog` searches it in memory
-with token-AND matching — offline, keyless, no rate limits. Foundation entries
-win name collisions with SR Legacy. Items become `Food` rows only when logged,
-keeping the seed out of CloudKit sync. (USDA's branded dataset is deliberately
-excluded: US-centric, hundreds of MB, and OFF covers branded better.)
+## Nutrition — USDA FoodData Central API
+- Search: `GET https://api.nal.usda.gov/fdc/v1/foods/search?query=…&api_key=…`
+- Detail: `GET https://api.nal.usda.gov/fdc/v1/food/{fdcId}?api_key=…`
+- `dataType=Foundation,SR Legacy,Branded` — lab-analyzed generics plus USDA's
+  branded set, all carrying full micronutrient data.
+- Nutrient ids are the 1000-series (1008 kcal, 1003 protein, 1089 iron, …);
+  `USDAClient.microIDs` maps them to `Micronutrient`.
+- Entries with no energy value are dropped: a food that logs as 0 kcal is worse
+  than one that isn't offered.
 
-Resolution order when logging: local cache → bundled FDC catalog (generic) →
-Open Food Facts (branded/barcode). Every remote fetch is cached as a `Food` row
-so repeat logging is offline.
+**Key handling.** Free key from <https://fdc.nal.usda.gov/api-key-signup.html>,
+entered by the user in Settings → Connected services and stored in the
+**Keychain**. It is never compiled into the binary — a bundled key ships to every
+install and is trivially extracted from the app package. Rate limit is 1,000
+requests/hour per key, which one user's searching will not approach.
+
+**Resolution order:** local cache → USDA FDC → Open Food Facts. The two network
+sources run concurrently, and either failing leaves the other's results intact.
+
+**Offline behaviour.** Search needs a connection. Every fetched food is cached as
+a `Food` row, so anything logged before — the long tail of what someone actually
+eats — still resolves and re-logs offline. Barcode scanning and custom foods are
+unaffected. With no key configured, search degrades to cache + Open Food Facts
+rather than failing, and the UI says which case applies.
 
 ## Barcode scanning
 `AVCaptureSession` + `VNBarcodeObservation` (Vision) for EAN-13/UPC-A → OFF lookup.

@@ -13,6 +13,8 @@ struct SleepSample: Sendable {
     let deepMinutes: Int
     let remMinutes: Int
     let coreMinutes: Int
+    var bedtime: Date?
+    var wakeTime: Date?
 }
 
 struct WorkoutSample: Sendable {

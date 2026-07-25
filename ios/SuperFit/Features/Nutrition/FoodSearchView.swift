@@ -20,8 +20,17 @@ struct FoodSearchView: View {
         NavigationStack {
             List {
                 if results.isEmpty && !searching && query.count >= 2 {
-                    Text("No matches. Try the barcode scanner or add a custom food.")
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No matches").foregroundStyle(.secondary)
+                        if !USDAClient().hasKey {
+                            Text("Add a USDA API key in Settings → Connected services to search the full food database. Without it only Open Food Facts and your own foods are searched.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Food search needs a connection. Foods you've logged before still work offline — or scan a barcode or add a custom food.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
                 ForEach(results) { food in
                     Button { logging = food } label: {
@@ -156,6 +165,9 @@ struct LogFoodView: View {
         entry.carbsG = scaled.carbsG
         entry.fatG = scaled.fatG
         entry.fibreG = scaled.fibreG
+        entry.micros = Dictionary(uniqueKeysWithValues: scaled.micros.compactMap { key, value in
+            Micronutrient(rawValue: key).map { ($0, value) }
+        })
         context.insert(entry)
         try? context.save()
         dismiss()

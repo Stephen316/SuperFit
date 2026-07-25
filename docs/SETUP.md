@@ -20,10 +20,17 @@ The Swift sources are here but the `.xcodeproj`/`.xcworkspace` is not committed
 - **Background Modes** → Background fetch + Background processing.
 
 ## API keys
-None. Generic foods ship inside the app (`Resources/fdc_seed.json`, public-domain
-USDA data — make sure it's added to the target's bundle resources); branded
-products come from the keyless Open Food Facts API. Regenerate the seed with
-`python tools/build_fdc_seed.py` when USDA publishes a new release.
+**USDA FoodData Central** — free, and needed for food search. Sign up at
+<https://fdc.nal.usda.gov/api-key-signup.html>, then enter the key in the app
+under Settings → Connected services. It is stored in the Keychain, not in the
+project, so nothing secret is committed and each install uses its own key.
+
+Open Food Facts (branded/barcode) needs no key. Garmin is optional — see
+[GARMIN.md](GARMIN.md).
+
+Without a USDA key the app still runs: search falls back to Open Food Facts plus
+foods you have already logged, and barcode scanning and custom foods are
+unaffected.
 
 ## Run
 - Simulator has no Health data — use a **real device** to exercise the HealthKit

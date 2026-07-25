@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 enum AppTab: String, CaseIterable {
-    case diary, train, today, weight, friends
+    case diary, train, today, weight, sleep
 
     var title: String { rawValue.capitalized }
     var icon: String {
@@ -11,7 +11,7 @@ enum AppTab: String, CaseIterable {
         case .diary: return "fork.knife"
         case .train: return "dumbbell"
         case .weight: return "scalemass"
-        case .friends: return "person.2"
+        case .sleep: return "moon.zzz"
         }
     }
 }
@@ -29,7 +29,7 @@ struct RootView: View {
             TrainingView().tag(AppTab.train).toolbar(.hidden, for: .tabBar)
             DashboardView().tag(AppTab.today).toolbar(.hidden, for: .tabBar)
             WeightView().tag(AppTab.weight).toolbar(.hidden, for: .tabBar)
-            FriendsView().tag(AppTab.friends).toolbar(.hidden, for: .tabBar)
+            SleepView().tag(AppTab.sleep).toolbar(.hidden, for: .tabBar)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
         .preferredColorScheme((AppearanceMode(rawValue: appearanceRaw) ?? .system).colorScheme)
@@ -75,27 +75,5 @@ struct RootView: View {
                   .queryItems?.first(where: { $0.name == "token" })?.value
         else { return }
         Task { await garmin.completeLinking(sessionToken: token) }
-    }
-}
-
-struct FriendsView: View {
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 10) {
-                Image(systemName: "person.2")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-                Text("Friends").font(.headline)
-                Text("Train together, share progress, and compare weeks. Coming soon.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("Friends")
-            .navigationBarTitleDisplayMode(.inline)
-            .settingsToolbar()
-        }
     }
 }
