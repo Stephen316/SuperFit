@@ -11,6 +11,7 @@
 | **5.5** | Garmin Health API (HRV + staged sleep via backend, opt-in) · dedicated Sleep tab: duration trend vs need, stage composition, bedtime consistency, sleep→HRV correlation | **done** |
 | **5.6** | Micronutrients: seed rebuilt with 14 micros/markers · goal- and training-adjusted reference intakes · nutrition breakdown view with coverage reporting and 7-day averaging · food search moved from bundled seed to USDA FDC API (key in Keychain) | **done** |
 | **5.7** | Supplements: 51-item catalog with per-serving nutrients · every-day entries that carry forward · skip/stop without losing history · custom supplements · contributes to macros, micronutrients and the TDEE energy balance · food-like items (bars, shakes, gainers) also searchable from the food diary | **done** |
+| **5.8** | USDA portion data: household measures ("1 medium", "1 cup, sliced") imported and cached · log in portions, grams or ounces · defaults follow the unit setting | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -74,4 +75,5 @@ SuperFitTests/NutrientTargetsTests.swift     RDA values + training/goal adjustme
 SuperFitTests/CyclicalBaselineTests.swift    detection gates, levelling, shrinkage
 SuperFitTests/QARegressionTests.swift        review findings, pinned
 SuperFitTests/SupplementTests.swift          daily/skip/stop logic, catalog integrity
+SuperFitTests/ServingOptionTests.swift       portion/gram/ounce conversion
 ```

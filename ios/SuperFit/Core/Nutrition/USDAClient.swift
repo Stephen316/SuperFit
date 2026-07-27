@@ -46,6 +46,19 @@ struct USDAClient: Sendable {
         return response.foods.compactMap(\.resolved)
     }
 
+    /// Full record for one food, including `foodPortions` — the household
+    /// measures ("1 medium", "1 cup, sliced") that search results omit.
+    /// Fetched lazily when the log sheet opens rather than for every search hit,
+    /// which would be one request per result.
+    func detail(fdcID: Int) async throws -> ResolvedFood? {
+        guard let key = USDAKeyStore.key else { return nil }
+        var comps = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/food/\(fdcID)")!
+        comps.queryItems = [.init(name: "api_key", value: key)]
+        guard let url = comps.url else { throw URLError(.badURL) }
+        let food: SearchResponse.Food = try await session.getJSON(url)
+        return food.resolved
+    }
+
     /// Cheap round trip used by Settings to confirm a pasted key works.
     func validate(key: String) async -> Bool {
         var comps = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/foods/search")!
@@ -70,7 +83,54 @@ struct USDAClient: Sendable {
             let brandName: String?
             let servingSize: Double?
             let servingSizeUnit: String?
+            let householdServingFullText: String?
             let foodNutrients: [Nutrient]?
+            let foodPortions: [Portion]?
+
+            /// USDA household measures. `amount` × `measureUnit`/`modifier`
+            /// describes the portion, `gramWeight` is what it weighs.
+            struct Portion: Decodable {
+                let amount: Double?
+                let modifier: String?
+                let gramWeight: Double?
+                let portionDescription: String?
+                let measureUnit: MeasureUnit?
+
+                struct MeasureUnit: Decodable {
+                    let name: String?
+                }
+
+                /// "1 medium", "1 cup, sliced", "1 bar". USDA splits this across
+                /// three optional fields with inconsistent population, so they're
+                /// assembled in preference order and anything unusable is dropped.
+                var resolved: FoodPortion? {
+                    guard let grams = gramWeight, grams > 0 else { return nil }
+
+                    // `measureUnit.name` is "undetermined" when USDA has none.
+                    let unit = (measureUnit?.name).flatMap {
+                        $0.lowercased() == "undetermined" ? nil : $0
+                    }
+                    let qualifier = [unit, modifier]
+                        .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                        .joined(separator: ", ")
+
+                    var label: String
+                    if !qualifier.isEmpty {
+                        let count = amount ?? 1
+                        let countText = count == count.rounded()
+                            ? String(Int(count)) : String(format: "%.2g", count)
+                        label = "\(countText) \(qualifier)"
+                    } else if let described = portionDescription?
+                        .trimmingCharacters(in: .whitespaces), !described.isEmpty {
+                        label = described
+                    } else {
+                        return nil
+                    }
+                    label = String(label.prefix(60))
+                    return FoodPortion(label: label, gramWeight: grams)
+                }
+            }
 
             struct Nutrient: Decodable {
                 let nutrientId: Int?
@@ -113,13 +173,30 @@ struct USDAClient: Sendable {
                 profile.micros = micros
 
                 let brand = (brandName ?? brandOwner)?.trimmingCharacters(in: .whitespaces)
+                let grams = servingSizeUnit?.lowercased() == "g" ? servingSize : nil
+
+                var portions = (foodPortions ?? []).compactMap(\.resolved)
+                // Branded foods have no foodPortions but do carry a named
+                // household serving ("1 bar", "2 tbsp") alongside its weight.
+                if portions.isEmpty, let grams,
+                   let household = householdServingFullText?
+                    .trimmingCharacters(in: .whitespaces), !household.isEmpty {
+                    portions = [FoodPortion(label: String(household.prefix(60)),
+                                            gramWeight: grams)]
+                }
+                // Same measure can appear twice with different weights; keep the
+                // first of each label so the picker doesn't show duplicates.
+                var seenLabels: Set<String> = []
+                portions = portions.filter { seenLabels.insert($0.label).inserted }
+
                 return ResolvedFood(
                     id: "fdc:\(fdcId)",
                     source: .usda,
                     name: name,
                     brand: (brand?.isEmpty ?? true) ? nil : brand,
                     per100g: profile,
-                    servingGrams: servingSizeUnit?.lowercased() == "g" ? servingSize : nil)
+                    servingGrams: grams,
+                    portions: portions)
             }
         }
     }

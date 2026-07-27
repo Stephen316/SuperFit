@@ -112,10 +112,28 @@ struct LogFoodView: View {
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
 
-    @State private var grams: Double = 100
-    @State private var confirmingDuplicate = false
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
-    private var scaled: NutrientProfile { food.scaled(grams: grams) }
+    @State private var resolved: ResolvedFood
+    @State private var quantity: Double = 1
+    @State private var unit: ServingOption = .gram
+    @State private var confirmingDuplicate = false
+    @State private var loadingPortions = false
+
+    init(food: ResolvedFood, day: Date, meal: MealSlot, onLogged: @escaping () -> Void) {
+        self.food = food
+        self.day = day
+        self.meal = meal
+        self.onLogged = onLogged
+        _resolved = State(initialValue: food)
+    }
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
+    private var options: [ServingOption] { ServingOption.options(for: resolved) }
+
+    /// Quantity is in the chosen unit; everything downstream works in grams.
+    private var grams: Double { quantity * unit.gramsPerUnit }
+    private var scaled: NutrientProfile { resolved.scaled(grams: grams) }
 
     /// The same product can be reached from the food diary and the supplements
     /// list, and both count toward the day's totals.
@@ -129,22 +147,31 @@ struct LogFoodView: View {
         NavigationStack {
             Form {
                 Section {
-                    LabeledContent(food.name) {
-                        if let brand = food.brand {
+                    LabeledContent(resolved.name) {
+                        if let brand = resolved.brand {
                             Text(brand).foregroundStyle(.secondary)
                         }
                     }
                     LabeledContent("Amount") {
-                        HStack(spacing: 4) {
-                            TextField("0", value: $grams, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                            Text("g").foregroundStyle(.secondary)
+                        TextField("0", value: $quantity, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Picker("Unit", selection: $unit) {
+                        ForEach(options) { option in
+                            Text(option.label).tag(option)
                         }
                     }
-                    if let serving = food.servingGrams {
-                        Button("Use 1 serving (\(Int(serving)) g)") { grams = serving }
-                            .font(.subheadline)
+                    if unit != .gram && unit != .ounce {
+                        LabeledContent("Weight", value: "\(Int(grams.rounded())) g")
+                            .foregroundStyle(.secondary)
+                    }
+                    if loadingPortions {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("Loading serving sizes…")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Section("This portion") {
@@ -159,6 +186,7 @@ struct LogFoodView: View {
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
+            .task { await loadPortions() }
             .alert("Already taken today", isPresented: $confirmingDuplicate) {
                 Button("Log anyway") { log() }
                 Button("Cancel", role: .cancel) {}
@@ -181,12 +209,42 @@ struct LogFoodView: View {
         }
     }
 
+    /// USDA search results carry no household measures, so they're fetched when
+    /// this sheet opens. Selection is only moved onto a portion if the user
+    /// hasn't already chosen a unit — never yank a choice out from under them.
+    private func loadPortions() async {
+        applyDefaultUnit()
+        guard resolved.portions.isEmpty, resolved.source == .usda else { return }
+        loadingPortions = true
+        defer { loadingPortions = false }
+        let detailed = await FoodResolver(context: context).withPortions(resolved)
+        guard !detailed.portions.isEmpty else { return }
+        let wasDefault = unit == .gram || unit == .ounce
+        resolved = detailed
+        if wasDefault, quantity == 1 || quantity == 100 { applyDefaultUnit() }
+    }
+
+    /// Prefer a real portion; otherwise the unit that matches the user's
+    /// measurement setting, with a sensible starting quantity for each.
+    private func applyDefaultUnit() {
+        if let portion = options.first, portion != .gram, portion != .ounce {
+            unit = portion
+            quantity = 1
+        } else if units == .imperial {
+            unit = .ounce
+            quantity = 3.5
+        } else {
+            unit = .gram
+            quantity = 100
+        }
+    }
+
     private func log() {
         let resolver = FoodResolver(context: context)
-        let cached = resolver.cache(food)
+        let cached = resolver.cache(resolved)
         let entry = NutritionLog(date: day, meal: meal)
         entry.foodID = cached.id
-        entry.foodName = food.name
+        entry.foodName = resolved.name
         entry.servingGrams = grams
         entry.kcal = scaled.kcal
         entry.proteinG = scaled.proteinG

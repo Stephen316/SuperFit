@@ -46,6 +46,24 @@ final class FoodResolver {
         return out
     }
 
+    /// Fills in USDA household measures, which the search endpoint omits.
+    /// Returns the food unchanged when it already has portions, isn't a USDA
+    /// item, or the request fails — portion data is a convenience, never a
+    /// prerequisite for logging.
+    func withPortions(_ food: ResolvedFood) async -> ResolvedFood {
+        guard food.portions.isEmpty, food.source == .usda,
+              let fdcID = Int(food.id.replacingOccurrences(of: "fdc:", with: "")),
+              let detailed = try? await usda.detail(fdcID: fdcID),
+              !detailed.portions.isEmpty
+        else { return food }
+
+        if let cached = cachedFood(remoteID: food.id) {
+            cached.portionsJSON = try? JSONEncoder().encode(detailed.portions)
+            try? context.save()
+        }
+        return detailed
+    }
+
     /// Persist a remote result locally (dedupes by remoteID).
     @discardableResult
     func cache(_ resolved: ResolvedFood) -> Food {
@@ -62,6 +80,8 @@ final class FoodResolver {
         // search would re-log the food with macros only.
         food.microsJSON = resolved.per100g.micros.isEmpty
             ? nil : try? JSONEncoder().encode(resolved.per100g.micros)
+        food.portionsJSON = resolved.portions.isEmpty
+            ? nil : try? JSONEncoder().encode(resolved.portions)
         context.insert(food)
         try? context.save()
         return food
@@ -115,7 +135,10 @@ extension Supplement {
                                      fatG: s.fatG * factor,
                                      fibreG: s.fibreG * factor,
                                      micros: s.micros.mapValues { $0 * factor }),
-            servingGrams: grams)
+            servingGrams: grams,
+            // The label already names the measure — "30 g scoop", "60 g bar" —
+            // so it makes a better portion than a generic "1 serving".
+            portions: [FoodPortion(label: "1 \(servingLabel)", gramWeight: grams)])
     }
 }
 
@@ -131,6 +154,8 @@ extension Food {
                                               fibreG: fibrePer100g,
                                               micros: microsJSON
                                                   .flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) } ?? [:]),
-                     servingGrams: nil)
+                     servingGrams: nil,
+                     portions: portionsJSON
+                        .flatMap { try? JSONDecoder().decode([FoodPortion].self, from: $0) } ?? [])
     }
 }

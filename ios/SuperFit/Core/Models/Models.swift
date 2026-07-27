@@ -88,6 +88,9 @@ final class Food {
     var fatPer100g: Double = 0
     var fibrePer100g: Double = 0
     var microsJSON: Data?                  // [String: Double] per 100 g
+    /// USDA household measures, JSON [FoodPortion]. Cached so a food logged
+    /// once keeps its "1 medium" option offline and without a second request.
+    var portionsJSON: Data?
     var isFavorite: Bool = false
 
     init(name: String, source: FoodSource = .custom) {

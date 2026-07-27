@@ -32,6 +32,9 @@ Patterns:
 
 ## Nutrition — USDA FoodData Central API
 - Search: `GET https://api.nal.usda.gov/fdc/v1/foods/search?query=…&api_key=…`
+- Detail: `GET https://api.nal.usda.gov/fdc/v1/food/{fdcId}?api_key=…` — the only
+  source of `foodPortions`, so it's fetched lazily when the log sheet opens
+  rather than once per search result.
 - `dataType=Foundation,SR Legacy,Branded` — lab-analyzed generics plus USDA's
   branded set, all carrying full micronutrient data.
 - Nutrient ids are the 1000-series (1008 kcal, 1003 protein, 1089 iron, …);
@@ -44,6 +47,20 @@ entered by the user in Settings → Connected services and stored in the
 **Keychain**. It is never compiled into the binary — a bundled key ships to every
 install and is trivially extracted from the app package. Rate limit is 1,000
 requests/hour per key, which one user's searching will not approach.
+
+**Serving sizes.** `foodPortions` gives household measures — "1 medium" at 118 g,
+"1 cup, sliced" at 150 g — which is how people actually think about food. USDA
+splits each across `amount`, `measureUnit.name` and `modifier` with inconsistent
+population (`measureUnit` is often the literal string "undetermined"), so labels
+are assembled in preference order and anything without a usable gram weight is
+dropped. Branded items carry no `foodPortions` but do have
+`householdServingFullText` alongside `servingSize`, which is used instead.
+
+Portions are cached on the `Food` row, so a food logged once keeps its serving
+options offline and costs no second request. The log sheet then offers portions
+first, then grams and ounces — always both, so nothing is unloggable when a
+source has no portion data. Ounces use the international avoirdupois definition
+(28.349523125 g).
 
 **Resolution order:** local cache → USDA FDC → Open Food Facts. The two network
 sources run concurrently, and either failing leaves the other's results intact.
