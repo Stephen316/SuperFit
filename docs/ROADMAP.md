@@ -14,6 +14,7 @@
 | **5.8** | USDA portion data: household measures ("1 medium", "1 cup, sliced") imported and cached · log in portions, grams or ounces · defaults follow the unit setting | **done** |
 | **5.9** | Account and backup: Sign in with Apple · iCloud sync status surfaced · JSON export/import with merge or replace · sign-out preserves data, erase is separate and confirmed | **done** |
 | **5.10** | Body composition: sync body fat and lean mass from Apple Health · optional measured body-fat entry · Katch-McArdle basal when lean mass is known, Mifflin otherwise | **done** |
+| **5.11** | Historical trends: energy balance (TDEE vs intake, gap shaded) · weight with a rate-of-change disclosure against the guardrails · lean mass, recovery, HRV/RHR, sleep, weekly volume per muscle, e1RM per lift · protein adherence from tapping the protein target · 30d/90d/6m/1y ranges | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -55,9 +56,13 @@ Core/Health/WatchWorkoutMonitor.swift        live session mirroring + finished o
 Core/Services/SyncCoordinator.swift          HealthKit → SwiftData day-keyed upserts
 Core/Services/AggregationService.swift       trend fill, TDEE records, recovery score
 Core/UI/Units.swift                          metric/imperial + keyboard dismiss
+Core/History/HistorySeries.swift             chart series, TDEE backfill, rolling means
 Core/Account/AccountManager.swift            Sign in with Apple, credential in Keychain
 Core/Account/DataArchive.swift               export/import, merge or replace
-Features/Dashboard/DashboardView.swift       cards + settings gear
+Features/Dashboard/DashboardView.swift       cards + settings gear + trends
+Features/History/HistoryView.swift           every trend, 30d-1y ranges
+Features/History/HistoryChart.swift          shared themed chart card
+Features/History/ProteinAdherenceView.swift  daily protein vs target, hit rate
 Features/Settings/SettingsView.swift         account/ToS placeholders, units, profile
 Features/Settings/ConnectedServicesView.swift  Garmin link/unlink
 Features/Settings/AccountView.swift          sign in/out, sync status, backup, erase
@@ -83,4 +88,5 @@ SuperFitTests/SupplementTests.swift          daily/skip/stop logic, catalog inte
 SuperFitTests/ServingOptionTests.swift       portion/gram/ounce conversion
 SuperFitTests/DataArchiveTests.swift         round trip, idempotent merge, erase
 SuperFitTests/BodyCompositionTests.swift     Katch vs Mifflin selection + sensitivity
+SuperFitTests/HistorySeriesTests.swift       backfill, rolling mean, edge-averaged change
 ```

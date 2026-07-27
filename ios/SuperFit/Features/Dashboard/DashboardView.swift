@@ -12,6 +12,8 @@ struct DashboardView: View {
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
 
     @State private var syncing = false
+    @State private var showingHistory = false
+    @State private var showingProtein = false
 
     private var profile: UserProfile? { profiles.first }
     private var latestWeight: Double? { metrics.first?.basisWeightKg }
@@ -55,8 +57,18 @@ struct DashboardView: View {
                 macrosCard
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingHistory = true } label: {
+                        Image(systemName: "chart.xyaxis.line")
+                            .font(.system(size: 19))
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                    .accessibilityLabel("Trends")
+                }
                 ToolbarItem(placement: .topBarTrailing) { SettingsGear() }
             }
+            .sheet(isPresented: $showingHistory) { HistoryView() }
+            .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
             .refreshable { await refresh() }
             .task { await refresh() }
         }
@@ -147,7 +159,11 @@ struct DashboardView: View {
                     .font(Theme.font(15))
                     .foregroundStyle(Theme.textPrimary)
                 HStack(spacing: 0) {
-                    macroColumn("Protein", todayLogs.reduce(0) { $0 + $1.proteinG })
+                    Button { showingProtein = true } label: {
+                        macroColumn("Protein", todayLogs.reduce(0) { $0 + $1.proteinG },
+                                    target: macros?.proteinG)
+                    }
+                    .buttonStyle(.plain)
                     Rectangle().fill(Theme.divider).frame(width: 1, height: 70)
                     macroColumn("Carbs", todayLogs.reduce(0) { $0 + $1.carbsG })
                     Rectangle().fill(Theme.divider).frame(width: 1, height: 70)
@@ -176,11 +192,20 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func macroColumn(_ label: String, _ grams: Double) -> some View {
+    private func macroColumn(_ label: String, _ grams: Double,
+                             target: Double? = nil) -> some View {
         VStack(spacing: 4) {
-            Text(label)
-                .font(Theme.font(16))
-                .foregroundStyle(Theme.textPrimary)
+            HStack(spacing: 3) {
+                Text(label)
+                    .font(Theme.font(16))
+                    .foregroundStyle(Theme.textPrimary)
+                // Only protein is tappable, so only protein gets the chevron.
+                if target != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
             Text("\(Int(grams)) g")
                 .font(Theme.font(30))
                 .foregroundStyle(Theme.textPrimary)

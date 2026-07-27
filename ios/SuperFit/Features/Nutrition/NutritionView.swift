@@ -15,6 +15,7 @@ struct NutritionView: View {
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var averaging = false
+    @State private var showingProtein = false
 
     private var profile: UserProfile? { profiles.first }
 
@@ -162,6 +163,7 @@ struct NutritionView: View {
                 }
             }
             .themedList()
+            .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
         }
     }
 
@@ -172,7 +174,15 @@ struct NutritionView: View {
             if let t = macroTargets {
                 let m = macroTotals
                 NutrientBar(label: "Calories", value: m.kcal, target: t.kcal, unit: "kcal")
-                NutrientBar(label: "Protein", value: m.protein, target: t.proteinG, unit: "g")
+                Button { showingProtein = true } label: {
+                    HStack(spacing: 8) {
+                        NutrientBar(label: "Protein", value: m.protein,
+                                    target: t.proteinG, unit: "g")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
                 NutrientBar(label: "Carbs", value: m.carbs, target: t.carbG, unit: "g")
                 NutrientBar(label: "Fat", value: m.fat, target: t.fatG, unit: "g")
                 NutrientBar(label: "Fibre", value: m.fibre, target: t.fibreG, unit: "g")
