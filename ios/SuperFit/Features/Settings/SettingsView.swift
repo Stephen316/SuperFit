@@ -23,10 +23,11 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section("Account") {
-                    Label("Create account", systemImage: "person.crop.circle.badge.plus")
-                        .foregroundStyle(.secondary)
-                    Text("Sync across devices and connect with friends. Coming soon.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    NavigationLink {
+                        AccountView()
+                    } label: {
+                        Label("Account and backup", systemImage: "person.crop.circle")
+                    }
                 }
 
                 Section("Profile") {
