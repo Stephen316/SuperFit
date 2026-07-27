@@ -26,12 +26,15 @@ final class SyncCoordinator {
         try? await health.requestAuthorization()
 
         async let mass = try? health.bodyMass(in: range)
+        async let bodyFat = try? health.bodyFatPercentage(in: range)
+        async let leanMass = try? health.leanBodyMass(in: range)
         async let activity = try? health.dailyActivity(in: range)
         async let sleep = try? health.sleep(in: range)
         async let rhr = try? health.restingHeartRate(in: range)
         async let hrv = try? health.hrv(in: range)
 
         upsertBodyMass(await mass ?? [])
+        upsertComposition(bodyFat: await bodyFat ?? [], leanMass: await leanMass ?? [])
         upsertActivity(await activity ?? [])
         upsertSleep(await sleep ?? [])
         upsertVitals(rhr: await rhr ?? [], hrv: await hrv ?? [])
@@ -88,6 +91,47 @@ final class SyncCoordinator {
         let existing = fetchDays(BodyMetrics.self, dateKey: \.date)
         for s in samples where !existing.contains(cal.startOfDay(for: s.date)) {
             context.insert(BodyMetrics(date: s.date, weightKg: s.kg, source: .healthKit))
+        }
+    }
+
+    /// Body fat and lean mass land on the same day's weight row. Smart scales
+    /// write these to HealthKit alongside weight, and until now the app read the
+    /// permission but never the data — leaving `MacroCalculator`'s lean-mass
+    /// protein path and the Katch-McArdle prior permanently inert.
+    ///
+    /// Lean mass is taken directly when HealthKit has it, and derived from body
+    /// fat otherwise. Both are stored: body fat is what the user recognises,
+    /// lean mass is what the engines use.
+    private func upsertComposition(bodyFat: [SampleValue], leanMass: [SampleValue]) {
+        let rows = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
+        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
+                               uniquingKeysWith: { a, _ in a })
+
+        // Several readings a day: keep the last, matching the weight behaviour.
+        func lastPerDay(_ samples: [SampleValue]) -> [Date: Double] {
+            var out: [Date: Double] = [:]
+            for s in samples.sorted(by: { $0.date < $1.date }) {
+                out[cal.startOfDay(for: s.date)] = s.value
+            }
+            return out
+        }
+        let fatByDay = lastPerDay(bodyFat)
+        let leanByDay = lastPerDay(leanMass)
+
+        for day in Set(fatByDay.keys).union(leanByDay.keys) {
+            // Composition without a weight for the same day has nothing to
+            // attach to, and inventing a weight row would corrupt the trend.
+            guard let row = byDay[day] else { continue }
+            if let fat = fatByDay[day] {
+                // HealthKit reports a fraction (0.18), the app stores percent.
+                let percent = fat <= 1 ? fat * 100 : fat
+                if (3...70).contains(percent) { row.bodyFatPct = percent }
+            }
+            if let lean = leanByDay[day], lean > 0, lean < row.weightKg {
+                row.leanMassKg = lean
+            } else if let fat = row.bodyFatPct {
+                row.leanMassKg = row.weightKg * (1 - fat / 100)
+            }
         }
     }
 

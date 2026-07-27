@@ -89,7 +89,8 @@ final class AggregationService {
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
-            avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy))
+            avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
+            leanMassKg: metrics.sorted { $0.date > $1.date }.first?.leanMassKg)
         let today = cal.startOfDay(for: .now)
         let existing = (try? context.fetch(FetchDescriptor<MetabolicEstimateRecord>())) ?? []
 

@@ -13,6 +13,7 @@
 | **5.7** | Supplements: 51-item catalog with per-serving nutrients · every-day entries that carry forward · skip/stop without losing history · custom supplements · contributes to macros, micronutrients and the TDEE energy balance · food-like items (bars, shakes, gainers) also searchable from the food diary | **done** |
 | **5.8** | USDA portion data: household measures ("1 medium", "1 cup, sliced") imported and cached · log in portions, grams or ounces · defaults follow the unit setting | **done** |
 | **5.9** | Account and backup: Sign in with Apple · iCloud sync status surfaced · JSON export/import with merge or replace · sign-out preserves data, erase is separate and confirmed | **done** |
+| **5.10** | Body composition: sync body fat and lean mass from Apple Health · optional measured body-fat entry · Katch-McArdle basal when lean mass is known, Mifflin otherwise | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -81,4 +82,5 @@ SuperFitTests/QARegressionTests.swift        review findings, pinned
 SuperFitTests/SupplementTests.swift          daily/skip/stop logic, catalog integrity
 SuperFitTests/ServingOptionTests.swift       portion/gram/ounce conversion
 SuperFitTests/DataArchiveTests.swift         round trip, idempotent merge, erase
+SuperFitTests/BodyCompositionTests.swift     Katch vs Mifflin selection + sensitivity
 ```

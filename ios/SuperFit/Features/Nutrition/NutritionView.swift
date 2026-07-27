@@ -192,6 +192,7 @@ struct NutritionView: View {
                 }
                 if let profile, macroTargets != nil {
                     Text(goalExplanation(profile.goal))
+                    Text(proteinBasisExplanation(profile.goal))
                 }
             }
         }
@@ -240,6 +241,24 @@ struct NutritionView: View {
             }
             .padding(.vertical, 6)
         }
+    }
+
+    /// Says which basis the protein target came from. Lean mass gives a truer
+    /// number than bodyweight — two people at 82 kg with 15% and 30% body fat
+    /// need different amounts — but it's silently different, so it's named.
+    private func proteinBasisExplanation(_ goal: FitnessGoal) -> String {
+        let lean = metrics.first?.leanMassKg
+        let usingLean = lean != nil
+        let gPerKg = profile?.proteinPerKgOverride ?? 0 > 0
+            ? profile!.proteinPerKgOverride
+            : goal.defaultProtein(perLeanMass: usingLean)
+        let figure = gPerKg == gPerKg.rounded()
+            ? String(Int(gPerKg)) : String(format: "%.1f", gPerKg)
+
+        if let lean {
+            return "Protein is \(figure) g per kg of lean mass (\(Int(lean.rounded())) kg), which is more accurate than using total bodyweight."
+        }
+        return "Protein is \(figure) g per kg of bodyweight. Add a measured body fat percentage in Settings → Profile, or let a smart scale sync it, to base it on lean mass instead."
     }
 
     private func goalExplanation(_ goal: FitnessGoal) -> String {

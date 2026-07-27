@@ -64,8 +64,9 @@ struct TDEEEstimate: Sendable {
     let avgIntakeKcal: Double
     let smoothedWeightKg: Double
     let windowDays: Int
-    /// Mifflin-St Jeor basal rate for the profile behind this estimate. Carried
-    /// so `calorieTarget` can refuse to prescribe below it.
+    /// Basal rate behind this estimate — Katch-McArdle when lean mass was known,
+    /// Mifflin-St Jeor otherwise. Carried so `calorieTarget` can refuse to
+    /// prescribe below it.
     var basalKcal: Double = 0
 }
 
@@ -85,14 +86,19 @@ struct MetabolismEngine: Sendable {
         /// the prior becomes passive BMR + measured activity (grossed up for
         /// TEF) and the guessed activity factor is ignored.
         var avgActiveEnergyKcal: Double?
+        /// Lean mass, when known. Switches the basal estimate from
+        /// Mifflin-St Jeor to Katch-McArdle — see `bmr(_:weightKg:)`.
+        var leanMassKg: Double?
 
         init(sex: BiologicalSex, ageYears: Double, heightCm: Double,
-             activity: ActivityBaseline, avgActiveEnergyKcal: Double? = nil) {
+             activity: ActivityBaseline, avgActiveEnergyKcal: Double? = nil,
+             leanMassKg: Double? = nil) {
             self.sex = sex
             self.ageYears = ageYears
             self.heightCm = heightCm
             self.activity = activity
             self.avgActiveEnergyKcal = avgActiveEnergyKcal
+            self.leanMassKg = leanMassKg
         }
     }
 
@@ -307,8 +313,24 @@ struct MetabolismEngine: Sendable {
             : slopes[mid]
     }
 
-    /// Mifflin-St Jeor BMR (kcal/day).
+    /// Basal rate, by whichever equation the available data supports.
+    ///
+    /// **Katch-McArdle when lean mass is known** — `370 + 21.6 x LBM`. It drops
+    /// sex, age and height entirely because lean mass already carries what those
+    /// were proxying for, which is why it beats Mifflin *when the body-fat figure
+    /// is real*: a DEXA scan (+/-1.5% body fat) puts basal within about +/-27
+    /// kcal, against Mifflin's typical +/-180.
+    ///
+    /// **Mifflin-St Jeor otherwise.** Deliberately not a self-estimated body-fat
+    /// range: 5 points of body-fat error moves this by ~89 kcal, so a guessed
+    /// bracket is no better than Mifflin — and people systematically underestimate
+    /// their own body fat, which would inflate lean mass, inflate basal, and raise
+    /// the calorie floor enough to block legitimate deficits. Unbiased noise beats
+    /// biased noise.
     private func bmr(_ p: Prior, weightKg: Double) -> Double {
+        if let lean = p.leanMassKg, lean > 0, lean <= weightKg {
+            return 370 + 21.6 * lean
+        }
         let base = 10 * weightKg + 6.25 * p.heightCm - 5 * p.ageYears
         switch p.sex {
         case .male: return base + 5

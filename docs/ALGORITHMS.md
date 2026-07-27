@@ -88,6 +88,37 @@ the only ground truth that matters — what the scale does given what you ate.
    TDEE (most stable); the 7-day flags fast metabolic shifts (adaptive
    thermogenesis during a long cut).
 
+### Basal rate
+
+**Katch-McArdle when lean mass is known** — `370 + 21.6 x LBM`. It drops sex, age
+and height, because lean mass already carries what those were proxying for.
+**Mifflin-St Jeor otherwise.**
+
+Lean mass comes from Apple Health (smart scales write body fat and lean mass
+alongside weight) or from a measured body-fat figure entered in Profile.
+
+The accuracy gain is real but entirely hostage to the input, since 5 percentage
+points of body-fat error moves basal by ~89 kcal:
+
+| Body-fat source | Input error | Basal error |
+|---|---|---|
+| None — Mifflin-St Jeor | — | ±180 kcal |
+| DEXA | ±1.5% | ±27 kcal |
+| BodPod | ±2.5% | ±44 kcal |
+| Smart scale (BIA) | ±6% | ±106 kcal |
+| Self-estimated bracket | ±7.5% | ±133 kcal |
+
+**Self-estimated ranges are deliberately not offered.** A bracket lands at ±133
+against Mifflin's ±180 — barely better, and the error isn't random: people
+systematically underestimate their own body fat, which inflates lean mass,
+inflates basal, and raises the calorie floor enough to block a legitimate
+deficit. Unbiased noise beats biased noise, so the field accepts a single
+measured number or nothing.
+
+The prior is blended out within 2–3 weeks as measured TDEE gains confidence, so
+this mainly affects the first fortnight and the permanent BMR floor on calorie
+targets.
+
 ### Confidence
 
 `confidence = coverage x dataMaturity x weighInDensity`, clamped to 0-1.
