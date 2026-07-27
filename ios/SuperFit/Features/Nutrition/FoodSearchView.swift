@@ -109,9 +109,21 @@ struct LogFoodView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Query private var supplements: [Supplement]
+    @Query private var supplementEntries: [SupplementEntry]
+
     @State private var grams: Double = 100
+    @State private var confirmingDuplicate = false
 
     private var scaled: NutrientProfile { food.scaled(grams: grams) }
+
+    /// The same product can be reached from the food diary and the supplements
+    /// list, and both count toward the day's totals.
+    private var alreadyTakenAsSupplement: Bool {
+        SupplementIntake.isTakenAsSupplement(name: food.name, on: day,
+                                             entries: supplementEntries,
+                                             supplements: supplements)
+    }
 
     var body: some View {
         NavigationStack {
@@ -147,10 +159,23 @@ struct LogFoodView: View {
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
+            .alert("Already taken today", isPresented: $confirmingDuplicate) {
+                Button("Log anyway") { log() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(food.name) is already logged in your supplements for this day. Logging it here as well will count it twice.")
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Back") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Log") { log() }.disabled(grams <= 0 || grams > 5000)
+                    Button("Log") {
+                        if alreadyTakenAsSupplement {
+                            confirmingDuplicate = true
+                        } else {
+                            log()
+                        }
+                    }
+                    .disabled(grams <= 0 || grams > 5000)
                 }
             }
         }

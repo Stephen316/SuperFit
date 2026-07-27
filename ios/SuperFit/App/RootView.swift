@@ -55,7 +55,13 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .onOpenURL { handleDeepLink($0) }
-        .task { ensureProfile() }
+        .task {
+            ensureProfile()
+            // Seeded here rather than in SupplementsView: food-like supplements
+            // are searchable from the food diary, so they must exist even if
+            // that screen is never opened.
+            SupplementCatalog.seedIfNeeded(context: context)
+        }
     }
 
     private func ensureProfile() {

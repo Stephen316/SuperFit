@@ -6,7 +6,7 @@ import SwiftData
 
 enum MetricSource: String, Codable, Sendable { case manual, healthKit }
 enum MealSlot: String, Codable, CaseIterable, Sendable { case breakfast, lunch, dinner, snack }
-enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom }
+enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom, supplement }
 enum MuscleGroup: String, Codable, CaseIterable, Sendable {
     case chest, back, lowerBack, traps, shoulders, biceps, triceps, forearms
     case quads, hamstrings, glutes, calves, core
@@ -132,6 +132,122 @@ final class NutritionLog {
         set {
             microsRaw = newValue.map { "\($0.key.rawValue):\(($0.value * 1000).rounded() / 1000)" }
         }
+    }
+}
+
+enum SupplementCategory: String, Codable, CaseIterable, Sendable {
+    case protein, vitamins, minerals, performance, health
+
+    var displayName: String {
+        switch self {
+        case .protein: return "Protein and amino acids"
+        case .vitamins: return "Vitamins"
+        case .minerals: return "Minerals and electrolytes"
+        case .performance: return "Performance"
+        case .health: return "General health"
+        }
+    }
+}
+
+/// A supplement and what one serving contributes. Seeded from
+/// `SupplementCatalog`; users can add their own.
+@Model
+final class Supplement {
+    var id: UUID = UUID()
+    var name: String = ""
+    var categoryRaw: String = SupplementCategory.health.rawValue
+    /// e.g. "capsule", "5 g scoop", "30 g scoop" — shown next to the count.
+    var servingLabel: String = "serving"
+    /// Mass of one serving, when it has one. Nil for capsules and tablets.
+    var servingGrams: Double?
+    var kcal: Double = 0
+    var proteinG: Double = 0
+    var carbsG: Double = 0
+    var fatG: Double = 0
+    var fibreG: Double = 0
+    /// Micronutrients per serving, "key:amount" (CloudKit-safe, as elsewhere).
+    var microsRaw: [String] = []
+    var isCustom: Bool = false
+
+    init(name: String, category: SupplementCategory, servingLabel: String,
+         servingGrams: Double? = nil,
+         profile: NutrientProfile = NutrientProfile(), isCustom: Bool = false) {
+        self.name = name
+        self.categoryRaw = category.rawValue
+        self.servingLabel = servingLabel
+        self.servingGrams = servingGrams
+        self.isCustom = isCustom
+        self.kcal = profile.kcal
+        self.proteinG = profile.proteinG
+        self.carbsG = profile.carbsG
+        self.fatG = profile.fatG
+        self.fibreG = profile.fibreG
+        self.microsRaw = profile.micros.map { "\($0.key):\($0.value)" }
+    }
+
+    var category: SupplementCategory {
+        SupplementCategory(rawValue: categoryRaw) ?? .health
+    }
+
+    /// Whether this also belongs in the food diary. A protein bar is a snack by
+    /// any reasonable reading; a vitamin D capsule is not. Needs both a serving
+    /// weight and calories, so 0 kcal powders like creatine stay out of food
+    /// search where they'd only be noise.
+    var isFoodLike: Bool { (servingGrams ?? 0) > 0 && kcal > 0 }
+
+    var perServing: NutrientProfile {
+        var micros: [String: Double] = [:]
+        for entry in microsRaw {
+            let parts = entry.split(separator: ":")
+            guard parts.count == 2, let v = Double(parts[1]) else { continue }
+            micros[String(parts[0])] = v
+        }
+        return NutrientProfile(kcal: kcal, proteinG: proteinG, carbsG: carbsG,
+                               fatG: fatG, fibreG: fibreG, micros: micros)
+    }
+}
+
+/// How a supplement applies to a day.
+///
+/// One model covers three roles so a daily supplement needs no row per day —
+/// materialising a year of creatine would be 365 rows saying the same thing.
+/// A `.daily` entry stands until stopped; `.once` and `.skipped` are the
+/// exceptions layered over it.
+enum SupplementEntryKind: String, Codable, Sendable {
+    case once      // taken on `date` only
+    case daily     // taken every day from `startedOn` until `stoppedOn`
+    case skipped   // a daily supplement deliberately not taken on `date`
+}
+
+@Model
+final class SupplementEntry {
+    var id: UUID = UUID()
+    var supplementID: UUID?
+    var kindRaw: String = SupplementEntryKind.once.rawValue
+    var servings: Double = 1
+    /// Set for `.once` and `.skipped`.
+    var date: Date?
+    /// Set for `.daily`. `stoppedOn` nil means still running.
+    var startedOn: Date?
+    var stoppedOn: Date?
+
+    init(supplementID: UUID, kind: SupplementEntryKind, servings: Double = 1) {
+        self.supplementID = supplementID
+        self.kindRaw = kind.rawValue
+        self.servings = servings
+    }
+
+    var kind: SupplementEntryKind {
+        SupplementEntryKind(rawValue: kindRaw) ?? .once
+    }
+
+    /// Whether a `.daily` entry is in force on `day`.
+    func covers(_ day: Date, calendar: Calendar = .current) -> Bool {
+        guard kind == .daily, let startedOn else { return false }
+        let d = calendar.startOfDay(for: day)
+        if d < calendar.startOfDay(for: startedOn) { return false }
+        if let stoppedOn, d > calendar.startOfDay(for: stoppedOn) { return false }
+        return true
     }
 }
 

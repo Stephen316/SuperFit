@@ -9,7 +9,11 @@ import Foundation
 enum MetabolicRecordAssembler {
     static let minPlausibleIntake = 800.0
 
+    /// `supplementKcal` carries calorie-bearing supplements — protein powder,
+    /// mass gainer, fish oil. Three shakes a day is ~340 kcal; leaving it out
+    /// would inflate measured TDEE by exactly that much.
     static func dailyRecords(logs: [NutritionLog], metrics: [BodyMetrics],
+                             supplementKcal: [Date: Double] = [:],
                              asOf: Date = .now) -> [DailyRecord] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: asOf)
@@ -19,6 +23,12 @@ enum MetabolicRecordAssembler {
             let d = cal.startOfDay(for: log.date)
             guard d < today else { continue }
             intakeByDay[d, default: 0] += log.kcal
+        }
+        // Only added to days that already have food logged: a day whose sole
+        // record is a standing creatine entry was not a logged day, and treating
+        // it as one would drag the intake average toward zero.
+        for (day, kcal) in supplementKcal where intakeByDay[day] != nil {
+            intakeByDay[day, default: 0] += kcal
         }
         intakeByDay = intakeByDay.filter { $0.value >= minPlausibleIntake }
 

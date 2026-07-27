@@ -23,19 +23,23 @@ final class FoodResolver {
         return remote
     }
 
-    /// Cache first so results appear instantly and offline; the two networks
-    /// run concurrently and either failing leaves the others intact.
+    /// Cache and supplements first so results appear instantly and offline; the
+    /// two networks run concurrently and either failing leaves the others intact.
     func search(_ term: String) async -> [ResolvedFood] {
         let trimmed = term.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
 
         let local = localMatches(trimmed)
+        // Protein bars, shakes and gainers are snacks and meals as much as
+        // supplements — someone reaching for "protein bar" in the food diary
+        // should find it there, not only in the supplements list.
+        let supplements = supplementMatches(trimmed)
         async let usdaResults = try? usda.search(trimmed)
         async let offResults = try? off.search(trimmed)
 
         var seen = Set(local.map(\.id))
         var out = local
-        for f in (await usdaResults ?? []) + (await offResults ?? [])
+        for f in supplements + (await usdaResults ?? []) + (await offResults ?? [])
         where seen.insert(f.id).inserted {
             out.append(f)
         }
@@ -71,6 +75,14 @@ final class FoodResolver {
         return try? context.fetch(d).first
     }
 
+    private func supplementMatches(_ term: String) -> [ResolvedFood] {
+        let d = FetchDescriptor<Supplement>(
+            predicate: #Predicate { $0.name.localizedStandardContains(term) })
+        return ((try? context.fetch(d)) ?? [])
+            .compactMap(\.asFood)
+            .sorted { $0.name.count < $1.name.count }
+    }
+
     private func localMatches(_ term: String) -> [ResolvedFood] {
         let d = FetchDescriptor<Food>(
             predicate: #Predicate { $0.name.localizedStandardContains(term) })
@@ -81,6 +93,29 @@ final class FoodResolver {
             }
             .prefix(25)
             .map(\.resolved)
+    }
+}
+
+extension Supplement {
+    /// The same product expressed as a food. Supplement figures are per serving
+    /// while foods are per 100 g, so they're rescaled — and `servingGrams` is
+    /// carried through so "use 1 serving" still means one scoop or one bar.
+    var asFood: ResolvedFood? {
+        guard isFoodLike, let grams = servingGrams, grams > 0 else { return nil }
+        let factor = 100 / grams
+        let s = perServing
+        return ResolvedFood(
+            id: "supplement:\(id.uuidString)",
+            source: .supplement,
+            name: name,
+            brand: "Supplement",
+            per100g: NutrientProfile(kcal: s.kcal * factor,
+                                     proteinG: s.proteinG * factor,
+                                     carbsG: s.carbsG * factor,
+                                     fatG: s.fatG * factor,
+                                     fibreG: s.fibreG * factor,
+                                     micros: s.micros.mapValues { $0 * factor }),
+            servingGrams: grams)
     }
 }
 

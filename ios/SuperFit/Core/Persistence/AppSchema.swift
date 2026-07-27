@@ -10,7 +10,8 @@ enum AppSchema {
         WorkoutTemplate.self, WorkoutTemplateItem.self,
         SleepData.self, DailyVitals.self,
         RecoveryScoreRecord.self, MetabolicEstimateRecord.self,
-        CyclicalPatternRecord.self
+        CyclicalPatternRecord.self,
+        Supplement.self, SupplementEntry.self
     ]
 
     /// True when persistence failed and the app is running on a throwaway

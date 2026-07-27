@@ -7,26 +7,47 @@ struct DiaryView: View {
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
     @Query private var logs: [NutritionLog]
     @Query private var energy: [DailyEnergy]
+    @Query private var supplements: [Supplement]
+    @Query private var supplementEntries: [SupplementEntry]
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var addingTo: MealSlot?
     @State private var showingNutrients = false
+    @State private var showingSupplements = false
 
     private var dayLogs: [NutritionLog] {
         logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
             .sorted { $0.loggedAt < $1.loggedAt }
     }
 
+    private var supplementTotal: NutrientProfile {
+        SupplementIntake.total(on: day, entries: supplementEntries, supplements: supplements)
+    }
+
+    /// Food plus supplements: a protein shake counts the same either way, so the
+    /// bars would understate intake if supplements were shown separately.
     private var totals: NutrientProfile {
-        dayLogs.reduce(into: NutrientProfile()) {
+        var t = dayLogs.reduce(into: NutrientProfile()) {
             $0.kcal += $1.kcal; $0.proteinG += $1.proteinG
             $0.carbsG += $1.carbsG; $0.fatG += $1.fatG; $0.fibreG += $1.fibreG
         }
+        let s = supplementTotal
+        t.kcal += s.kcal; t.proteinG += s.proteinG
+        t.carbsG += s.carbsG; t.fatG += s.fatG; t.fibreG += s.fibreG
+        return t
+    }
+
+    private var supplementCount: Int {
+        SupplementIntake.taken(on: day, entries: supplementEntries, supplements: supplements).count
     }
 
     private var targets: MacroTargets? {
         guard let profile = profiles.first, let w = metrics.first?.basisWeightKg else { return nil }
-        let recs = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics)
+        let recs = MetabolicRecordAssembler.dailyRecords(
+            logs: logs, metrics: metrics,
+            supplementKcal: SupplementIntake.dailyKcal(
+                entries: supplementEntries, supplements: supplements,
+                from: Date.now.addingTimeInterval(-30 * 86_400), to: .now))
         let est = MetabolismEngine().estimate(
             records: recs, windowDays: 30,
             prior: .init(sex: profile.sex, ageYears: profile.ageYears,
@@ -62,6 +83,7 @@ struct DiaryView: View {
                 FoodSearchView(day: day, meal: slot)
             }
             .sheet(isPresented: $showingNutrients) { NutritionView() }
+            .sheet(isPresented: $showingSupplements) { SupplementsView(day: day) }
         }
     }
 
@@ -83,6 +105,19 @@ struct DiaryView: View {
             } label: {
                 Label("Vitamins and minerals", systemImage: "chart.bar.doc.horizontal")
                     .font(.subheadline)
+            }
+            Button {
+                showingSupplements = true
+            } label: {
+                HStack {
+                    Label("Supplements", systemImage: "pills")
+                        .font(.subheadline)
+                    Spacer()
+                    if supplementCount > 0 {
+                        Text("\(supplementCount)")
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
             }
         }
     }

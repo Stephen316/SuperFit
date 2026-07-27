@@ -10,6 +10,8 @@ struct NutritionView: View {
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
     @Query(sort: \MetabolicEstimateRecord.date, order: .reverse) private var estimates: [MetabolicEstimateRecord]
     @Query(sort: \TrainingSession.startedAt, order: .reverse) private var sessions: [TrainingSession]
+    @Query private var supplements: [Supplement]
+    @Query private var supplementEntries: [SupplementEntry]
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var averaging = false
@@ -72,19 +74,44 @@ struct NutritionView: View {
                                                sessionsPerWeek: sessionsPerWeek))
     }
 
+    /// Every calendar day the current view covers — supplements are evaluated
+    /// per day rather than read from logs, so the window has to be enumerated.
+    private var windowDays: [Date] {
+        guard averaging else { return [day] }
+        return (0..<Self.averagingWindowDays).compactMap {
+            Calendar.current.date(byAdding: .day, value: -$0, to: day)
+        }
+    }
+
+    /// Supplements summed across the window. Counted the same as food: a whey
+    /// shake is 25 g of protein whichever screen it was entered on.
+    private var supplementTotal: NutrientProfile {
+        windowDays.reduce(into: NutrientProfile()) { sum, d in
+            let t = SupplementIntake.total(on: d, entries: supplementEntries,
+                                           supplements: supplements)
+            sum.kcal += t.kcal; sum.proteinG += t.proteinG
+            sum.carbsG += t.carbsG; sum.fatG += t.fatG; sum.fibreG += t.fibreG
+            for (k, v) in t.micros { sum.micros[k, default: 0] += v }
+        }
+    }
+
     private var macroTotals: (kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double) {
         let l = windowLogs
-        return (l.reduce(0) { $0 + $1.kcal } / divisor,
-                l.reduce(0) { $0 + $1.proteinG } / divisor,
-                l.reduce(0) { $0 + $1.carbsG } / divisor,
-                l.reduce(0) { $0 + $1.fatG } / divisor,
-                l.reduce(0) { $0 + $1.fibreG } / divisor)
+        let sup = supplementTotal
+        return ((l.reduce(0) { $0 + $1.kcal } + sup.kcal) / divisor,
+                (l.reduce(0) { $0 + $1.proteinG } + sup.proteinG) / divisor,
+                (l.reduce(0) { $0 + $1.carbsG } + sup.carbsG) / divisor,
+                (l.reduce(0) { $0 + $1.fatG } + sup.fatG) / divisor,
+                (l.reduce(0) { $0 + $1.fibreG } + sup.fibreG) / divisor)
     }
 
     private var microTotals: [Micronutrient: Double] {
         var out: [Micronutrient: Double] = [:]
         for log in windowLogs {
             for (nutrient, amount) in log.micros { out[nutrient, default: 0] += amount }
+        }
+        for (key, amount) in supplementTotal.micros {
+            if let nutrient = Micronutrient(rawValue: key) { out[nutrient, default: 0] += amount }
         }
         return out.mapValues { $0 / divisor }
     }
@@ -102,7 +129,8 @@ struct NutritionView: View {
     var body: some View {
         NavigationStack {
             List {
-                if windowLogs.isEmpty {
+                if windowLogs.isEmpty && supplementTotal.kcal == 0
+                    && supplementTotal.micros.isEmpty {
                     emptySection
                 } else {
                     macroSection
@@ -158,6 +186,9 @@ struct NutritionView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if averaging {
                     Text("Averaged over \(Self.averagingWindowDays) days; \(loggedDaysInWindow) had food logged. Unlogged days count as zero, so patchy logging reads low.")
+                }
+                if supplementTotal.kcal > 0 || !supplementTotal.micros.isEmpty {
+                    Text("Includes supplements taken\(averaging ? " during this window" : " today").")
                 }
                 if let profile, macroTargets != nil {
                     Text(goalExplanation(profile.goal))

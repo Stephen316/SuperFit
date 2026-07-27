@@ -76,7 +76,15 @@ final class AggregationService {
         let metrics = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
         guard !metrics.isEmpty else { return }
 
-        let records = MetabolicRecordAssembler.dailyRecords(logs: logs, metrics: metrics)
+        let supplements = (try? context.fetch(FetchDescriptor<Supplement>())) ?? []
+        let entries = (try? context.fetch(FetchDescriptor<SupplementEntry>())) ?? []
+        let earliest = metrics.map(\.date).min() ?? .now
+        let supplementKcal = SupplementIntake.dailyKcal(
+            entries: entries, supplements: supplements,
+            from: max(earliest, Date.now.addingTimeInterval(-120 * 86_400)), to: .now)
+
+        let records = MetabolicRecordAssembler.dailyRecords(
+            logs: logs, metrics: metrics, supplementKcal: supplementKcal)
         let energy = (try? context.fetch(FetchDescriptor<DailyEnergy>())) ?? []
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,
