@@ -1,0 +1,72 @@
+# XcodeGen spec — the Xcode project is generated from this file, not committed.
+#
+# A hand-maintained .xcodeproj drifts from the repo: files added on another
+# machine don't appear until someone drags them in, deleted files linger as red
+# references, and settings like the deployment target live only in a binary blob
+# nobody reviews. Generating it means the sources on disk are the sources in the
+# project, always.
+#
+# Run `xcodegen generate` from the repo root (brew install xcodegen), then open
+# SuperFit.xcodeproj. Re-run after any git pull that adds or removes files.
+
+name: SuperFit
+
+options:
+  bundleIdPrefix: com.superfit
+  createIntermediateGroups: true
+  # iOS 17 is a hard floor, not a preference: @Observable, safeAreaPadding and
+  # scrollContentBackground are all 17-only. Below it the app will not compile.
+  deploymentTarget:
+    iOS: "17.0"
+
+settings:
+  base:
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: NO
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  SuperFit:
+    type: application
+    platform: iOS
+    # Whole-folder glob: new files are picked up on the next generate, and a
+    # deleted file simply stops existing rather than becoming a broken reference.
+    sources:
+      - path: ios/SuperFit
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        INFOPLIST_FILE: ios/SuperFit/SupportingFiles/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ios/SuperFit/SupportingFiles/SuperFit.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.superfit.app
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    entitlements:
+      path: ios/SuperFit/SupportingFiles/SuperFit.entitlements
+
+  SuperFitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ios/SuperFitTests
+    dependencies:
+      - target: SuperFit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.superfit.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  SuperFit:
+    build:
+      targets:
+        SuperFit: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SuperFitTests

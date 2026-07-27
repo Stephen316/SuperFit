@@ -19,6 +19,9 @@ locks the math down before UI is layered on top.
 
 ## File map (implemented)
 ```
+project.yml                                  XcodeGen spec (.xcodeproj generated)
+ios/SuperFit/SupportingFiles/Info.plist      usage strings, URL scheme, launch
+ios/SuperFit/SupportingFiles/SuperFit.entitlements  HealthKit + CloudKit
 App/SuperFitApp.swift                        entry + ModelContainer
 App/RootView.swift                           tab navigation
 Core/Persistence/AppSchema.swift             SwiftData container config
