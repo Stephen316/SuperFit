@@ -5,98 +5,30 @@ struct FoodSearchView: View {
     let day: Date
     let meal: MealSlot
 
-    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
-    @State private var query = ""
-    @State private var results: [ResolvedFood] = []
-    @State private var searching = false
-    @State private var scanning = false
-    @State private var creatingCustom = false
     @State private var logging: ResolvedFood?
-    @State private var searchTask: Task<Void, Never>?
+    @State private var loggingMeal: SavedMeal?
 
     var body: some View {
         NavigationStack {
-            List {
-                if results.isEmpty && !searching && query.count >= 2 {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No matches").foregroundStyle(.secondary)
-                        if !USDAClient().hasKey {
-                            Text("Add a USDA API key in Settings → Connected services to search the full food database. Without it only Open Food Facts and your own foods are searched.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Text("Food search needs a connection. Foods you've logged before still work offline — or scan a barcode or add a custom food.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                ForEach(results) { food in
-                    Button { logging = food } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(food.name).foregroundStyle(.primary)
-                            HStack(spacing: 6) {
-                                if let brand = food.brand { Text(brand) }
-                                Text("\(Int(food.per100g.kcal)) kcal · P \(Int(food.per100g.proteinG))g per 100g")
-                            }
-                            .font(.caption).foregroundStyle(.secondary)
-                        }
+            FoodPickerView(showsBarcode: true, showsMeals: true,
+                           onPickMeal: { loggingMeal = $0 },
+                           onPick: { logging = $0 })
+                .navigationTitle("Add to \(meal.rawValue.capitalized)")
+                .navigationBarTitleDisplayMode(.inline)
+                .themedList()
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Cancel") { dismiss() }
                     }
                 }
-            }
-            .searchable(text: $query, prompt: "Search foods")
-            .overlay { if searching { ProgressView() } }
-            .navigationTitle("Add to \(meal.rawValue.capitalized)")
-            .navigationBarTitleDisplayMode(.inline)
-            .themedList()
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
+                .sheet(item: $logging) { food in
+                    LogFoodView(food: food, day: day, meal: meal) { dismiss() }
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { scanning = true } label: { Image(systemName: "barcode.viewfinder") }
-                    Button { creatingCustom = true } label: { Image(systemName: "plus") }
+                .sheet(item: $loggingMeal) { saved in
+                    MealBuilderView(existing: saved, logTo: (day: day, slot: meal))
                 }
-            }
-            .onChange(of: query) { runSearch() }
-            .sheet(isPresented: $scanning) { scannerSheet }
-            .sheet(isPresented: $creatingCustom) {
-                CustomFoodView { food in
-                    logging = food
-                }
-            }
-            .sheet(item: $logging) { food in
-                LogFoodView(food: food, day: day, meal: meal) { dismiss() }
-            }
-        }
-    }
-
-    private var scannerSheet: some View {
-        NavigationStack {
-            BarcodeScannerView { code in
-                scanning = false
-                Task {
-                    searching = true
-                    logging = await FoodResolver(context: context).byBarcode(code)
-                    searching = false
-                }
-            }
-            .navigationTitle("Scan barcode")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-        }
-    }
-
-    private func runSearch() {
-        searchTask?.cancel()
-        let term = query
-        searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(400))   // debounce
-            guard !Task.isCancelled else { return }
-            searching = true
-            results = await FoodResolver(context: context).search(term)
-            searching = false
         }
     }
 }

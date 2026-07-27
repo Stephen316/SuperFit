@@ -15,6 +15,7 @@
 | **5.9** | Account and backup: Sign in with Apple · iCloud sync status surfaced · JSON export/import with merge or replace · sign-out preserves data, erase is separate and confirmed | **done** |
 | **5.10** | Body composition: sync body fat and lean mass from Apple Health · optional measured body-fat entry · Katch-McArdle basal when lean mass is known, Mifflin otherwise | **done** |
 | **5.11** | Historical trends: energy balance (TDEE vs intake, gap shaded) · weight with a rate-of-change disclosure against the guardrails · lean mass, recovery, HRV/RHR, sleep, weekly volume per muscle, e1RM per lift · protein adherence from tapping the protein target · 30d/90d/6m/1y ranges | **done** |
+| **5.12** | Saved meals: builder that persists as ingredients are added, each searched through the shared food search · label entry per serving or per 100 g · "My foods" filter · swipe-to-delete foods and meals from search | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -48,7 +49,8 @@ Core/Nutrition/Micronutrient.swift           14 micros/markers, units, floor vs 
 Core/Nutrition/NutrientTargets.swift         RDAs adjusted for sex/age/goal/training
 Core/Nutrition/SupplementCatalog.swift       51 supplements w/ per-serving nutrients
 Core/Nutrition/SupplementIntake.swift        resolves daily/one-off/skip into a day
-Core/Nutrition/FoodResolver.swift            cache → USDA FDC → OFF
+Core/Nutrition/FoodResolver.swift            cache → USDA FDC → OFF, delete
+Core/Nutrition/MealComposer.swift            meal totals, missing-ingredient handling
 Core/Nutrition/BarcodeScanner.swift          AVFoundation scanner + sim fallback
 Core/Training/TrainingAnalytics.swift        tension-weighted volume + e1RM progression
 Core/Training/ExerciseLibrary.swift          56-exercise catalog w/ 1-5 tension scores
@@ -72,7 +74,9 @@ Features/Sleep/SleepView.swift               duration, stages, consistency, HRV 
 Features/Nutrition/DiaryView.swift           meal sections, targets vs intake
 Features/Nutrition/NutritionView.swift       macros + micros vs targets, 7-day average
 Features/Nutrition/SupplementsView.swift     day's supplements, catalog picker, custom
-Features/Nutrition/FoodSearchView.swift      search / scan / log portion
+Features/Nutrition/FoodPickerView.swift      shared search: filter, swipe delete, meals
+Features/Nutrition/FoodSearchView.swift      log portion on top of the picker
+Features/Nutrition/MealBuilderView.swift     build/edit/log a saved meal
 Features/Nutrition/CustomFoodView.swift      custom foods w/ consistency check
 Features/Training/TrainingView.swift         start/history, weekly volume, strength
 Features/Training/ActiveWorkoutView.swift    set logging, RIR, rest timer, picker
@@ -89,4 +93,5 @@ SuperFitTests/ServingOptionTests.swift       portion/gram/ounce conversion
 SuperFitTests/DataArchiveTests.swift         round trip, idempotent merge, erase
 SuperFitTests/BodyCompositionTests.swift     Katch vs Mifflin selection + sensitivity
 SuperFitTests/HistorySeriesTests.swift       backfill, rolling mean, edge-averaged change
+SuperFitTests/MealComposerTests.swift        meal totals, deleted ingredients, label conversion
 ```

@@ -259,20 +259,32 @@ final class SupplementEntry {
 final class SavedMeal {
     var id: UUID = UUID()
     var name: String = ""
+    var createdAt: Date = Date()
+    var lastLoggedAt: Date?
     @Relationship(deleteRule: .cascade) var items: [SavedMealItem]? = []
 
     init(name: String) { self.name = name }
+
+    var orderedItems: [SavedMealItem] {
+        (items ?? []).sorted { $0.addedAt < $1.addedAt }
+    }
 }
 
 @Model
 final class SavedMealItem {
+    var id: UUID = UUID()
     var foodID: UUID?
+    /// Display snapshot, so a meal still reads sensibly if the food it points
+    /// at is later deleted from the food list.
+    var foodName: String?
     var servingGrams: Double = 0
+    var addedAt: Date = Date()
     var meal: SavedMeal?
 
-    init(foodID: UUID, servingGrams: Double) {
+    init(foodID: UUID, servingGrams: Double, foodName: String? = nil) {
         self.foodID = foodID
         self.servingGrams = servingGrams
+        self.foodName = foodName
     }
 }
 

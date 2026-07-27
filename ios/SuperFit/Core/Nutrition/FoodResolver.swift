@@ -64,6 +64,32 @@ final class FoodResolver {
         return detailed
     }
 
+    /// The stored row behind a search result, if there is one.
+    ///
+    /// Remote hits that have never been logged have no local row — nothing to
+    /// delete, and the UI shouldn't offer to.
+    func storedFood(for resolved: ResolvedFood) -> Food? {
+        if let cached = cachedFood(remoteID: resolved.id) { return cached }
+        guard let uuid = UUID(uuidString: resolved.id) else { return nil }
+        var d = FetchDescriptor<Food>(predicate: #Predicate { $0.id == uuid })
+        d.fetchLimit = 1
+        return try? context.fetch(d).first
+    }
+
+    /// Removes a food from the local list.
+    ///
+    /// Logged entries are untouched: `NutritionLog` snapshots macros at log
+    /// time, so deleting the food it came from cannot rewrite history. Saved
+    /// meals referencing it will report a missing ingredient rather than
+    /// silently under-counting — see `MealComposer`.
+    @discardableResult
+    func delete(_ resolved: ResolvedFood) -> Bool {
+        guard let food = storedFood(for: resolved) else { return false }
+        context.delete(food)
+        try? context.save()
+        return true
+    }
+
     /// Persist a remote result locally (dedupes by remoteID).
     @discardableResult
     func cache(_ resolved: ResolvedFood) -> Food {
