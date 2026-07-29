@@ -18,6 +18,8 @@
 | **5.12** | Saved meals: builder that persists as ingredients are added, each searched through the shared food search · label entry per serving or per 100 g · "My foods" filter · swipe-to-delete foods and meals from search | **done** |
 | **5.13** | Multi-sport workouts: 40-activity taxonomy across 7 groups · finished watch workouts persisted with every metric HealthKit exposes (distance, HR avg/max/min, elevation, cadence, power, swim strokes, laps, source device) · idempotent import keyed on the source's own ID, skipping watch strength blocks that duplicate a logged gym session · Garmin `/workouts` enrichment for fields Apple Health drops · activity picker on "New workout" offering start-live or import-from-watch · GPS-tracked live cardio · cardio-only ACWR from TRIMP, reported separately from lifting | **done** |
 | **5.14** | Food search reach: USDA Survey (FNDDS) added for foods as eaten · Open Food Facts moved off the deprecated CGI endpoint to the current search service · results sorted by device region so the local shelf leads without hiding imports · "Load more" pagination across both sources | **done** |
+| **5.15** | Food region: three-tier country sort (chosen country → market-adjacent countries OR'd into one request → global) · country selector in Settings, defaulting to the device region and naming it · store chips follow the selection | **done** |
+| **5.16** | Source-blind relevance: results ranked by provenance (own foods → generic whole foods → your country → neighbours → rest) rather than by which API returned them · provenance from Open Food Facts `countries_tags` and USDA `dataType`/`marketCountry` | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -52,6 +54,9 @@ Core/Nutrition/NutrientTargets.swift         RDAs adjusted for sex/age/goal/trai
 Core/Nutrition/SupplementCatalog.swift       51 supplements w/ per-serving nutrients
 Core/Nutrition/SupplementIntake.swift        resolves daily/one-off/skip into a day
 Core/Nutrition/FoodResolver.swift            cache → USDA FDC → OFF, delete
+Core/Nutrition/FoodRegion.swift              countries, tags, market-adjacency
+Core/Nutrition/FoodRelevance.swift           provenance ranking, source-blind
+Core/Nutrition/StoreBrand.swift              retailer own-brand filters per region
 Core/Nutrition/MealComposer.swift            meal totals, missing-ingredient handling
 Core/Nutrition/BarcodeScanner.swift          AVFoundation scanner + sim fallback
 Core/Training/TrainingAnalytics.swift        tension-weighted volume + e1RM progression

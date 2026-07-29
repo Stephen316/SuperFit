@@ -56,19 +56,41 @@ ranges outside the US and no tag to filter on, so including it would only dilute
 the results. Country sorting is skipped too — Tesco's own brand is British by
 definition, so the second request buys nothing.
 
-**Country sorting, not filtering.** Results are merged from two concurrent
-queries — one restricted to the device region's `countries_tags`, one unrestricted
-— with local hits first and duplicates dropped. Unweighted, a UK search for
-"chicken breast" returns a Spanish product above Tesco's; weighted, the top three
-are Tesco, Sainsbury's and Morrisons. A hard filter was rejected because it hides
-imported or holiday purchases with no signal that the product exists at all.
+**Country sorting, not filtering — in three tiers.** Results merge from three
+concurrent queries, duplicates dropped, in precision order:
 
-Country comes from `Locale.current.region`, not GPS: no permission prompt, works
-with no signal, and it doesn't switch catalogue the moment you land abroad. Tags
-are English lowercase names (`united-kingdom`), not ISO codes, so
-`countryTag(for:)` maps the ones with meaningful catalogues and passes anything
-else through lowercased — an unmapped region searches unweighted rather than
-sending a tag matching nothing.
+1. the chosen country's `countries_tags`
+2. market-adjacent countries, OR'd into a single request
+3. unrestricted
+
+Unweighted, a UK search for "chicken breast" returns a Spanish product above
+Tesco's; weighted, the top three are Tesco, Sainsbury's and Morrisons. A hard
+filter was rejected because it hides imported or holiday purchases with no signal
+the product exists at all.
+
+The neighbour tier matters most where a country's own coverage is thin. Measured:
+"milk" restricted to Ireland returns **2,125** products; the UK tier behind it adds
+**7,021**. Without it an Irish user sees a fraction of what's on their shelves,
+because the same chains span both. Adjacency means "realistically the same
+shelves", not a shared border.
+
+Several tags OR into one request rather than one per country — verified live, a
+5-way OR for Germany's neighbours returns results normally. A country with no
+listed neighbours costs two requests, not three.
+
+**Region selection.** `Settings → Food database` sets the country; the default
+follows `Locale.current.region` and names what it resolved to, so the choice isn't
+blind. An explicit setting wins, and an unknown stored code falls back to the
+device rather than leaving search silently unweighted. It also drives which
+retailers the store chips offer, so both move together.
+
+Not GPS, deliberately: a location prompt on the food tab reads as invasive for a
+grocery search, it needs a signal, and it breaks the moment you travel — your
+cupboard doesn't change nationality because you're abroad for a week. The region
+*setting* is the better signal for "whose products am I eating", which is the
+actual question. Tags are English lowercase names (`united-kingdom`), not ISO
+codes; unmapped regions search unweighted rather than sending a tag matching
+nothing.
 
 ## Nutrition — USDA FoodData Central API
 - Search: `GET https://api.nal.usda.gov/fdc/v1/foods/search?query=…&api_key=…`
@@ -135,6 +157,60 @@ source has no portion data. Ounces use the international avoirdupois definition
 
 **Resolution order:** local cache → USDA FDC → Open Food Facts. The two network
 sources run concurrently, and either failing leaves the other's results intact.
+
+**Ranking is by product locality, not by source.** `FoodRelevance` bands every
+result and sorts:
+
+| Band | What it is |
+|---|---|
+| 1 | Your own foods — logged before, or custom |
+| 2 | Generic whole foods — no supplier, so no country |
+| 3 | Sold in your country |
+| 4 | Sold in a neighbouring country |
+| 5 | Everything else |
+
+The sources have no standing of their own. USDA happens to hold the lab generics
+and Open Food Facts happens to hold British supermarket own-brands; that's an
+accident of who catalogued what and says nothing about which result the user
+wants. Concatenating source-by-source put **up to 50 USDA entries, mostly US
+branded, above every Tesco product** for a UK user — the results were there,
+just unreachable.
+
+Generic whole foods rank above **every** branded product, including the local
+shelf. Two reasons: most logging is of ingredients rather than specific packets,
+and the generic entries are the better data — Foundation and SR Legacy are
+lab-analysed with full micronutrient profiles, where a crowd-sourced branded entry
+often carries macros alone. The country bands exist for when you do want the
+specific packet.
+
+The generic check runs *before* the country bands, so a generic that a source
+happens to tag with a country isn't pulled down into a retail band by it.
+
+Provenance comes from Open Food Facts `countries_tags` (verified present on 10/10
+live hits, stripped of the `en:` prefix) and, for USDA, `dataType` for generic
+versus branded plus `marketCountry` mapped onto the same tag vocabulary. An absent
+market leaves a food unattributed rather than asserting a country it never
+claimed — unattributed can't be ranked local, but isn't assumed foreign either.
+
+The sort carries an explicit position tiebreak rather than relying on
+`sorted(by:)`, which Swift does not document as stable: without it, identical
+searches would reshuffle.
+
+**Request cost and debounce.** One completed search is **5–7 HTTP requests**: USDA's
+stable datatypes (1), the survey dataset with its retries (1–3), and three Open
+Food Facts country tiers (3).
+
+Typing fires a task per keystroke, but each cancels the previous and waits before
+touching the network, so a normal word costs one search rather than one per letter.
+The wait is **600 ms**, raised from 400: at 400 an ordinary mid-word pause fired its
+own search, so one word could cost three of the above — 15–21 requests.
+
+The minimum query is **3 characters**, from `FoodSearch.minimumQueryLength`. A
+two-letter term almost never means what the user intended and cost a full search.
+The constant is shared because the guard appears in the resolver, both clients and
+the empty-state text — four copies that would otherwise drift and let a query reach
+one source but not another. A store chip is exempt: browsing a retailer's range is
+a legitimate search with no term at all.
 
 **Pagination.** "Load more" appends the next page from both sources, deduplicated
 against what's already shown. Cached rows and supplements appear on page 1 only —

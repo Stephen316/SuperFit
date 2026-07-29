@@ -18,6 +18,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @AppStorage(FoodRegionSetting.storageKey) private var foodRegionRaw = FoodRegionSetting.automatic
 
     var body: some View {
         NavigationStack {
@@ -56,6 +57,23 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                }
+
+                Section {
+                    Picker("Country", selection: $foodRegionRaw) {
+                        Text(FoodRegionSetting.automaticLabel())
+                            .tag(FoodRegionSetting.automatic)
+                        ForEach(FoodRegion.all) { region in
+                            Text(region.displayName).tag(region.code)
+                        }
+                    }
+                } header: {
+                    Text("Food database")
+                } footer: {
+                    Text("Ranks that country's products first in food search, then "
+                         + "neighbouring countries, then everywhere else. Nothing is "
+                         + "hidden — set this to where you buy your food, which isn't "
+                         + "always where your phone is configured.")
                 }
 
                 Section("Data sources") {

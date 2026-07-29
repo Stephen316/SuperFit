@@ -33,74 +33,90 @@ struct OpenFoodFactsClient: Sendable {
     /// on two of three consecutive probes while the new endpoint answered every
     /// time — so it stays only as a fallback for when the new one is down.
     ///
-    /// Results are **sorted** by the user's country, not filtered to it.
+    /// Results are **sorted** by country in three tiers, not filtered to one.
+    ///
+    /// 1. the chosen country
+    /// 2. market-adjacent countries
+    /// 3. everything else
     ///
     /// The database is global, so an unweighted search for "chicken breast" from
     /// the UK returns a Spanish product above Tesco's — measured, not assumed.
     /// The local catalogue is what someone logging their weekly shop needs first.
     ///
-    /// Sorting rather than filtering matters: a hard country filter would hide
-    /// anything bought abroad or imported, and the user would have no way to know
-    /// the product was in the database at all. Both queries run concurrently and
-    /// merge local-first, so the local shelf comes first and the rest still
-    /// follows.
+    /// The neighbour tier matters most where a country's own coverage is thin.
+    /// Measured: "milk" restricted to Ireland returns 2,125 products; Ireland or
+    /// the UK returns 9,000, because the same chains span both. Without it an
+    /// Irish user sees a quarter of what's actually on their shelves.
     ///
-    /// Country comes from the device region, not GPS. It needs no permission,
-    /// works with no signal, and doesn't flip to the wrong catalogue the moment
-    /// you land somewhere on holiday — your groceries don't change nationality
-    /// with your location.
+    /// Sorting rather than filtering matters: a hard country filter would hide
+    /// anything imported or bought abroad, with no way to tell the product was in
+    /// the database at all. The tiers run concurrently and merge in order, so
+    /// precision leads and nothing is lost.
     func search(_ term: String, page: Int = 1,
-                region: String? = Locale.current.region?.identifier,
+                region: FoodRegion? = nil,
                 brand: StoreBrand? = nil) async throws -> SearchPage {
         let query = String(term.prefix(80)).trimmingCharacters(in: .whitespaces)
-        guard query.count >= 2 || brand != nil else {
+        guard query.count >= FoodSearch.minimumQueryLength || brand != nil else {
             return SearchPage(foods: [], hasMore: false)
         }
 
-        // A store filter already narrows hard enough that country sorting adds
-        // nothing but a second request — Tesco's own brand is British by
-        // definition.
+        // A store filter already narrows hard enough that country tiers add
+        // nothing but extra requests — Tesco's own brand is British by definition.
         if let brand {
             if let filtered = try? await searchAlicious(query, page: page,
-                                                        region: nil, brand: brand) {
+                                                        tags: [], brand: brand) {
                 return filtered
             }
             return SearchPage(foods: [], hasMore: false)
         }
 
         guard let region else {
-            if let global = try? await searchAlicious(query, page: page, region: nil) {
+            if let global = try? await searchAlicious(query, page: page, tags: []) {
                 return global
             }
             return try await searchLegacy(query, page: page)
         }
 
-        async let localTask = try? searchAlicious(query, page: page, region: region)
-        async let globalTask = try? searchAlicious(query, page: page, region: nil)
+        let neighbourTags = region.neighbourTags
+        async let localTask = try? searchAlicious(query, page: page, tags: [region.tag])
+        async let neighbourTask = neighbourTags.isEmpty
+            ? nil : try? searchAlicious(query, page: page, tags: neighbourTags)
+        async let globalTask = try? searchAlicious(query, page: page, tags: [])
+
         let local = await localTask
+        let neighbours = await neighbourTask
         let global = await globalTask
 
-        guard local != nil || global != nil else {
+        guard local != nil || neighbours != nil || global != nil else {
             return try await searchLegacy(query, page: page)
         }
 
         var seen = Set<String>()
         var merged: [ResolvedFood] = []
-        for food in (local?.foods ?? []) + (global?.foods ?? [])
+        for food in (local?.foods ?? []) + (neighbours?.foods ?? []) + (global?.foods ?? [])
         where seen.insert(food.id).inserted {
             merged.append(food)
         }
         return SearchPage(foods: merged,
-                          hasMore: (local?.hasMore ?? false) || (global?.hasMore ?? false))
+                          hasMore: (local?.hasMore ?? false)
+                              || (neighbours?.hasMore ?? false)
+                              || (global?.hasMore ?? false))
     }
 
-    private func searchAlicious(_ query: String, page: Int, region: String?,
+    /// One tier. Several tags are OR'd, which is how the neighbour tier is
+    /// expressed as a single request rather than one per country.
+    private func searchAlicious(_ query: String, page: Int, tags: [String],
                                 brand: StoreBrand? = nil) async throws -> SearchPage {
         var comps = URLComponents(string: "https://search.openfoodfacts.org/search")!
         // Tags go in the query string rather than as filter parameters; this
         // service takes a single Lucene-style `q`.
         var q = query
-        if let region { q += " countries_tags:\"en:\(countryTag(for: region))\"" }
+        if tags.count == 1 {
+            q += " countries_tags:\"en:\(tags[0])\""
+        } else if tags.count > 1 {
+            let clause = tags.map { "countries_tags:\"en:\($0)\"" }.joined(separator: " OR ")
+            q += " (\(clause))"
+        }
         if let brand { q += " brands_tags:\"\(brand.tag)\"" }
         q = q.trimmingCharacters(in: .whitespaces)
         comps.queryItems = [
@@ -108,7 +124,7 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "page", value: String(page)),
             .init(name: "page_size", value: String(Self.pageSize)),
             .init(name: "fields",
-                  value: "code,product_name,brands,nutriments,serving_quantity"),
+                  value: "code,product_name,brands,nutriments,serving_quantity,countries_tags"),
         ]
         guard let url = comps.url else { throw URLError(.badURL) }
         let response: AliciousResponse = try await session.getJSON(url)
@@ -129,7 +145,7 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "json", value: "1"),
             .init(name: "page_size", value: String(Self.pageSize)),
             .init(name: "page", value: String(page)),
-            .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity"),
+            .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity,countries_tags"),
         ]
         guard let url = comps.url else { throw URLError(.badURL) }
         let response: OFFSearchResponse = try await session.getJSON(url)
@@ -141,36 +157,6 @@ struct OpenFoodFactsClient: Sendable {
         return SearchPage(foods: foods, hasMore: foods.count >= Self.pageSize)
     }
 
-    /// ISO region code → the Open Food Facts country tag slug.
-    ///
-    /// Tags are English lowercase names, not ISO codes. Only the countries with
-    /// meaningful catalogues are mapped; anything else searches unweighted, which
-    /// is the behaviour before this existed.
-    func countryTag(for region: String) -> String {
-        switch region.uppercased() {
-        case "GB": return "united-kingdom"
-        case "US": return "united-states"
-        case "IE": return "ireland"
-        case "FR": return "france"
-        case "DE": return "germany"
-        case "ES": return "spain"
-        case "IT": return "italy"
-        case "NL": return "netherlands"
-        case "BE": return "belgium"
-        case "CH": return "switzerland"
-        case "AT": return "austria"
-        case "PT": return "portugal"
-        case "PL": return "poland"
-        case "SE": return "sweden"
-        case "NO": return "norway"
-        case "DK": return "denmark"
-        case "FI": return "finland"
-        case "CA": return "canada"
-        case "AU": return "australia"
-        case "NZ": return "new-zealand"
-        default: return region.lowercased()
-        }
-    }
 }
 
 /// Response from Open Food Facts' current search service.
@@ -192,17 +178,19 @@ private struct AliciousHit: Decodable {
     let brands: [String]?
     let nutriments: OFFNutriments?
     let servingQuantity: StringOrDouble?
+    let countriesTags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case code, brands, nutriments
         case productName = "product_name"
         case servingQuantity = "serving_quantity"
+        case countriesTags = "countries_tags"
     }
 
     func resolved(id: String) -> ResolvedFood? {
         guard let name = productName, !name.isEmpty,
               let n = nutriments, let kcal = n.energyKcal100g else { return nil }
-        return ResolvedFood(
+        var food = ResolvedFood(
             id: id, source: .openFoodFacts, name: name,
             brand: brands?.first?.trimmingCharacters(in: .whitespaces),
             per100g: NutrientProfile(kcal: kcal,
@@ -211,6 +199,19 @@ private struct AliciousHit: Decodable {
                                      fatG: n.fat100g ?? 0,
                                      fibreG: n.fiber100g ?? 0),
             servingGrams: servingQuantity?.value)
+        food.countryTags = OFFCountryTag.strip(countriesTags)
+        return food
+    }
+}
+
+/// Open Food Facts prefixes country tags with a language code — "en:ireland".
+/// Stored without it so a tag compares directly against `FoodRegion.tag`.
+enum OFFCountryTag {
+    static func strip(_ tags: [String]?) -> [String] {
+        (tags ?? []).map { tag in
+            guard let colon = tag.firstIndex(of: ":") else { return tag }
+            return String(tag[tag.index(after: colon)...])
+        }
     }
 }
 
@@ -247,17 +248,19 @@ private struct OFFProduct: Decodable {
     let brands: String?
     let nutriments: OFFNutriments?
     let servingQuantity: StringOrDouble?
+    let countriesTags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case code, brands, nutriments
         case productName = "product_name"
         case servingQuantity = "serving_quantity"
+        case countriesTags = "countries_tags"
     }
 
     func resolved(id: String) -> ResolvedFood? {
         guard let name = productName, !name.isEmpty,
               let n = nutriments, let kcal = n.energyKcal100g else { return nil }
-        return ResolvedFood(
+        var food = ResolvedFood(
             id: id, source: .openFoodFacts, name: name,
             brand: brands?.components(separatedBy: ",").first?
                 .trimmingCharacters(in: .whitespaces),
@@ -267,6 +270,8 @@ private struct OFFProduct: Decodable {
                                      fatG: n.fat100g ?? 0,
                                      fibreG: n.fiber100g ?? 0),
             servingGrams: servingQuantity?.value)
+        food.countryTags = OFFCountryTag.strip(countriesTags)
+        return food
     }
 }
 

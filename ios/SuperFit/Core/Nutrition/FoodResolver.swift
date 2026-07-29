@@ -1,6 +1,18 @@
 import Foundation
 import SwiftData
 
+/// Shared limits for food search, in one place because the guard is repeated in
+/// the resolver, both API clients, and the empty-state text — four copies that
+/// would otherwise drift apart and let a query reach one source but not another.
+enum FoodSearch {
+    /// Shortest query that reaches the network.
+    ///
+    /// Three, not two: a two-letter term almost never means what the user
+    /// intended, and one completed search costs 5–7 requests across the two
+    /// sources' datasets and country tiers.
+    static let minimumQueryLength = 3
+}
+
 /// Resolution order: local cache → USDA FoodData Central → Open Food Facts.
 /// Anything fetched is cached as a Food row, so previously logged foods still
 /// resolve offline even though search itself needs a connection.
@@ -35,9 +47,10 @@ final class FoodResolver {
     /// Local rows and supplements are page-1 only: they're already complete, and
     /// repeating them on every page would push the remote results the user is
     /// paging *for* further down each time.
-    func search(_ term: String, page: Int = 1, brand: StoreBrand? = nil) async -> SearchPage {
+    func search(_ term: String, page: Int = 1, brand: StoreBrand? = nil,
+                region: FoodRegion? = nil) async -> SearchPage {
         let trimmed = term.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 2 || brand != nil else {
+        guard trimmed.count >= FoodSearch.minimumQueryLength || brand != nil else {
             return SearchPage(foods: [], hasMore: false)
         }
 
@@ -54,7 +67,8 @@ final class FoodResolver {
         let supplements = firstPage && !filteringByStore ? supplementMatches(trimmed) : []
         async let usdaResults = filteringByStore
             ? nil : try? usda.search(trimmed, page: page)
-        async let offResults = try? off.search(trimmed, page: page, brand: brand)
+        async let offResults = try? off.search(trimmed, page: page, region: region,
+                                              brand: brand)
 
         let usdaPage = await usdaResults ?? []
         let offPage = await offResults
@@ -65,6 +79,14 @@ final class FoodResolver {
         where seen.insert(f.id).inserted {
             out.append(f)
         }
+
+        // Rank by how local the *product* is, not by which API returned it.
+        // Concatenating source by source put up to 50 USDA entries — mostly US
+        // branded — above every Tesco product for a UK user. The sources have no
+        // standing of their own; provenance does.
+        out = FoodRelevance.ordered(out, region: region,
+                                    ownIDs: Set(local.map(\.id)))
+
         // USDA reports no page count, so a full page implies another may exist.
         let usdaHasMore = usdaPage.count >= USDAClient.pageSize
         return SearchPage(foods: out, hasMore: usdaHasMore || (offPage?.hasMore ?? false))

@@ -55,6 +55,28 @@ struct USDAClient: Sendable {
     /// so three tries lands near 90% while the main search is never at risk.
     private static let surveyAttempts = 3
 
+    /// Datasets with no supplier behind them — whole foods and survey recipes.
+    static let genericDataTypes: Set<String> = [
+        "Foundation", "SR Legacy", "Survey (FNDDS)", "survey_fndds_food",
+    ]
+
+    /// FDC's `marketCountry` → Open Food Facts country tags, so a USDA branded
+    /// item and an Open Food Facts one can be compared on the same footing.
+    ///
+    /// Nearly every FDC branded entry is "United States". Returning [] for an
+    /// unrecognised or absent market leaves the food unattributed rather than
+    /// asserting a country it never claimed.
+    static func countryTags(forMarket market: String?) -> [String] {
+        switch market?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "united states": return ["united-states"]
+        case "canada": return ["canada"]
+        case "united kingdom": return ["united-kingdom"]
+        case "australia": return ["australia"]
+        case "new zealand": return ["new-zealand"]
+        default: return []
+        }
+    }
+
     /// Generic foods first (Foundation and SR Legacy are lab-analyzed), then
     /// USDA's branded entries. Returns [] with no key rather than throwing —
     /// search still works through the local cache and Open Food Facts.
@@ -66,7 +88,7 @@ struct USDAClient: Sendable {
                 limit: Int = USDAClient.pageSize) async throws -> [ResolvedFood] {
         guard resolveKey() != nil else { return [] }
         let query = String(term.prefix(80)).trimmingCharacters(in: .whitespaces)
-        guard query.count >= 2 else { return [] }
+        guard query.count >= FoodSearch.minimumQueryLength else { return [] }
 
         async let surveyFoods = surveySearch(query, page: page, limit: limit)
         let stable = try await request(query, page: page, limit: limit,
@@ -144,6 +166,10 @@ struct USDAClient: Sendable {
             let fdcId: Int
             let description: String
             let brandOwner: String?
+            /// "Foundation", "SR Legacy", "Branded", "Survey (FNDDS)".
+            let dataType: String?
+            /// Branded items carry the market they're sold in ("United States").
+            let marketCountry: String?
             let brandName: String?
             let servingSize: Double?
             let servingSizeUnit: String?
@@ -253,7 +279,7 @@ struct USDAClient: Sendable {
                 var seenLabels: Set<String> = []
                 portions = portions.filter { seenLabels.insert($0.label).inserted }
 
-                return ResolvedFood(
+                var food = ResolvedFood(
                     id: "fdc:\(fdcId)",
                     source: .usda,
                     name: name,
@@ -261,6 +287,13 @@ struct USDAClient: Sendable {
                     per100g: profile,
                     servingGrams: grams,
                     portions: portions)
+                // Foundation, SR Legacy and the survey set are whole foods and
+                // recipes with no supplier, so they have no country. Ranking them
+                // as foreign would bury "rice, white, long-grain" under some other
+                // country's own-brand.
+                food.isGeneric = USDAClient.genericDataTypes.contains(dataType ?? "")
+                food.countryTags = USDAClient.countryTags(forMarket: marketCountry)
+                return food
             }
         }
     }

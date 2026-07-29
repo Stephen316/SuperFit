@@ -34,8 +34,15 @@ struct FoodPickerView: View {
     @State private var loadingMore = false
     @State private var loadedPage = 1
     @State private var store: StoreBrand?
+    @AppStorage(FoodRegionSetting.storageKey) private var foodRegionRaw = FoodRegionSetting.automatic
 
-    private let stores = StoreBrand.forRegion(Locale.current.region?.identifier)
+    /// The chosen country drives both the search ranking and which retailers the
+    /// chips offer, so changing it in Settings moves both together.
+    private var region: FoodRegion? {
+        FoodRegionSetting.effective(stored: foodRegionRaw)
+    }
+
+    private var stores: [StoreBrand] { StoreBrand.forRegion(region?.code) }
 
     /// Ids of everything in the user's own list — custom foods and anything
     /// previously logged. Built once per render rather than fetched per row.
@@ -64,7 +71,7 @@ struct FoodPickerView: View {
             if !matchingMeals.isEmpty && filter != .all || (showsMeals && !matchingMeals.isEmpty) {
                 mealsSection
             }
-            if visible.isEmpty && !searching && query.count >= 2 {
+            if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
                 emptyRow
             }
             ForEach(visible) { food in
@@ -91,6 +98,12 @@ struct FoodPickerView: View {
         .safeAreaInset(edge: .top) { filterBar }
         .onChange(of: query) { runSearch() }
         .onChange(of: filter) { if filter == .mine { runSearch() } }
+        .onChange(of: foodRegionRaw) {
+            // A chip for a retailer that doesn't operate in the new country would
+            // otherwise stay selected and silently return nothing.
+            if let store, !stores.contains(store) { self.store = nil }
+            runSearch()
+        }
         .sheet(isPresented: $scanning) { scannerSheet }
         .sheet(isPresented: $creatingCustom) {
             CustomFoodView { food in onPick(food) }
@@ -270,10 +283,15 @@ struct FoodPickerView: View {
         searchTask?.cancel()
         let term = query
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(400))   // debounce
+            // One completed search is 5–7 requests: USDA's stable datatypes, the
+            // survey dataset with its retries, and three Open Food Facts country
+            // tiers. At 400 ms an ordinary mid-word pause fired its own search, so
+            // typing one word could cost three of those. 600 ms covers normal
+            // typing gaps and still reads as instant.
+            try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             searching = true
-            let page = await FoodResolver(context: context).search(term, brand: store)
+            let page = await FoodResolver(context: context).search(term, brand: store, region: region)
             guard !Task.isCancelled else { return }
             results = page.foods
             hasMore = page.hasMore
@@ -293,7 +311,8 @@ struct FoodPickerView: View {
         loadingMore = true
         Task {
             let page = await FoodResolver(context: context).search(term, page: next,
-                                                                   brand: store)
+                                                                   brand: store,
+                                                                   region: region)
             guard !Task.isCancelled, term == query else {
                 loadingMore = false
                 return
