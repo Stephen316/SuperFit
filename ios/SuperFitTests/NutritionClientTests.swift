@@ -165,6 +165,73 @@ private let usdaSearchJSON = """
         #expect(!USDAKeyStore.isBundled)
     }
 
+    // MARK: What USDA is asked for
+
+    /// The generic sets are asked for on their own and wide. Mixed into one
+    /// 25-result request they lost outright: "milk", "chocolate" and "yoghurt"
+    /// each came back with no generic entries at all, so plain milk could never
+    /// be ranked up because it was never in the response.
+    @Test func genericsAreRequestedSeparatelyAndWide() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        nonisolated(unsafe) var queries: [String] = []
+        StubProtocol.responder = { url in
+            queries.append(url.query?.removingPercentEncoding ?? "")
+            return (200, usdaSearchJSON)
+        }
+        _ = try await USDAClient(session: StubProtocol.session())
+            .search("rice", includeBranded: false)
+
+        let generic = try #require(queries.first { $0.contains("Foundation") })
+        #expect(generic.contains("SR Legacy"))
+        #expect(generic.contains("pageSize=\(USDAClient.genericPageSize)"))
+        // Wider than the ordinary page, or the real food stays off the end of it.
+        #expect(USDAClient.genericPageSize > USDAClient.pageSize)
+    }
+
+    /// USDA's branded set is US-only. Off a US shelf every one of those items
+    /// sorts into the bottom provenance band, so fetching them spends bandwidth
+    /// on results that appear last.
+    @Test func brandedIsSkippedWhenItIsNotTheLocalShelf() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        nonisolated(unsafe) var queries: [String] = []
+        StubProtocol.responder = { url in
+            queries.append(url.query?.removingPercentEncoding ?? "")
+            return (200, usdaSearchJSON)
+        }
+        _ = try await USDAClient(session: StubProtocol.session())
+            .search("rice", includeBranded: false)
+        #expect(!queries.contains { $0.contains("dataType=Branded") })
+    }
+
+    @Test func brandedIsFetchedWhenItIsTheLocalShelf() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        nonisolated(unsafe) var queries: [String] = []
+        StubProtocol.responder = { url in
+            queries.append(url.query?.removingPercentEncoding ?? "")
+            return (200, usdaSearchJSON)
+        }
+        _ = try await USDAClient(session: StubProtocol.session())
+            .search("rice", includeBranded: true)
+        #expect(queries.contains { $0.contains("dataType=Branded") })
+    }
+
+    /// Losing the branded request must not empty a working search, the same rule
+    /// the survey set follows.
+    @Test func aFailingBrandedRequestStillLeavesTheGenerics() async throws {
+        USDAKeyStore.save("test-key")
+        defer { USDAKeyStore.clear() }
+        StubProtocol.responder = { url in
+            let q = url.query?.removingPercentEncoding ?? ""
+            return q.contains("dataType=Branded") ? (503, Data()) : (200, usdaSearchJSON)
+        }
+        let foods = try await USDAClient(session: StubProtocol.session())
+            .search("chicken", includeBranded: true)
+        #expect(!foods.isEmpty)
+    }
+
     @Test func usdaRejectsShortQueries() async throws {
         USDAKeyStore.save("test-key")
         defer { USDAKeyStore.clear() }

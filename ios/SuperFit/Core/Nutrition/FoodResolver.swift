@@ -65,8 +65,13 @@ final class FoodResolver {
         // supplements — someone reaching for "protein bar" in the food diary
         // should find it there, not only in the supplements list.
         let supplements = firstPage && !filteringByStore ? supplementMatches(trimmed) : []
+        // USDA's branded set is US-only, so it's the local shelf for a US user
+        // and the bottom provenance band for everyone else. Fetched accordingly
+        // rather than always: see USDAClient.search.
+        let usdaWantsBranded = region?.code == "US"
         async let usdaResults = filteringByStore
-            ? nil : try? usda.search(trimmed, page: page)
+            ? nil : try? usda.search(trimmed, page: page,
+                                     includeBranded: usdaWantsBranded)
         async let offResults = try? off.search(trimmed, page: page, region: region,
                                               brand: brand)
 
@@ -80,15 +85,16 @@ final class FoodResolver {
             out.append(f)
         }
 
-        // Rank by how local the *product* is, not by which API returned it.
-        // Concatenating source by source put up to 50 USDA entries — mostly US
-        // branded — above every Tesco product for a UK user. The sources have no
-        // standing of their own; provenance does.
-        out = FoodRelevance.ordered(out, region: region,
+        // Rank by what the food *is* and where it's sold, not by which API
+        // returned it. Concatenating source by source put up to 50 USDA entries —
+        // mostly US branded — above every Tesco product for a UK user, and
+        // provenance alone still can't tell rice from rice cakes.
+        out = FoodRelevance.ordered(out, query: trimmed, region: region,
                                     ownIDs: Set(local.map(\.id)))
 
         // USDA reports no page count, so a full page implies another may exist.
-        let usdaHasMore = usdaPage.count >= USDAClient.pageSize
+        // Measured against the generic page, which is the widest of the requests.
+        let usdaHasMore = usdaPage.count >= USDAClient.genericPageSize
         return SearchPage(foods: out, hasMore: usdaHasMore || (offPage?.hasMore ?? false))
     }
 

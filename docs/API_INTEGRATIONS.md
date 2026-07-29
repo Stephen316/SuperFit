@@ -161,6 +161,26 @@ sources run concurrently, and either failing leaves the other's results intact.
 **Ranking is by product locality, not by source.** `FoodRelevance` bands every
 result and sorts:
 
+**Name match is the first key; provenance is the tiebreak.** Provenance can't
+tell a thing from the things named after it — "rice cakes" and "brown rice" are
+both British, both retail, both contain the word. `FoodNameMatch` decides first:
+
+| | Match | Example for "rice" |
+|---|---|---|
+| 1 | `exact` — the name is the food | Rice · Rice, white, long-grain |
+| 2 | `headNoun` — a kind of it | Brown Rice · Basmati Rice |
+| 3 | `modifier` — named after it | Rice Cakes · Rice Vinegar |
+| 4 | `partial` — loose or scattered | Riced Cauliflower |
+| 5 | `none` — matched on brand only | |
+
+Two conventions make the head recoverable without a dictionary: **English puts the
+head of a noun phrase last** ("brown rice" is a rice, "rice cakes" are cakes), and
+**USDA writes generics head-first with comma qualifiers** ("Rice, white,
+long-grain"). The head-noun test deliberately never looks past the first comma —
+in "Cereal, rice" the comma marks rice as the qualifier.
+
+Then provenance orders whatever tied:
+
 | Band | What it is |
 |---|---|
 | 1 | Your own foods — logged before, or custom |
@@ -195,6 +215,31 @@ claimed — unattributed can't be ranked local, but isn't assumed foreign either
 The sort carries an explicit position tiebreak rather than relying on
 `sorted(by:)`, which Swift does not document as stable: without it, identical
 searches would reshuffle.
+
+**What USDA is asked for.** The generic sets (`Foundation,SR Legacy`) are
+requested **on their own and 50 wide**; `Branded` is requested separately and
+**only when the chosen country is the US**.
+
+Both follow from measurement. Mixed into one 25-result request the generics lost
+outright — searching "milk", "chocolate" or "yoghurt" returned *no* generic entry
+at all, so no reordering could surface plain milk because plain milk was never in
+the response. And USDA's own ordering is close to useless: on the generic sets
+alone, "rice" put real rice at **#39** behind rice crackers, "oats" put rolled oats
+at **#18** behind "Oil, oat". Fifty covers every term measured, with
+`FoodNameMatch` pulling the real food to the top.
+
+Fifty and no more because USDA sends **~29 KB per result** and offers no way to ask
+for less — the search endpoint has no field selection and ignores
+`format=abridged`, so page size *is* the data bill. Neither `requireAllWords` nor
+`sortBy` improves the ordering (measured: identical, and worse, respectively).
+
+`Branded` is US-only, so off a US shelf every one of those items sorts into the
+bottom provenance band — about 720 KB a search spent on results that appear last.
+For a US user they *are* the local shelf, so the fetch follows the same country
+setting the ranking does. Open Food Facts covers branded products everywhere.
+
+**Known gap:** USDA holds no "yoghurt", only "yogurt" — a British spelling returns
+zero USDA hits. Open Food Facts still answers.
 
 **Request cost and debounce.** One completed search is **5–7 HTTP requests**: USDA's
 stable datatypes (1), the survey dataset with its retries (1–3), and three Open

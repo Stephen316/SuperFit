@@ -60,6 +60,62 @@ struct FoodPickerView: View {
         return filter == .all ? results : results.filter { ids.contains($0.id) }
     }
 
+    /// A run of results under one heading. A nil title means a plain ungrouped
+    /// list, which is what a store browse or a single-category result should be.
+    private struct FoodSection: Identifiable {
+        let title: String?
+        let foods: [ResolvedFood]
+        var id: String { title ?? "" }
+    }
+
+    /// Splits the results into the food that was asked for and everything else
+    /// merely named after it.
+    ///
+    /// Ordering already puts rice above rice cakes, but a heading is what makes
+    /// that legible: the complaint was that searching "rice" showed rice cakes and
+    /// Rice Krispies with no actual rice in sight, and a reordered but unlabelled
+    /// list still leaves you scanning for where one group ends.
+    private var sections: [FoodSection] {
+        let foods = visible
+        let term = query.trimmingCharacters(in: .whitespaces)
+        guard term.count >= FoodSearch.minimumQueryLength else {
+            return [FoodSection(title: nil, foods: foods)]
+        }
+
+        let ranked = FoodRelevance.ranked(foods, query: term, region: region,
+                                          ownIDs: storedIDs)
+        let isTheFood = ranked.filter { $0.match <= .headNoun }.map(\.food)
+        let namedAfterIt = ranked.filter { $0.match > .headNoun }.map(\.food)
+
+        // A heading with nothing to contrast against is just noise.
+        guard !isTheFood.isEmpty, !namedAfterIt.isEmpty else {
+            return [FoodSection(title: nil, foods: foods)]
+        }
+        return [FoodSection(title: term.capitalized, foods: isTheFood),
+                FoodSection(title: "Other matches", foods: namedAfterIt)]
+    }
+
+    /// Hoists `storedIDs` out of the row loop: it walks every stored food to build
+    /// a set, and reading it per row rebuilt that set once per result.
+    @ViewBuilder
+    private func foodRows(_ foods: [ResolvedFood]) -> some View {
+        let ids = storedIDs
+        ForEach(foods) { food in
+            Button { onPick(food) } label: { row(food) }
+                // Swipe reveals a red bin; a full swipe removes it outright,
+                // matching the delete gesture everywhere else in iOS.
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    if ids.contains(food.id) {
+                        Button(role: .destructive) {
+                            delete(food)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+        }
+    }
+
     private var matchingMeals: [SavedMeal] {
         guard showsMeals else { return [] }
         guard !query.isEmpty else { return meals }
@@ -74,19 +130,13 @@ struct FoodPickerView: View {
             if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
                 emptyRow
             }
-            ForEach(visible) { food in
-                Button { onPick(food) } label: { row(food) }
-                    // Swipe reveals a red bin; a full swipe removes it outright,
-                    // matching the delete gesture everywhere else in iOS.
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if storedIDs.contains(food.id) {
-                            Button(role: .destructive) {
-                                delete(food)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
+            let sections = sections
+            if sections.count == 1 {
+                foodRows(sections[0].foods)
+            } else {
+                ForEach(sections) { section in
+                    Section(section.title ?? "") { foodRows(section.foods) }
+                }
             }
             if hasMore && filter == .all && !visible.isEmpty {
                 loadMoreRow

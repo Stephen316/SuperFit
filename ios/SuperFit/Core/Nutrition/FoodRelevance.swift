@@ -25,6 +25,12 @@ import Foundation
 /// 4. **Sold in a neighbouring country** — the same chains often span both.
 /// 5. **Everything else** — foreign retailers.
 ///
+/// Provenance is the **second** key, not the first. It orders foods that answer
+/// the query equally well, and can't distinguish a thing from the things named
+/// after it — "rice cakes" and "brown rice" are both British, both retail, both
+/// contain the word. `FoodNameMatch` makes that call first; everything below then
+/// decides between the results that tied.
+///
 /// The sort is **stable**, so within a band each source's own relevance order
 /// survives. This only decides which band a result lands in.
 enum FoodRelevance {
@@ -62,32 +68,53 @@ enum FoodRelevance {
         return .foreignRetail
     }
 
-    /// Reorders results by band, preserving each source's ordering within a band.
+    /// A result with everything the ordering decided about it, so the picker can
+    /// show the categories rather than just inherit their order.
+    struct Ranked: Sendable {
+        let food: ResolvedFood
+        /// How well the name answers the query — the primary sort key.
+        let match: FoodNameMatch
+        /// How local the product is — decides between equally good name matches.
+        let band: Band
+        /// Where the sources put it, carried so the sort can't reshuffle.
+        let position: Int
+    }
+
+    /// Ranks results by name match first, then provenance, then original order.
+    ///
+    /// `query` is required rather than defaulted: forgetting it would silently
+    /// disable the name matching and leave the old behaviour looking correct.
     ///
     /// `sorted(by:)` is not documented as stable in Swift, so the index is carried
     /// as an explicit tiebreak rather than relied on — without it, results would
     /// reshuffle between identical searches.
-    static func ordered(_ foods: [ResolvedFood], region: FoodRegion?,
-                        ownIDs: Set<String>) -> [ResolvedFood] {
+    static func ranked(_ foods: [ResolvedFood], query: String,
+                       region: FoodRegion?, ownIDs: Set<String>) -> [Ranked] {
         // Written out rather than chained: the fluent version tips the type
-        // checker over its time limit on the tuple.
-        struct Ranked {
-            let position: Int
-            let band: Band
-            let food: ResolvedFood
-        }
-
+        // checker over its time limit.
         var ranked: [Ranked] = []
         ranked.reserveCapacity(foods.count)
         for (position, food) in foods.enumerated() {
+            // Scored once here, never inside the comparator: tokenising is the
+            // expensive part, and a comparator would repeat it O(n log n) times.
+            let match = FoodNameMatch.match(name: food.name, brand: food.brand,
+                                            query: query)
             let band = band(for: food, region: region, ownIDs: ownIDs)
-            ranked.append(Ranked(position: position, band: band, food: food))
+            ranked.append(Ranked(food: food, match: match, band: band,
+                                 position: position))
         }
 
         ranked.sort { a, b in
+            if a.match != b.match { return a.match < b.match }
             if a.band != b.band { return a.band < b.band }
             return a.position < b.position
         }
-        return ranked.map(\.food)
+        return ranked
+    }
+
+    static func ordered(_ foods: [ResolvedFood], query: String,
+                        region: FoodRegion?,
+                        ownIDs: Set<String>) -> [ResolvedFood] {
+        ranked(foods, query: query, region: region, ownIDs: ownIDs).map(\.food)
     }
 }

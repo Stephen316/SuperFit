@@ -18,9 +18,13 @@ struct FoodRelevanceTests {
         return f
     }
 
-    private func order(_ foods: [ResolvedFood], region: FoodRegion? = .unitedKingdom,
+    /// Defaults to an empty query so the provenance tests below stay about
+    /// provenance: with no term every result ties on name and the band decides.
+    private func order(_ foods: [ResolvedFood], query: String = "",
+                       region: FoodRegion? = .unitedKingdom,
                        own: Set<String> = []) -> [String] {
-        FoodRelevance.ordered(foods, region: region, ownIDs: own).map(\.id)
+        FoodRelevance.ordered(foods, query: query, region: region,
+                              ownIDs: own).map(\.id)
     }
 
     // MARK: Locality beats source
@@ -163,7 +167,8 @@ struct FoodRelevanceTests {
             food("c", source: .usda, generic: true),
             food("d", countries: ["united-states"]),
         ]
-        let result = FoodRelevance.ordered(foods, region: .unitedKingdom, ownIDs: [])
+        let result = FoodRelevance.ordered(foods, query: "", region: .unitedKingdom,
+                                           ownIDs: [])
         #expect(result.count == foods.count)
         #expect(Set(result.map(\.id)) == Set(foods.map(\.id)))
     }

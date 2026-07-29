@@ -36,8 +36,27 @@ struct USDAClient: Sendable {
 
     static let pageSize = 25
 
-    /// The three datasets that request reliably.
-    private static let stableDataTypes = "Foundation,SR Legacy,Branded"
+    /// The lab-analysed whole foods, asked for on their own rather than mixed in
+    /// with the branded set.
+    ///
+    /// Mixed, they lose. Measured over six terms at the old 25-result window,
+    /// "milk", "chocolate" and "yoghurt" returned **no** generic entries at all —
+    /// branded products filled every slot — so no amount of reordering could
+    /// surface plain milk, because plain milk was never in the response.
+    private static let genericSearchDataTypes = "Foundation,SR Legacy"
+
+    private static let brandedDataType = "Branded"
+
+    /// Asked for wide, because USDA's own ordering is close to useless and the
+    /// real food sits deep in the list. Measured, searching the generic sets:
+    /// "rice" put actual rice at #39 behind rice crackers and rice cakes, "oats"
+    /// put rolled oats at #18 behind oat bran bagels and "Oil, oat".
+    ///
+    /// Fifty covers every term measured while `FoodNameMatch` pulls the real food
+    /// to the top. It isn't larger because USDA sends roughly 29 KB per result and
+    /// offers no way to ask for less — no field selection, and `format=abridged`
+    /// is ignored by this endpoint — so the page size *is* the data bill.
+    static let genericPageSize = 50
 
     /// Foods *as eaten* — "spaghetti with meat sauce", "chicken curry,
     /// restaurant" — where the other three carry ingredients.
@@ -84,22 +103,41 @@ struct USDAClient: Sendable {
     /// The survey dataset is fetched as a second, independent request and appended.
     /// It is additive: when it fails the search still returns everything else,
     /// which is why it can't share the main request.
-    func search(_ term: String, page: Int = 1,
+    /// `includeBranded` is the caller's call because USDA's branded set is
+    /// US-only. On a British or Irish shelf every one of those items sorts into
+    /// the bottom provenance band, so fetching them spends about 720 KB a search
+    /// on results that appear last — where for a US user they *are* the local
+    /// shelf. Open Food Facts covers branded products everywhere, with country
+    /// tiers, so nothing is unreachable either way.
+    func search(_ term: String, page: Int = 1, includeBranded: Bool = true,
                 limit: Int = USDAClient.pageSize) async throws -> [ResolvedFood] {
         guard resolveKey() != nil else { return [] }
         let query = String(term.prefix(80)).trimmingCharacters(in: .whitespaces)
         guard query.count >= FoodSearch.minimumQueryLength else { return [] }
 
         async let surveyFoods = surveySearch(query, page: page, limit: limit)
-        let stable = try await request(query, page: page, limit: limit,
-                                      dataTypes: Self.stableDataTypes)
+        async let brandedFoods = brandedSearch(query, page: page, limit: limit,
+                                               include: includeBranded)
+        let generics = try await request(query, page: page,
+                                         limit: Self.genericPageSize,
+                                         dataTypes: Self.genericSearchDataTypes)
 
-        var seen = Set(stable.map(\.id))
-        var out = stable
-        for food in await surveyFoods where seen.insert(food.id).inserted {
+        var seen = Set(generics.map(\.id))
+        var out = generics
+        for food in await brandedFoods + (await surveyFoods)
+        where seen.insert(food.id).inserted {
             out.append(food)
         }
         return out
+    }
+
+    /// Additive like the survey set, and never throwing: losing the branded items
+    /// must not turn a working search into a failed one.
+    private func brandedSearch(_ query: String, page: Int, limit: Int,
+                               include: Bool) async -> [ResolvedFood] {
+        guard include else { return [] }
+        return (try? await request(query, page: page, limit: limit,
+                                   dataTypes: Self.brandedDataType)) ?? []
     }
 
     /// The survey dataset, retried a few times and never throwing: a failure here
@@ -121,7 +159,7 @@ struct USDAClient: Sendable {
         var comps = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/foods/search")!
         comps.queryItems = [
             .init(name: "query", value: query),
-            .init(name: "pageSize", value: String(min(limit, 50))),
+            .init(name: "pageSize", value: String(min(limit, 200))),
             .init(name: "pageNumber", value: String(max(page, 1))),
             .init(name: "dataType", value: dataTypes),
             .init(name: "api_key", value: key),
