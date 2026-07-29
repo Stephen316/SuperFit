@@ -149,8 +149,8 @@ struct ProteinAdherenceView: View {
         let all = points
         return HistoryChartCard(
             title: "Protein vs target",
-            yLabel: { "\(Int($0))g" },
             height: 190,
+            yLabel: { "\(Int($0))g" },
             content: {
                 // Bars coloured by whether the day landed, so the pattern of
                 // misses is readable without reading any numbers.

@@ -188,7 +188,10 @@ struct DataArchiveTests {
     @Test func rejectsAnArchiveFromANewerVersion() throws {
         var archive = DataArchive()
         archive.version = DataArchive.currentVersion + 1
-        let data = try JSONEncoder().encode(archive)
+        // Must go through the service's encoder: a bare JSONEncoder writes dates
+        // as numbers, so decode fails on exportedAt before reaching the version
+        // guard this test exists to exercise.
+        let data = try DataArchiveService.encode(archive)
         #expect(throws: DataArchiveService.ArchiveError.self) {
             try DataArchiveService.decode(data)
         }

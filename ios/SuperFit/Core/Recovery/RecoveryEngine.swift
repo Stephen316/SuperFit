@@ -108,12 +108,15 @@ struct RecoveryEngine: Sendable {
         guard let acute = i.acuteLoad, let chronic = i.chronicLoad, chronic > 0
         else { return nil }
         let acwr = acute / chronic
-        // Half-open bounds: `0.8...1.3` followed by `1.3...1.5` overlaps at 1.3,
-        // and relying on first-match-wins to resolve it hides the intent.
+        // 1.3 is the top of the sweet spot, so it belongs to the optimal band and
+        // that range is closed. Swift has no exclusive lower bound, so the
+        // penalised band is expressed as an upper bound and resolves values just
+        // above 1.3 by first-match-wins — the reason the bands are not uniformly
+        // half-open.
         switch acwr {
         case ..<0.8: return 0.9                      // detraining, but recovered
-        case 0.8..<1.3: return 1.0
-        case 1.3..<1.5: return 0.7
+        case 0.8...1.3: return 1.0
+        case ..<1.5: return 0.7
         default: return max(0, 1.0 - (acwr - 1.5))
         }
     }

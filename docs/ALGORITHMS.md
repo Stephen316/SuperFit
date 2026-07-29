@@ -273,6 +273,13 @@ score = 100 × (0.35·sleep + 0.30·hrv + 0.20·rhr + 0.15·load)
 **ACWR** = (7-day training volume) / (28-day average 7-day volume). ~0.8–1.3 is the
 "sweet spot"; >1.5 spikes injury risk → load sub-score drops.
 
+The sweet spot is **closed at 1.3** — an ACWR of exactly 1.3 scores as optimal, not
+penalised. Gabbett's band is inclusive at its upper edge, and a boundary that
+penalises the value it names reads as a defect to anyone checking the number
+against the paper. Swift has no exclusive lower bound, so the penalised band above
+it is written as an upper bound and resolved by first-match-wins rather than making
+all four bands half-open and moving the error to 1.5 instead.
+
 ### Recommendation bands
 ```
 90–100 : Push intensity — add load or a top set
@@ -330,6 +337,27 @@ than none.
 | Span of history | >= 90 days |
 | Adjusted R² of the profile | >= 0.10 |
 | Amplitude vs residual SD | >= 0.33 |
+| Best sub-21-day fit vs chosen | < 0.85x |
+
+**Harmonic rejection.** Restricting the search to 21-35 days excludes a short
+period as an *answer* but not as a *cause*: a 7-day training rhythm divides 21, 28
+and 35 exactly, so it folds perfectly at all three and was reported as a 21-day
+cycle. Measured on 240-day series, 10-day rhythms read as 30 and 14-day as 28 —
+the weekly case that surfaced it was not the only one.
+
+Testing whether the profile repeats within itself does not work: rotating a smooth
+profile by one day barely changes it, so that test fires on every genuine rhythm.
+What separates the cases is whether a *shorter* period explains the residuals
+about as well. For a genuine monthly rhythm the best sub-21 fit is near zero
+adjusted R² (28-day data: 0.470 chosen vs -0.003 short); for an aliased weekly one
+the short fit edges ahead (0.255 vs 0.269).
+
+The 0.85 threshold sits mid-plateau. Swept over 405 monthly configurations
+(periods 21-35 x amplitude x noise x span), 162 sub-physiological ones, and 48
+rhythm-free ones, every value from 0.70 to 0.95 gave zero false rejects, zero
+misreported periods, zero false accepts and zero false positives; 1.0 left four
+exact-doubling aliases through, 0.60 began suppressing genuine rhythms. The
+false-positive rate on rhythm-free data stays at 0%.
 | Every phase position | >= 2 observations |
 
 Measured false-positive rate on rhythm-free data -- flat, drifting, and

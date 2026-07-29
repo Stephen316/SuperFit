@@ -140,9 +140,9 @@ enum DataArchiveService {
                                     sex: p.sexRaw, goal: p.goalRaw, activity: p.activityRaw,
                                     proteinPerKgOverride: p.proteinPerKgOverride)
         }
-        archive.bodyMetrics = fetch(context).map {
-            .init(date: $0.date, weightKg: $0.weightKg, bodyFatPct: $0.bodyFatPct,
-                  leanMassKg: $0.leanMassKg, source: $0.sourceRaw)
+        archive.bodyMetrics = fetch(context).map { (m: BodyMetrics) in
+            .init(date: m.date, weightKg: m.weightKg, bodyFatPct: m.bodyFatPct,
+                  leanMassKg: m.leanMassKg, source: m.sourceRaw)
         }
         archive.foods = fetch(context).map { (f: Food) in
             .init(id: f.id, source: f.sourceRaw, remoteID: f.remoteID, name: f.name,

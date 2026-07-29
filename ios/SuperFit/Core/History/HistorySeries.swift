@@ -214,14 +214,17 @@ struct HistorySeries: Sendable {
         calendar.firstWeekday = 2
         let aggregator = VolumeAggregator()
         var out: [HistoryPoint] = []
-        var cursor = start
+        // Start on the week boundary and step by each week's own end. Walking
+        // +7d from an unaligned `start` visits weeks offset from the calendar's,
+        // which drops the trailing days of the range: a Sunday-start 14-day
+        // window lost 6 of its 14 days. Only a Monday start was ever correct.
+        var cursor = calendar.dateInterval(of: .weekOfYear, for: start)?.start ?? start
 
         while cursor <= end {
             guard let week = calendar.dateInterval(of: .weekOfYear, for: cursor) else { break }
             let sets = aggregator.weeklySets(records: records, muscles: muscles, week: week)
             out.append(HistoryPoint(date: week.start, value: sets[muscle] ?? 0))
-            guard let next = calendar.date(byAdding: .weekOfYear, value: 1, to: cursor) else { break }
-            cursor = next
+            cursor = week.end
         }
         return out
     }

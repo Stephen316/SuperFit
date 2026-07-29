@@ -93,6 +93,10 @@ struct HistoryView: View {
                                   from: start, to: .now)
     }
 
+    private var intakePoints: [HistoryPoint] {
+        HistorySeries.intake(records: dailyRecords).filter { $0.date >= start }
+    }
+
     /// Expenditure and intake on one axis, with the gap between them shaded.
     ///
     /// Two separate charts made the reader subtract by eye to answer the only
@@ -110,8 +114,8 @@ struct HistoryView: View {
             title: "Energy balance",
             headline: average.map { "\($0 >= 0 ? "+" : "")\(Int($0.rounded())) kcal/day" },
             change: bands.last.map { "burning \(Int($0.value))" },
-            yLabel: { "\(Int($0))" },
             height: 190,
+            yLabel: { "\(Int($0))" },
             content: {
                 // The gap is the story; the lines just bound it.
                 ForEach(balancePairs(bands: bands, intake: intakeMean)) { pair in
@@ -264,8 +268,8 @@ struct HistoryView: View {
         return HistoryChartCard(
             title: "Weekly change",
             headline: points.last.map { units.weightDeltaString($0.value) },
-            yLabel: { String(format: "%+.1f", $0) },
             height: 150,
+            yLabel: { String(format: "%+.1f", $0) },
             content: {
                 RectangleMark(
                     xStart: .value("Start", start),

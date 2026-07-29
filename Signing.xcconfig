@@ -1,0 +1,12 @@
+// Signing settings, applied to every target and configuration.
+//
+// The development team is per-developer and per-machine, so it lives in
+// Secrets.xcconfig, which is gitignored. The include below is `#include?`, not
+// `#include`: the optional form is silently skipped when the file is absent, so
+// a fresh clone still generates and builds for the simulator with no setup.
+// Simulator builds are unsigned and need no team at all.
+//
+// This indirection exists because DEVELOPMENT_TEAM set through Xcode's Signing
+// & Capabilities editor is written into SuperFit.xcodeproj, which is generated
+// and gitignored — the next `xcodegen generate` erases it.
+#include? "Secrets.xcconfig"

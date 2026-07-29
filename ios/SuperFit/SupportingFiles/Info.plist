@@ -43,7 +43,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.superfit.app</string>
+			<string>com.stephenh.superfit</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>superfit</string>

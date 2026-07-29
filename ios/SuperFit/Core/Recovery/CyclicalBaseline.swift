@@ -58,6 +58,15 @@ enum CyclicalBaseline {
     /// Physiological bounds for a menstrual cycle. Outside this range a repeat
     /// is more likely training periodisation, shift patterns, or noise.
     static let periodRange = 21...35
+    /// Candidate rhythms below the physiological floor, tested only to be ruled
+    /// out. A 7-day rhythm folds perfectly at 21, 28 and 35 because it divides
+    /// all three, so `periodRange` alone excludes 7 as an *answer* while letting
+    /// it arrive disguised as a multiple of itself.
+    static let subPhysiologicalRange = 2...20
+    /// Reject the monthly candidate when a sub-physiological period explains at
+    /// least this much of its strength. Measured safe over 0.70–0.95; 0.85 is
+    /// the middle of that plateau rather than either edge.
+    static let maxHarmonicRatio = 0.85
     /// Evidence bar before adjusting anything: at least this many complete
     /// repeats, spanning at least `minSpanDays`. A pattern seen once or twice is
     /// a coincidence; the point is to be slow rather than clever.
@@ -92,25 +101,45 @@ enum CyclicalBaseline {
         // autocorrelation peak recovered the true period 0% of the time on
         // realistic noise (28 d read as 25), while this recovers it exactly on
         // 82–99% of windows of six cycles or more.
-        var best: (period: Int, strength: Double, profile: [Double])?
-        for period in periodRange {
-            guard (last - first) / period >= minCycles,
-                  let candidate = foldedProfile(residuals, period: period)
-            else { continue }
-            if best == nil || candidate.strength > best!.strength {
-                best = (period, candidate.strength, candidate.profile)
-            }
-        }
-        guard let best, best.strength >= minStrength else { return nil }
+        guard let best = bestFit(residuals, over: periodRange, span: last - first),
+              best.strength >= minStrength
+        else { return nil }
 
         let amplitude = (best.profile.max() ?? 0) - (best.profile.min() ?? 0)
         guard amplitude >= minAmplitudeRatio * spread else { return nil }
+
+        // Harmonic guard. Asking whether the profile repeats within itself fires
+        // on any smooth rhythm — rotating a smooth curve by a day barely changes
+        // it. The question that separates the cases is whether a *shorter* period
+        // explains the residuals about as well: for a genuine monthly rhythm the
+        // best sub-21 fit is near zero adjusted R², while for an aliased weekly
+        // one it edges ahead of the monthly candidate.
+        if let short = bestFit(residuals, over: subPhysiologicalRange, span: last - first),
+           short.strength >= best.strength * maxHarmonicRatio {
+            return nil
+        }
 
         return CyclicalPattern(periodDays: best.period,
                                cyclesObserved: (last - first) / best.period,
                                strength: best.strength,
                                amplitude: amplitude,
                                profile: best.profile)
+    }
+
+    /// Strongest folded fit across a range of candidate periods.
+    private static func bestFit(_ residuals: [CyclicalSample],
+                                over periods: ClosedRange<Int>,
+                                span: Int) -> (period: Int, strength: Double, profile: [Double])? {
+        var best: (period: Int, strength: Double, profile: [Double])?
+        for period in periods {
+            guard span / period >= minCycles,
+                  let candidate = foldedProfile(residuals, period: period)
+            else { continue }
+            if best == nil || candidate.strength > best!.strength {
+                best = (period, candidate.strength, candidate.profile)
+            }
+        }
+        return best
     }
 
     /// Folds the series onto one cycle of `period` and reports the phase profile
