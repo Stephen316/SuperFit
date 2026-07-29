@@ -23,27 +23,51 @@ final class FoodResolver {
         return remote
     }
 
+    /// One page of merged results, and whether asking for another is worthwhile.
+    struct SearchPage: Sendable {
+        var foods: [ResolvedFood]
+        var hasMore: Bool
+    }
+
     /// Cache and supplements first so results appear instantly and offline; the
     /// two networks run concurrently and either failing leaves the others intact.
-    func search(_ term: String) async -> [ResolvedFood] {
+    ///
+    /// Local rows and supplements are page-1 only: they're already complete, and
+    /// repeating them on every page would push the remote results the user is
+    /// paging *for* further down each time.
+    func search(_ term: String, page: Int = 1, brand: StoreBrand? = nil) async -> SearchPage {
         let trimmed = term.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 2 else { return [] }
+        guard trimmed.count >= 2 || brand != nil else {
+            return SearchPage(foods: [], hasMore: false)
+        }
 
-        let local = localMatches(trimmed)
+        let firstPage = page <= 1
+        // A store filter is asking for that retailer's own brand specifically, so
+        // cached rows, supplements and USDA generics are all off-topic. USDA has
+        // no supermarket own-brand ranges outside the US and no tag to filter on
+        // regardless, so querying it would only dilute the results.
+        let filteringByStore = brand != nil
+        let local = firstPage && !filteringByStore ? localMatches(trimmed) : []
         // Protein bars, shakes and gainers are snacks and meals as much as
         // supplements — someone reaching for "protein bar" in the food diary
         // should find it there, not only in the supplements list.
-        let supplements = supplementMatches(trimmed)
-        async let usdaResults = try? usda.search(trimmed)
-        async let offResults = try? off.search(trimmed)
+        let supplements = firstPage && !filteringByStore ? supplementMatches(trimmed) : []
+        async let usdaResults = filteringByStore
+            ? nil : try? usda.search(trimmed, page: page)
+        async let offResults = try? off.search(trimmed, page: page, brand: brand)
+
+        let usdaPage = await usdaResults ?? []
+        let offPage = await offResults
 
         var seen = Set(local.map(\.id))
         var out = local
-        for f in supplements + (await usdaResults ?? []) + (await offResults ?? [])
+        for f in supplements + usdaPage + (offPage?.foods ?? [])
         where seen.insert(f.id).inserted {
             out.append(f)
         }
-        return out
+        // USDA reports no page count, so a full page implies another may exist.
+        let usdaHasMore = usdaPage.count >= USDAClient.pageSize
+        return SearchPage(foods: out, hasMore: usdaHasMore || (offPage?.hasMore ?? false))
     }
 
     /// Fills in USDA household measures, which the search endpoint omits.

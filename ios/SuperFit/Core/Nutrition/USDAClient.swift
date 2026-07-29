@@ -3,9 +3,12 @@ import Foundation
 /// USDA FoodData Central API — generic whole foods plus USDA's branded set,
 /// with full micronutrient data.
 ///
-/// Needs a free key from https://fdc.nal.usda.gov/api-key-signup.html. The key
-/// is the user's own and lives in the Keychain, never in the binary: a key
-/// compiled into an app ships to every install and is trivially extracted.
+/// Needs a free key from https://fdc.nal.usda.gov/api-key-signup.html. The key is
+/// the user's own: normally entered in Settings and held in the Keychain, and
+/// optionally injected at build time from the gitignored `Secrets.xcconfig` for a
+/// personal build, since Keychain entries don't survive a reinstall without
+/// iCloud Keychain. See `USDAKeyStore` for why that trade is acceptable here and
+/// not for a build given to anyone else.
 struct USDAClient: Sendable {
 
     /// FDC nutrient ids → the app's micronutrient keys.
@@ -18,26 +21,87 @@ struct USDAClient: Sendable {
     ]
 
     private let session: URLSession
+    /// Injected so "no key configured at all" stays testable. Under the test
+    /// runner `Bundle.main` is the host app, which carries the build-time key,
+    /// so clearing the Keychain alone no longer produces a key-less client.
+    private let resolveKey: @Sendable () -> String?
 
-    init(session: URLSession = .nutritionDefault) {
+    init(session: URLSession = .nutritionDefault,
+         key: @escaping @Sendable () -> String? = { USDAKeyStore.key }) {
         self.session = session
+        self.resolveKey = key
     }
 
-    var hasKey: Bool { USDAKeyStore.key != nil }
+    var hasKey: Bool { resolveKey() != nil }
+
+    static let pageSize = 25
+
+    /// The three datasets that request reliably.
+    private static let stableDataTypes = "Foundation,SR Legacy,Branded"
+
+    /// Foods *as eaten* — "spaghetti with meat sauce", "chicken curry,
+    /// restaurant" — where the other three carry ingredients.
+    ///
+    /// Requested on its own, never alongside the others. Including this value in
+    /// the main request makes it fail intermittently: measured over repeated
+    /// identical calls, the three stable types returned 200 twelve times out of
+    /// twelve, while adding this one dropped to 5 of 12, with the rest 400s from
+    /// USDA's edge rather than the API. No encoding of the space and parentheses
+    /// helped — `%20`/`%28%29` gave 5/10, literal parens 7/10, `+` 4/10 — so the
+    /// value itself is what trips it.
+    private static let surveyDataType = "Survey (FNDDS)"
+
+    /// Attempts for the survey request. Failures are independent at roughly 55%,
+    /// so three tries lands near 90% while the main search is never at risk.
+    private static let surveyAttempts = 3
 
     /// Generic foods first (Foundation and SR Legacy are lab-analyzed), then
     /// USDA's branded entries. Returns [] with no key rather than throwing —
     /// search still works through the local cache and Open Food Facts.
-    func search(_ term: String, limit: Int = 25) async throws -> [ResolvedFood] {
-        guard let key = USDAKeyStore.key else { return [] }
+    ///
+    /// The survey dataset is fetched as a second, independent request and appended.
+    /// It is additive: when it fails the search still returns everything else,
+    /// which is why it can't share the main request.
+    func search(_ term: String, page: Int = 1,
+                limit: Int = USDAClient.pageSize) async throws -> [ResolvedFood] {
+        guard resolveKey() != nil else { return [] }
         let query = String(term.prefix(80)).trimmingCharacters(in: .whitespaces)
         guard query.count >= 2 else { return [] }
 
+        async let surveyFoods = surveySearch(query, page: page, limit: limit)
+        let stable = try await request(query, page: page, limit: limit,
+                                      dataTypes: Self.stableDataTypes)
+
+        var seen = Set(stable.map(\.id))
+        var out = stable
+        for food in await surveyFoods where seen.insert(food.id).inserted {
+            out.append(food)
+        }
+        return out
+    }
+
+    /// The survey dataset, retried a few times and never throwing: a failure here
+    /// must not turn a working search into an empty one.
+    private func surveySearch(_ query: String, page: Int,
+                              limit: Int) async -> [ResolvedFood] {
+        for _ in 0..<Self.surveyAttempts {
+            if let foods = try? await request(query, page: page, limit: limit,
+                                              dataTypes: Self.surveyDataType) {
+                return foods
+            }
+        }
+        return []
+    }
+
+    private func request(_ query: String, page: Int, limit: Int,
+                         dataTypes: String) async throws -> [ResolvedFood] {
+        guard let key = resolveKey() else { return [] }
         var comps = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/foods/search")!
         comps.queryItems = [
             .init(name: "query", value: query),
             .init(name: "pageSize", value: String(min(limit, 50))),
-            .init(name: "dataType", value: "Foundation,SR Legacy,Branded"),
+            .init(name: "pageNumber", value: String(max(page, 1))),
+            .init(name: "dataType", value: dataTypes),
             .init(name: "api_key", value: key),
         ]
 
@@ -51,7 +115,7 @@ struct USDAClient: Sendable {
     /// Fetched lazily when the log sheet opens rather than for every search hit,
     /// which would be one request per result.
     func detail(fdcID: Int) async throws -> ResolvedFood? {
-        guard let key = USDAKeyStore.key else { return nil }
+        guard let key = resolveKey() else { return nil }
         var comps = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/food/\(fdcID)")!
         comps.queryItems = [.init(name: "api_key", value: key)]
         guard let url = comps.url else { throw URLError(.badURL) }
@@ -206,8 +270,38 @@ struct USDAClient: Sendable {
 enum USDAKeyStore {
     private static let account = "usda.apiKey"
 
+    /// Keychain first, then a key injected at build time.
+    ///
+    /// The build-time value comes from `Secrets.xcconfig`, which is gitignored,
+    /// through an Info.plist substitution. It exists because Keychain entries
+    /// don't survive a reinstall without iCloud Keychain, and personal-team
+    /// provisioning profiles expire weekly — so without it the key has to be
+    /// pasted again every few days.
+    ///
+    /// It does mean the key reaches the app bundle and can be recovered from it.
+    /// That is acceptable for a personal build of a free, per-key rate-limited,
+    /// revocable API key, and is not acceptable for a distributed one — a build
+    /// intended for anyone else should ship with the setting unset and rely on
+    /// the settings screen.
     static var key: String? {
-        Keychain.read(account)
+        if let stored = Keychain.read(account) { return stored }
+        return bundledKey
+    }
+
+    /// True when the key came from the build rather than the settings screen, so
+    /// the UI can say where it's coming from instead of showing an empty field.
+    static var isBundled: Bool {
+        Keychain.read(account) == nil && bundledKey != nil
+    }
+
+    private static var bundledKey: String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "USDAAPIKey") as? String
+        else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An unset build setting substitutes to the empty string, and the
+        // placeholder is what the example file ships with.
+        guard !trimmed.isEmpty, trimmed != "$(USDA_API_KEY)" else { return nil }
+        return trimmed
     }
 
     static func save(_ value: String) {

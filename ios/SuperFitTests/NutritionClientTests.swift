@@ -145,10 +145,24 @@ private let usdaSearchJSON = """
         #expect(foods.count == 2)
     }
 
+    /// The key is injected rather than cleared from the Keychain: under the test
+    /// runner `Bundle.main` is the host app, which carries the build-time key, so
+    /// clearing the Keychain alone no longer yields a key-less client.
     @Test func usdaReturnsNothingWithoutAKey() async throws {
         USDAKeyStore.clear()
         StubProtocol.responder = { _ in (200, usdaSearchJSON) }
-        #expect(try await USDAClient(session: StubProtocol.session()).search("chicken").isEmpty)
+        let client = USDAClient(session: StubProtocol.session(), key: { nil })
+        #expect(try await client.search("chicken").isEmpty)
+        #expect(!client.hasKey)
+    }
+
+    /// A build-time key is a fallback, never an override: someone who pastes a
+    /// key in Settings expects that key to be the one used.
+    @Test func theKeychainWinsOverTheBundledKey() {
+        USDAKeyStore.save("keychain-key")
+        defer { USDAKeyStore.clear() }
+        #expect(USDAKeyStore.key == "keychain-key")
+        #expect(!USDAKeyStore.isBundled)
     }
 
     @Test func usdaRejectsShortQueries() async throws {

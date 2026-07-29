@@ -30,6 +30,12 @@ struct FoodPickerView: View {
     @State private var buildingMeal = false
     @State private var searchTask: Task<Void, Never>?
     @State private var confirmingDelete: ResolvedFood?
+    @State private var hasMore = false
+    @State private var loadingMore = false
+    @State private var loadedPage = 1
+    @State private var store: StoreBrand?
+
+    private let stores = StoreBrand.forRegion(Locale.current.region?.identifier)
 
     /// Ids of everything in the user's own list — custom foods and anything
     /// previously logged. Built once per render rather than fetched per row.
@@ -75,6 +81,9 @@ struct FoodPickerView: View {
                         }
                     }
             }
+            if hasMore && filter == .all && !visible.isEmpty {
+                loadMoreRow
+            }
             creationRow
         }
         .searchable(text: $query, prompt: "Search foods")
@@ -100,13 +109,51 @@ struct FoodPickerView: View {
     // MARK: - Pieces
 
     private var filterBar: some View {
-        Picker("Filter", selection: $filter) {
-            ForEach(FoodFilter.allCases) { Text($0.label).tag($0) }
+        VStack(spacing: 8) {
+            Picker("Filter", selection: $filter) {
+                ForEach(FoodFilter.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+
+            if filter == .all && !stores.isEmpty { storeBar }
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .background(.bar)
+    }
+
+    /// Own-brand filters for the local retailers.
+    ///
+    /// Labelled "own brand" rather than "sold at" because that's what it is:
+    /// Open Food Facts indexes who made a product, and its stocked-in field
+    /// returns nothing. This finds Tesco Finest pasta, not a jar of Hellmann's
+    /// bought in Tesco, and the label shouldn't promise the second.
+    private var storeBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(stores) { brand in
+                    let selected = store == brand
+                    Button {
+                        store = selected ? nil : brand
+                        runSearch()
+                    } label: {
+                        Text(brand.displayName)
+                            .font(.caption.weight(selected ? .semibold : .regular))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(selected ? Theme.gold.opacity(0.25) : .clear)
+                                    .overlay(Capsule().stroke(
+                                        selected ? Theme.gold : Theme.hairline.opacity(0.4),
+                                        lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(selected ? Theme.gold : .secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     private func row(_ food: ResolvedFood) -> some View {
@@ -200,6 +247,23 @@ struct FoodPickerView: View {
         }
     }
 
+    private var loadMoreRow: some View {
+        Button(action: loadMore) {
+            HStack {
+                Spacer()
+                if loadingMore {
+                    ProgressView()
+                } else {
+                    Text("Load more results")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.gold)
+                }
+                Spacer()
+            }
+        }
+        .disabled(loadingMore)
+    }
+
     // MARK: - Actions
 
     private func runSearch() {
@@ -209,8 +273,36 @@ struct FoodPickerView: View {
             try? await Task.sleep(for: .milliseconds(400))   // debounce
             guard !Task.isCancelled else { return }
             searching = true
-            results = await FoodResolver(context: context).search(term)
+            let page = await FoodResolver(context: context).search(term, brand: store)
+            guard !Task.isCancelled else { return }
+            results = page.foods
+            hasMore = page.hasMore
+            loadedPage = 1
             searching = false
+        }
+    }
+
+    /// Appends the next page. Deliberately a button rather than infinite scroll:
+    /// each page is two network calls, and past the first 25 the results are
+    /// rarely what was wanted — paging should be a decision, not a side effect
+    /// of scrolling.
+    private func loadMore() {
+        guard !loadingMore, hasMore else { return }
+        let term = query
+        let next = loadedPage + 1
+        loadingMore = true
+        Task {
+            let page = await FoodResolver(context: context).search(term, page: next,
+                                                                   brand: store)
+            guard !Task.isCancelled, term == query else {
+                loadingMore = false
+                return
+            }
+            let known = Set(results.map(\.id))
+            results.append(contentsOf: page.foods.filter { !known.contains($0.id) })
+            hasMore = page.hasMore
+            loadedPage = next
+            loadingMore = false
         }
     }
 

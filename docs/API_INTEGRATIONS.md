@@ -25,28 +25,99 @@ Patterns:
 
 ## Nutrition — Open Food Facts (barcode-first, free)
 - Product by barcode: `GET https://world.openfoodfacts.org/api/v2/product/{barcode}.json`
-- Search: `GET https://world.openfoodfacts.org/cgi/search.pl?search_terms=...&json=1`
+- Search: `GET https://search.openfoodfacts.org/search?q=…&page=…&page_size=25`
 - No key. Set a descriptive `User-Agent: SuperFit/1.0 (contact@…)` per their policy.
 - Map `nutriments` (per 100 g) → `Food.per100g`. Coverage is crowd-sourced; treat
   missing fields as nil, not zero.
+
+**Why not `cgi/search.pl`.** That endpoint is deprecated and unreliable in
+practice — probing it returned 503 on two of three consecutive attempts while the
+current search service answered every time. It remains wired as a fallback for
+when the new service is down, but it is no longer the primary.
+
+The two return different shapes for one field: `brands` is an **array** on the
+search service and a comma-joined **string** on the legacy endpoint and the
+product endpoint. `OFFNutriments` is shared; the containers are not.
+
+**Store filtering is own-brand only.** `brands_tags` finds a retailer's own range
+(Tesco Finest, Lidl Deluxe). The `stores_tags` field — where a product was *seen*
+— returns **0 results for every retailer tested**, so "sold at Tesco" is not
+possible and the UI says "own brand" rather than implying it.
+
+Tag spellings are Open Food Facts', not the shop name: `sainsbury` returns 141
+products against `sainsbury-s`'s 3,345. Every tag in `StoreBrand` was checked
+against a live count. Coverage is uneven — Lidl/Aldi/Carrefour hit the 10,000
+result cap, Tesco 8,844, SuperValu 764, Dunnes 90 — and many own-brand fresh items
+(whole chicken, loose produce) carry no energy value and are dropped before
+reaching the picker.
+
+A store filter queries Open Food Facts alone: USDA has no supermarket own-brand
+ranges outside the US and no tag to filter on, so including it would only dilute
+the results. Country sorting is skipped too — Tesco's own brand is British by
+definition, so the second request buys nothing.
+
+**Country sorting, not filtering.** Results are merged from two concurrent
+queries — one restricted to the device region's `countries_tags`, one unrestricted
+— with local hits first and duplicates dropped. Unweighted, a UK search for
+"chicken breast" returns a Spanish product above Tesco's; weighted, the top three
+are Tesco, Sainsbury's and Morrisons. A hard filter was rejected because it hides
+imported or holiday purchases with no signal that the product exists at all.
+
+Country comes from `Locale.current.region`, not GPS: no permission prompt, works
+with no signal, and it doesn't switch catalogue the moment you land abroad. Tags
+are English lowercase names (`united-kingdom`), not ISO codes, so
+`countryTag(for:)` maps the ones with meaningful catalogues and passes anything
+else through lowercased — an unmapped region searches unweighted rather than
+sending a tag matching nothing.
 
 ## Nutrition — USDA FoodData Central API
 - Search: `GET https://api.nal.usda.gov/fdc/v1/foods/search?query=…&api_key=…`
 - Detail: `GET https://api.nal.usda.gov/fdc/v1/food/{fdcId}?api_key=…` — the only
   source of `foodPortions`, so it's fetched lazily when the log sheet opens
   rather than once per search result.
-- `dataType=Foundation,SR Legacy,Branded` — lab-analyzed generics plus USDA's
-  branded set, all carrying full micronutrient data.
+- `dataType=Foundation,SR Legacy,Branded` in the main request — lab-analyzed
+  generics plus USDA's branded set, all carrying full micronutrient data.
+- `Survey (FNDDS)` is requested **separately**, never in the same call. It adds
+  foods *as eaten* ("dirty rice", "rice pilaf", "chicken curry, restaurant") where
+  the other three carry ingredients.
+
+  Putting it in the main request makes that request fail intermittently. Measured
+  over repeated identical calls: the three stable types returned 200 **12/12**,
+  adding the survey type dropped to **5/12**, the rest 400s from USDA's edge
+  (nginx HTML body, not an API error). No encoding of the space and parentheses
+  helped — `%20`+`%28%29` gave 5/10, literal parens 7/10, `+` for space 4/10 — so
+  the value itself is what trips it, not the escaping.
+
+  It therefore runs as an independent, retried, non-throwing request whose results
+  are appended: **11/12 availability at three attempts**, and a failure can never
+  turn a working search into an empty one.
+- `pageNumber` drives pagination. USDA reports no page count, so "another page may
+  exist" is inferred from a full page of results.
 - Nutrient ids are the 1000-series (1008 kcal, 1003 protein, 1089 iron, …);
   `USDAClient.microIDs` maps them to `Micronutrient`.
 - Entries with no energy value are dropped: a food that logs as 0 kcal is worse
   than one that isn't offered.
 
 **Key handling.** Free key from <https://fdc.nal.usda.gov/api-key-signup.html>,
-entered by the user in Settings → Connected services and stored in the
-**Keychain**. It is never compiled into the binary — a bundled key ships to every
-install and is trivially extracted from the app package. Rate limit is 1,000
-requests/hour per key, which one user's searching will not approach.
+entered in Settings → Connected services and stored in the **Keychain**. Rate
+limit is 1,000 requests/hour per key, which one user's searching will not
+approach.
+
+A key may also be injected at build time via `USDA_API_KEY` in the gitignored
+`Secrets.xcconfig`, substituted into Info.plist and read as a **fallback** when
+the Keychain is empty. The Keychain always wins, so pasting a key in Settings
+overrides the build.
+
+This exists because Keychain entries don't survive a reinstall without iCloud
+Keychain — unavailable on a personal Apple team, which also can't hold a
+provisioning profile longer than 7 days, so reinstalls are frequent. Without it
+the key has to be re-pasted every few days.
+
+The trade is explicit: an injected key reaches the app bundle and can be
+recovered from it. That is acceptable for a personal build of a free,
+per-key-rate-limited, revocable key. **A build given to anyone else should leave
+the setting unset** and rely on the settings screen. The key is never committed —
+`Secrets.xcconfig` is gitignored and `Secrets.example.xcconfig` ships blank.
 
 **Serving sizes.** `foodPortions` gives household measures — "1 medium" at 118 g,
 "1 cup, sliced" at 150 g — which is how people actually think about food. USDA
@@ -64,6 +135,14 @@ source has no portion data. Ounces use the international avoirdupois definition
 
 **Resolution order:** local cache → USDA FDC → Open Food Facts. The two network
 sources run concurrently, and either failing leaves the other's results intact.
+
+**Pagination.** "Load more" appends the next page from both sources, deduplicated
+against what's already shown. Cached rows and supplements appear on page 1 only —
+they're already complete, and repeating them would push the remote results the
+user is paging *for* further down each time. It's a button rather than infinite
+scroll: each page costs three network calls, and past the first 25 the results are
+rarely what was wanted, so paging should be a decision rather than a side effect
+of scrolling.
 
 **Offline behaviour.** Search needs a connection. Every fetched food is cached as
 a `Food` row, so anything logged before — the long tail of what someone actually
