@@ -24,10 +24,13 @@
 	<string>SuperFit can save workouts you log back to Apple Health so your fitness data stays in one place.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>SuperFit uses the camera to scan food barcodes for fast, accurate nutrition logging.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SuperFit follows your location during an outdoor run, ride, or walk you start in the app, to measure distance and pace. Location is used only while a workout is running and never leaves your device.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
 		<string>processing</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

@@ -21,6 +21,16 @@ actor HealthKitManager: HealthProvider {
         q(.distanceWalkingRunning); q(.flightsClimbed)
         q(.bodyMass); q(.bodyFatPercentage); q(.leanBodyMass)
         q(.restingHeartRate); q(.heartRateVariabilitySDNN); q(.vo2Max); q(.heartRate)
+        // Workout detail: distance per modality, elevation, cadence, power and
+        // swim strokes are separate quantity types, not fields on HKWorkout.
+        q(.distanceCycling); q(.distanceSwimming); q(.distanceDownhillSnowSports)
+        q(.swimmingStrokeCount); q(.flightsClimbed)
+        if #available(iOS 16.0, *) {
+            q(.runningPower); q(.runningSpeed); q(.runningStrideLength)
+            q(.cyclingPower); q(.cyclingCadence); q(.cyclingSpeed)
+        }
+        if #available(iOS 17.0, *) { q(.timeInDaylight) }
+        q(.stepCount)
         if let sleep = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) { t.insert(sleep) }
         t.insert(HKObjectType.workoutType())
         return t
@@ -95,12 +105,118 @@ actor HealthKitManager: HealthProvider {
             }
             store.execute(q)
         }
-        return workouts.map {
-            let kcal = $0.statistics(for: HKQuantityType(.activeEnergyBurned))?
-                .sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
-            return WorkoutSample(start: $0.startDate, end: $0.endDate,
-                                 activityName: $0.workoutActivityType.displayName,
-                                 activeEnergyKcal: kcal, avgHeartRate: nil)
+        var out: [WorkoutSample] = []
+        for workout in workouts {
+            out.append(await sample(from: workout))
+        }
+        return out
+    }
+
+    /// Assembles everything HealthKit knows about one workout.
+    ///
+    /// Statistics come off the workout itself where they exist; heart rate needs
+    /// a separate query because `HKWorkout` carries no HR statistics of its own.
+    /// Anything the source didn't record stays nil rather than becoming zero.
+    private func sample(from workout: HKWorkout) async -> WorkoutSample {
+        func stat(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit) -> Double? {
+            workout.statistics(for: HKQuantityType(id))?
+                .sumQuantity()?.doubleValue(for: unit)
+        }
+
+        let meta = workout.metadata ?? [:]
+        let isIndoor = meta[HKMetadataKeyIndoorWorkout] as? Bool
+        let swimsInPool = (meta[HKMetadataKeySwimmingLocationType] as? Int)
+            .map { $0 == HKWorkoutSwimmingLocationType.pool.rawValue }
+        let activity = WorkoutActivity(healthKit: workout.workoutActivityType,
+                                       isIndoor: isIndoor, swimsInPool: swimsInPool)
+
+        // Distance lives under a different type per modality, so ask for the one
+        // this activity would have written and fall back through the others.
+        let distance = stat(.distanceWalkingRunning, .meter())
+            ?? stat(.distanceCycling, .meter())
+            ?? stat(.distanceSwimming, .meter())
+            ?? stat(.distanceDownhillSnowSports, .meter())
+
+        var s = WorkoutSample(
+            externalID: workout.uuid.uuidString,
+            start: workout.startDate,
+            end: workout.endDate,
+            activity: activity,
+            activeEnergyKcal: stat(.activeEnergyBurned, .kilocalorie()) ?? 0)
+
+        s.distanceMetres = distance
+        s.swimStrokeCount = stat(.swimmingStrokeCount, .count())
+        s.sourceName = workout.sourceRevision.source.name
+        s.elevationGainMetres = (meta[HKMetadataKeyElevationAscended] as? HKQuantity)?
+            .doubleValue(for: .meter())
+        s.swimStrokeStyle = (meta[HKMetadataKeySwimmingStrokeStyle] as? Int)
+            .flatMap(strokeStyleName)
+
+        if let hr = try? await heartRateStatistics(in: DateInterval(start: workout.startDate,
+                                                                   end: workout.endDate)) {
+            s.avgHeartRate = hr.average
+            s.maxHeartRate = hr.maximum
+            s.minHeartRate = hr.minimum
+        }
+
+        // Cadence as a rate can't be summed, so derive it from step count over
+        // the duration for foot activities. Cycling reports its own.
+        if activity.metrics.contains(.cadence), workout.duration > 0 {
+            if let steps = stat(.stepCount, .count()) {
+                s.avgCadence = steps / (workout.duration / 60)
+            }
+        }
+
+        s.laps = laps(from: workout)
+        return s
+    }
+
+    private func strokeStyleName(_ raw: Int) -> String? {
+        switch HKSwimmingStrokeStyle(rawValue: raw) {
+        case .freestyle: return "Freestyle"
+        case .backstroke: return "Backstroke"
+        case .breaststroke: return "Breaststroke"
+        case .butterfly: return "Butterfly"
+        case .mixed: return "Mixed"
+        case .kickboard: return "Kickboard"
+        default: return nil
+        }
+    }
+
+    /// Laps from the workout's own segment/lap markers.
+    private func laps(from workout: HKWorkout) -> [WorkoutLapSample] {
+        guard let events = workout.workoutEvents else { return [] }
+        let marks = events.filter { $0.type == .lap || $0.type == .segment }
+        return marks.enumerated().map { i, event in
+            WorkoutLapSample(index: i + 1,
+                             start: event.dateInterval.start,
+                             durationSeconds: event.dateInterval.duration,
+                             distanceMetres: nil,
+                             avgHeartRate: nil)
+        }
+    }
+
+    /// Average, max and min heart rate over an interval.
+    ///
+    /// `HKStatisticsQuery` with `.discreteAverage` does this server-side rather
+    /// than pulling every beat sample across the whole workout.
+    private func heartRateStatistics(
+        in range: DateInterval
+    ) async throws -> (average: Double?, maximum: Double?, minimum: Double?) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
+            throw HealthError.unsupportedType
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: range.start, end: range.end)
+        return try await withCheckedThrowingContinuation { cont in
+            let q = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate,
+                                      options: [.discreteAverage, .discreteMax, .discreteMin]) { _, stats, error in
+                if let error { cont.resume(throwing: error); return }
+                let unit = HKUnit.count().unitDivided(by: .minute())
+                cont.resume(returning: (stats?.averageQuantity()?.doubleValue(for: unit),
+                                        stats?.maximumQuantity()?.doubleValue(for: unit),
+                                        stats?.minimumQuantity()?.doubleValue(for: unit)))
+            }
+            store.execute(q)
         }
     }
 

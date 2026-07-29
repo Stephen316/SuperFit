@@ -89,6 +89,134 @@ actor GarminProvider: RecoveryProvider {
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode([RecoveryDTO].self, from: data).map(\.metrics)
     }
+
+    /// GET {base}/garmin/workouts?start=…&end=… → [GarminWorkoutDTO]
+    ///
+    /// Enrichment, not a second source of truth. Garmin Connect already writes
+    /// activities to Apple Health, so the same run usually arrives twice; the
+    /// sync service matches on start time and fills in only what HealthKit has no
+    /// field for — power, cadence, training effect. Workouts with no HealthKit
+    /// counterpart (Connect's Health sync off) are imported whole.
+    func workouts(in range: DateInterval) async throws -> [GarminWorkout] {
+        guard let config, let token = config.sessionToken else { return [] }
+        var comps = URLComponents(
+            url: config.baseURL.appendingPathComponent("garmin/workouts"),
+            resolvingAgainstBaseURL: false)!
+        comps.queryItems = [
+            .init(name: "start", value: ISO8601DateFormatter().string(from: range.start)),
+            .init(name: "end", value: ISO8601DateFormatter().string(from: range.end)),
+        ]
+        guard let url = comps.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if http.statusCode == 401 {
+            unlink()
+            throw URLError(.userAuthenticationRequired)
+        }
+        guard (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        guard data.count < 5_000_000 else { throw URLError(.dataLengthExceedsMaximum) }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode([GarminWorkoutDTO].self, from: data).map(\.workout)
+    }
+}
+
+/// A Garmin activity, normalized by the backend.
+struct GarminWorkout: Sendable, Equatable {
+    let id: String
+    let start: Date
+    let end: Date
+    let activity: WorkoutActivity
+    var activeEnergyKcal: Double?
+    var distanceMetres: Double?
+    var avgHeartRate: Double?
+    var maxHeartRate: Double?
+    var elevationGainMetres: Double?
+    var avgCadence: Double?
+    var avgPowerWatts: Double?
+    /// Garmin's aerobic/anaerobic training effect, already rendered to a phrase
+    /// by the backend. Kept as text: the 0–5 scale is Garmin's own model and
+    /// converting it into one of this app's numbers would imply a shared basis
+    /// that doesn't exist.
+    var trainingEffectSummary: String?
+}
+
+/// Backend response shape for activities.
+struct GarminWorkoutDTO: Decodable {
+    let id: String
+    let startTime: Date
+    let durationSeconds: Double
+    /// Garmin's activity key, e.g. "running", "lap_swimming", "road_biking".
+    let activityType: String
+    let activeKilocalories: Double?
+    let distanceMeters: Double?
+    let averageHeartRate: Double?
+    let maxHeartRate: Double?
+    let elevationGainMeters: Double?
+    let averageCadence: Double?
+    let averagePowerWatts: Double?
+    let aerobicTrainingEffect: Double?
+    let anaerobicTrainingEffect: Double?
+
+    var workout: GarminWorkout {
+        GarminWorkout(
+            id: id,
+            start: startTime,
+            end: startTime.addingTimeInterval(durationSeconds),
+            activity: GarminWorkoutDTO.activity(for: activityType),
+            activeEnergyKcal: activeKilocalories,
+            distanceMetres: distanceMeters,
+            avgHeartRate: averageHeartRate,
+            maxHeartRate: maxHeartRate,
+            elevationGainMetres: elevationGainMeters,
+            avgCadence: averageCadence,
+            avgPowerWatts: averagePowerWatts,
+            trainingEffectSummary: Self.effectSummary(aerobic: aerobicTrainingEffect,
+                                                      anaerobic: anaerobicTrainingEffect))
+    }
+
+    /// Garmin's activity keys → the app's taxonomy. Unknown keys land on `.other`
+    /// so a new Garmin activity type imports rather than failing to decode.
+    static func activity(for key: String) -> WorkoutActivity {
+        switch key.lowercased() {
+        case "running", "street_running": return .running
+        case "trail_running": return .trailRunning
+        case "treadmill_running", "indoor_running": return .treadmillRunning
+        case "walking", "casual_walking", "speed_walking": return .walking
+        case "hiking": return .hiking
+        case "cycling", "road_biking", "gravel_cycling": return .cycling
+        case "mountain_biking": return .mountainBiking
+        case "indoor_cycling", "virtual_ride": return .indoorCycling
+        case "lap_swimming": return .poolSwimming
+        case "open_water_swimming": return .openWaterSwimming
+        case "rowing": return .rowing
+        case "indoor_rowing": return .indoorRowing
+        case "stand_up_paddleboarding", "kayaking": return .paddling
+        case "elliptical": return .elliptical
+        case "stair_climbing", "indoor_climbing": return .stairClimbing
+        case "hiit": return .hiit
+        case "strength_training": return .strengthTraining
+        case "yoga": return .yoga
+        case "pilates": return .pilates
+        case "tennis": return .tennis
+        case "resort_skiing_snowboarding", "backcountry_skiing": return .skiing
+        default: return .other
+        }
+    }
+
+    static func effectSummary(aerobic: Double?, anaerobic: Double?) -> String? {
+        switch (aerobic, anaerobic) {
+        case let (a?, b?): return String(format: "Aerobic %.1f · anaerobic %.1f", a, b)
+        case let (a?, nil): return String(format: "Aerobic %.1f", a)
+        case let (nil, b?): return String(format: "Anaerobic %.1f", b)
+        case (nil, nil): return nil
+        }
+    }
 }
 
 /// Backend response shape — stable regardless of Garmin's own format.

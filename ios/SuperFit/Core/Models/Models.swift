@@ -361,6 +361,89 @@ final class WorkoutTemplateItem {
     }
 }
 
+enum WorkoutSource: String, Codable, Sendable {
+    case appleHealth, garmin, manual, liveSession
+
+    var displayName: String {
+        switch self {
+        case .appleHealth: return "Apple Health"
+        case .garmin: return "Garmin"
+        case .manual: return "Manual entry"
+        case .liveSession: return "Tracked in SuperFit"
+        }
+    }
+}
+
+/// A non-strength workout — a run, ride, swim, class — imported from a watch or
+/// tracked in the app.
+///
+/// Kept separate from `TrainingSession` rather than bolted onto it: a session is
+/// a list of sets against the exercise catalog, and forcing a 10 km run into that
+/// shape would mean a set with no exercise, no weight and no reps. They share the
+/// history view, not the schema.
+///
+/// `externalID` is the source's own identifier (HealthKit's workout UUID), which
+/// is what makes repeated imports idempotent — the observer query fires on every
+/// change to the workout store, not once per new workout.
+@Model
+final class WorkoutRecord {
+    var id: UUID = UUID()
+    var externalID: String?
+    var startedAt: Date = Date()
+    var endedAt: Date = Date()
+    var activityRaw: String = WorkoutActivity.other.rawValue
+    var sourceRaw: String = WorkoutSource.appleHealth.rawValue
+    var sourceName: String?
+
+    var activeEnergyKcal: Double = 0
+    var totalEnergyKcal: Double?
+    var distanceMetres: Double?
+    var avgHeartRate: Double?
+    var maxHeartRate: Double?
+    var minHeartRate: Double?
+    var elevationGainMetres: Double?
+    var avgCadence: Double?
+    var avgPowerWatts: Double?
+    var swimStrokeCount: Double?
+    var swimStrokeStyle: String?
+    /// Laps as JSON — a handful of values per lap, only ever read as a whole,
+    /// and a relationship would add a CloudKit-synced table for no query benefit.
+    var lapsJSON: Data?
+    var notes: String?
+
+    init(startedAt: Date = .now, endedAt: Date = .now,
+         activity: WorkoutActivity = .other, source: WorkoutSource = .manual) {
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.activityRaw = activity.rawValue
+        self.sourceRaw = source.rawValue
+    }
+
+    var activity: WorkoutActivity {
+        get { WorkoutActivity(rawValue: activityRaw) ?? .other }
+        set { activityRaw = newValue.rawValue }
+    }
+
+    var source: WorkoutSource {
+        get { WorkoutSource(rawValue: sourceRaw) ?? .appleHealth }
+        set { sourceRaw = newValue.rawValue }
+    }
+
+    var laps: [WorkoutLapSample] {
+        get { lapsJSON.flatMap { try? JSONDecoder().decode([WorkoutLapSample].self, from: $0) } ?? [] }
+        set { lapsJSON = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+
+    var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
+
+    /// Metres per second, or nil when the activity carries no distance. Guarded
+    /// on duration as well: a zero-length workout would divide by zero.
+    var averageSpeed: Double? {
+        guard let distanceMetres, distanceMetres > 0, durationSeconds > 0 else { return nil }
+        return distanceMetres / durationSeconds
+    }
+}
+
 @Model
 final class TrainingSession {
     var id: UUID = UUID()

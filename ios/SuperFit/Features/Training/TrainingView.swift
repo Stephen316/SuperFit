@@ -7,8 +7,15 @@ struct TrainingView: View {
     @Query private var exercises: [Exercise]
     @Query(sort: \WorkoutTemplate.createdAt, order: .reverse) private var savedTemplates: [WorkoutTemplate]
 
+    @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
+    @Query private var profiles: [UserProfile]
+    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+
     @State private var activeSession: TrainingSession?
     @State private var watch = WatchWorkoutMonitor()
+    @State private var showingPicker = false
+    @State private var liveActivity: WorkoutActivity?
+    @State private var detailWorkout: WorkoutRecord?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -34,6 +41,22 @@ struct TrainingView: View {
         return VolumeAggregator().weeklySets(records: allRecords, muscles: muscles, week: week)
     }
 
+    /// Cardio ACWR, or nil when too few workouts carry heart rate to answer.
+    private var cardioLoad: CardioLoadAnalyzer.Result? {
+        guard let profile = profiles.first,
+              let restingHR = vitals.compactMap(\.restingHR).first
+        else { return nil }
+        let records = workouts
+            .filter { !$0.activity.isStrength }
+            .map { CardioRecord(date: $0.startedAt,
+                                durationMinutes: $0.durationSeconds / 60,
+                                avgHeartRate: $0.avgHeartRate) }
+        return CardioLoadAnalyzer().acwr(records: records,
+                                         restingHR: restingHR,
+                                         age: Double(profile.ageYears),
+                                         isFemale: profile.sex == .female)
+    }
+
     private var progressions: [ExerciseProgression] {
         let window = DateInterval(start: .now.addingTimeInterval(-60 * 86_400), end: .now)
         return ProgressionAnalyzer().progressions(records: allRecords, window: window)
@@ -54,28 +77,14 @@ struct TrainingView: View {
         NavigationStack {
             List {
                 Section {
-                    if savedTemplates.isEmpty {
-                        Button { start(named: nil) } label: {
-                            Label("Start workout", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                        }
-                    } else {
-                        Menu {
-                            Section("My workouts") {
-                                ForEach(savedTemplates) { template in
-                                    Button(template.name) { start(named: template.name) }
-                                }
-                            }
-                            Divider()
-                            Button("Empty workout") { start(named: nil) }
-                        } label: {
-                            Label("Start workout", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                        }
+                    Button { showingPicker = true } label: {
+                        Label("New workout", systemImage: "plus.circle.fill")
+                            .font(.headline)
                     }
                 } footer: {
                     if savedTemplates.isEmpty {
-                        Text("Finish a workout to save it as a reusable template.")
+                        Text("Pick any activity — gym, run, ride, swim — or import "
+                             + "one your watch already recorded.")
                     }
                 }
 
@@ -111,9 +120,44 @@ struct TrainingView: View {
                     }
                 }
 
-                Section("History") {
+                if let load = cardioLoad {
+                    Section {
+                        HStack {
+                            Text("Cardio load")
+                            Spacer()
+                            Text(String(format: "%.2f", load.ratio))
+                                .monospacedDigit()
+                            Text(load.band.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(bandColor(load.band))
+                        }
+                    } footer: {
+                        Text("Acute:chronic ratio for cardio only, from heart-rate "
+                             + "load. Reported separately from lifting — the two "
+                             + "have no shared unit — and not folded into your "
+                             + "recovery score.")
+                    }
+                }
+
+                if !workouts.isEmpty {
+                    Section("Activities") {
+                        ForEach(workouts.prefix(30)) { workout in
+                            Button { detailWorkout = workout } label: {
+                                WorkoutRow(workout: workout, units: units)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .onDelete { offsets in
+                            let shown = Array(workouts.prefix(30))
+                            for i in offsets { context.delete(shown[i]) }
+                            try? context.save()
+                        }
+                    }
+                }
+
+                Section("Gym history") {
                     if sessions.isEmpty {
-                        Text("No workouts yet.").foregroundStyle(.secondary)
+                        Text("No gym workouts yet.").foregroundStyle(.secondary)
                     }
                     ForEach(sessions.prefix(30)) { session in
                         Button { activeSession = session } label: {
@@ -134,11 +178,36 @@ struct TrainingView: View {
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)
                 await watch.start()
+                await WorkoutSyncService(context: context).sync()
             }
             .fullScreenCover(item: $activeSession) { session in
                 ActiveWorkoutView(session: session)
             }
+            .fullScreenCover(item: $liveActivity) { activity in
+                LiveCardioView(activity: activity)
+            }
+            .sheet(item: $detailWorkout) { workout in
+                WorkoutDetailView(workout: workout)
+            }
+            .sheet(isPresented: $showingPicker) {
+                ActivityPickerView(
+                    savedTemplates: savedTemplates,
+                    recentWatchWorkouts: unimportedWatchWorkouts,
+                    onStartStrength: { start(named: $0) },
+                    onStartLive: { liveActivity = $0 },
+                    onImport: { sample in
+                        WorkoutSyncService(context: context).apply([sample])
+                        try? context.save()
+                    })
+            }
         }
+    }
+
+    /// Watch workouts that aren't already stored, so the picker never offers to
+    /// import something twice.
+    private var unimportedWatchWorkouts: [WorkoutSample] {
+        let stored = Set(workouts.compactMap(\.externalID))
+        return watch.todaysWorkouts.filter { !stored.contains($0.externalID) }
     }
 
     @ViewBuilder
@@ -163,17 +232,25 @@ struct TrainingView: View {
             }
         } else if !watch.todaysWorkouts.isEmpty {
             Section("Today from Apple Watch") {
-                ForEach(watch.todaysWorkouts.indices, id: \.self) { i in
-                    let w = watch.todaysWorkouts[i]
+                ForEach(watch.todaysWorkouts, id: \.externalID) { w in
                     HStack {
-                        Image(systemName: "applewatch")
-                        Text(w.activityName)
+                        Image(systemName: w.activity.symbolName)
+                        Text(w.activity.displayName)
                         Spacer()
-                        Text("\(Int(w.end.timeIntervalSince(w.start) / 60)) min · \(Int(w.activeEnergyKcal)) kcal")
+                        Text("\(Int(w.durationSeconds / 60)) min · \(Int(w.activeEnergyKcal)) kcal")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
+        }
+    }
+
+    private func bandColor(_ band: CardioLoadAnalyzer.Result.Band) -> Color {
+        switch band {
+        case .optimal: return .green
+        case .detraining: return .secondary
+        case .elevated: return .orange
+        case .spike: return .red
         }
     }
 
@@ -189,6 +266,46 @@ struct TrainingView: View {
         context.insert(session)
         try? context.save()
         activeSession = session
+    }
+}
+
+struct WorkoutRow: View {
+    let workout: WorkoutRecord
+    let units: UnitSystem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: workout.activity.symbolName)
+                .foregroundStyle(Theme.gold)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(workout.activity.displayName)
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(workout.startedAt, format: .dateTime.month().day())
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text(summary)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var summary: String {
+        var parts = ["\(Int(workout.durationSeconds / 60)) min"]
+        if workout.activity.metrics.contains(.distance),
+           let metres = workout.distanceMetres, metres > 0 {
+            parts.append(units == .metric
+                         ? String(format: "%.2f km", metres / 1000)
+                         : String(format: "%.2f mi", metres / 1609.344))
+        }
+        if workout.activeEnergyKcal > 0 {
+            parts.append("\(Int(workout.activeEnergyKcal)) kcal")
+        }
+        if let hr = workout.avgHeartRate { parts.append("\(Int(hr)) bpm") }
+        return parts.joined(separator: " · ")
     }
 }
 

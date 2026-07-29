@@ -19,6 +19,11 @@ what you eat and what the scale does over rolling 7/14/30-day windows.
   intakes adjusted for sex, age, goal, and training volume.
 - **Training** — 56-exercise catalog with 1–5 muscle-tension scores, tension-weighted
   weekly volume, e1RM progression, custom exercises, and reusable saved workouts.
+- **Multi-sport** — 40 activities from running to open-water swimming. Workouts
+  finished on an Apple Watch or Garmin sync in with everything the device recorded;
+  start one live on the phone with GPS distance, or import what the watch already
+  has. Cardio load is reported as its own acute:chronic ratio, never blended with
+  lifting tonnage. Workout calories are shown, never added back to the target.
 - **Recovery** — 0–100 readiness from sleep, HRV, resting HR, and training load
   (ACWR), degrading gracefully when inputs are missing rather than inventing a score.
 - **Sleep** — duration against need, stage composition, bedtime consistency, and the
