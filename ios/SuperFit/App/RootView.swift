@@ -79,9 +79,14 @@ struct RootView: View {
     }
 }
 
-/// Five tabs on a dark rounded bar. The centre well is a fixed part of the bar,
-/// not a selection indicator — it stays put while the gold moves to whichever
-/// tab is active.
+/// bottom-navigation from the Figma frame: 72pt tall, `#0A181B`, a 1pt `#1D3437`
+/// hairline along the top, and the home tab raised out of it in an 83pt well.
+///
+/// Squared off rather than rounded, and the fill runs past the safe area to the
+/// bottom of the screen. The frame floats the bar with 32pt beneath it, which on
+/// a real device would show the background gradient through the home-indicator
+/// strip; carrying the fill down was asked for and is what the bar does on
+/// hardware.
 private struct TabBar: View {
     @Binding var selection: AppTab
 
@@ -97,43 +102,47 @@ private struct TabBar: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.bottom, 6)
-        .background(
-            UnevenRoundedRectangle(topLeadingRadius: Theme.tabBarRadius,
-                                   topTrailingRadius: Theme.tabBarRadius,
-                                   style: .continuous)
-                .fill(Theme.tabBar)
+        .frame(height: 72)
+        .background(alignment: .top) {
+            Theme.tabBar
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Theme.hairline).frame(height: 1)
+                }
                 .ignoresSafeArea(edges: .bottom)
-        )
+        }
     }
 
     @ViewBuilder
     private func item(_ tab: AppTab) -> some View {
         let active = selection == tab
-        let tint = active ? Theme.gold : Theme.textPrimary
+        let tint = active ? Theme.gold : Theme.textSecondary
 
         if tab == .home {
+            // The well is 83pt against a 72pt bar, so it stands proud of both
+            // edges. Not a selection indicator: it stays put and only the tint
+            // moves with the active tab.
             ZStack {
                 Circle()
-                    .fill(Theme.surface)
-                    .frame(width: 74, height: 74)
-                Image(systemName: tab.icon)
-                    .font(.system(size: 32, weight: .regular))
-                    .foregroundStyle(tint)
+                    .fill(Theme.homeWell)
+                    .frame(width: 83, height: 83)
+                // Filled, not stroked: HouseGlyph is Figma's stroke *outline*.
+                // The file colours it #C3A920, not the gauge's #C4D13C.
+                HouseGlyph()
+                    .fill(active ? Theme.amber : tint)
+                    .frame(width: HouseGlyph.naturalSize.width,
+                           height: HouseGlyph.naturalSize.height)
             }
-            .frame(height: 62)
-            .offset(y: -12)
+            .frame(height: 72)
         } else {
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 22, weight: .regular))
                     .foregroundStyle(tint)
                 Text(tab.title)
-                    .font(Theme.font(13))
+                    .font(Theme.text(11, .medium))
                     .foregroundStyle(tint)
             }
-            .frame(height: 62)
+            .frame(height: 72)
         }
     }
 }
