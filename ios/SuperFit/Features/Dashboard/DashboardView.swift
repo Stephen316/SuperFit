@@ -251,7 +251,7 @@ struct DashboardView: View {
                     .foregroundStyle(Theme.textPrimary)
                 Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
                     .font(Theme.text(13, .medium))
-                    .foregroundStyle(hasData ? Theme.amber : Theme.textSecondary)
+                    .foregroundStyle(hasData ? Theme.gold : Theme.textSecondary)
             }
         }
     }

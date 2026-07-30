@@ -128,7 +128,7 @@ private struct TabBar: View {
                 // Filled, not stroked: HouseGlyph is Figma's stroke *outline*.
                 // The file colours it #C3A920, not the gauge's #C4D13C.
                 HouseGlyph()
-                    .fill(active ? Theme.amber : tint)
+                    .fill(active ? Theme.gold : tint)
                     .frame(width: HouseGlyph.naturalSize.width,
                            height: HouseGlyph.naturalSize.height)
             }

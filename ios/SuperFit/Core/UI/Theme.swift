@@ -8,8 +8,14 @@ enum Theme {
 
     // Sampled from the Figma file via the REST API, not by eye: every value here
     // is the literal fill on the corresponding node.
-    static let gold = Color(hex: 0xC4D13C)          // gauge-progress
-    static let amber = Color(hex: 0xC3A920)         // "Reduce Volume"
+    /// The app's one accent, everywhere: tab icons, gauges, charts, links.
+    ///
+    /// The mustard the Figma file strokes the home glyph with, not the limier
+    /// `#C4D13C` it fills the recovery gauge with. The file uses both, a couple of
+    /// hundred hue degrees apart, and having two near-identical yellows made the
+    /// selected tab look like a different shade of wrong next to everything else.
+    /// One wins, and it's the one on the icon you look at most.
+    static let gold = Color(hex: 0xC3A920)
     static let backgroundTop = Color(hex: 0x0C2627) // frame gradient stop 0
     static let backgroundBottom = Color.black       // frame gradient stop 1
     static let surface = Color(hex: 0x0F1D20)       // every card fill
