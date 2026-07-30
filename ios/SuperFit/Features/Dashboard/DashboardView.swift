@@ -22,11 +22,20 @@ struct DashboardView: View {
     @Query(sort: \RecoveryScoreRecord.date, order: .reverse) private var recoveries: [RecoveryScoreRecord]
     @Query(sort: \DailyEnergy.date, order: .reverse) private var energy: [DailyEnergy]
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
+    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+    @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
 
+    /// The day on screen. Every card reads from this rather than "now", so the
+    /// arrows under the title move the whole page together.
+    @State private var day = Calendar.current.startOfDay(for: .now)
+    @State private var addingTo: MealSlot?
     @State private var syncing = false
     @State private var showingHistory = false
     @State private var showingProtein = false
     @State private var showingSettings = false
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var profile: UserProfile? { profiles.first }
     private var latestWeight: Double? { metrics.first?.basisWeightKg }
@@ -46,19 +55,39 @@ struct DashboardView: View {
                                          proteinPerKg: override)
     }
 
-    private var todayLogs: [NutritionLog] {
-        nutrition.filter { Calendar.current.isDateInToday($0.date) }
+    private func onDay(_ date: Date) -> Bool {
+        Calendar.current.isDate(date, inSameDayAs: day)
     }
 
-    private var todayRecovery: RecoveryScoreRecord? {
-        recoveries.first { Calendar.current.isDateInToday($0.date) }
+    private var isToday: Bool { Calendar.current.isDateInToday(day) }
+
+    private var todayLogs: [NutritionLog] { nutrition.filter { onDay($0.date) } }
+    private var todayRecovery: RecoveryScoreRecord? { recoveries.first { onDay($0.date) } }
+    private var todayEnergy: DailyEnergy? { energy.first { onDay($0.date) } }
+    private var lastSleep: SleepData? { sleep.first { onDay($0.date) } }
+    private var todayVitals: DailyVitals? { vitals.first { onDay($0.date) } }
+    private var todayWorkouts: [WorkoutRecord] { workouts.filter { onDay($0.startedAt) } }
+
+    /// The weight to show is the last one recorded on or before the day being
+    /// viewed — stepping back a day shouldn't blank it just because nothing was
+    /// weighed that morning.
+    private var weightOnDay: BodyMetrics? {
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
+        return metrics.first { $0.date < end }
     }
 
-    private var todayEnergy: DailyEnergy? {
-        energy.first { Calendar.current.isDateInToday($0.date) }
+    /// The meal slot closest to the time of day, so the card offers the one you
+    /// are most likely about to eat. On a past day there is no "about to", so it
+    /// falls back to the last slot of the day.
+    private var nextMeal: MealSlot {
+        guard isToday else { return .dinner }
+        switch Calendar.current.component(.hour, from: .now) {
+        case ..<11: return .breakfast
+        case ..<16: return .lunch
+        case ..<21: return .dinner
+        default: return .snack
+        }
     }
-
-    private var lastSleep: SleepData? { sleep.first }
 
     var body: some View {
         NavigationStack {
@@ -73,6 +102,10 @@ struct DashboardView: View {
                             consumedCard
                             activitySleepCard
                             macrosCard
+                            stepsCard
+                            nextMealCard
+                            weightCard
+                            restingHRCard
                         }
                         .padding(.horizontal, 20)      // dashboard-content, pad 20
                         // bottom-spacer is 40 in the frame; the tab bar's own 72
@@ -88,6 +121,7 @@ struct DashboardView: View {
             .sheet(isPresented: $showingHistory) { HistoryView() }
             .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(item: $addingTo) { slot in FoodSearchView(day: day, meal: slot) }
             .task { await refresh() }
         }
     }
@@ -108,16 +142,54 @@ struct DashboardView: View {
     /// it would cost a whole screen, so it sits beside the gear in the same 40pt
     /// treatment rather than being dropped.
     private var headerRow: some View {
-        HStack(spacing: 10) {
-            Text("Today")
-                .font(Theme.text(18, .bold))
-                .foregroundStyle(Theme.textPrimary)
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(isToday ? "Today" : Self.dayFormatter.string(from: day))
+                    .font(Theme.text(18, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                dayStepper
+            }
             Spacer(minLength: 0)
             circleButton("chart.xyaxis.line", label: "Trends") { showingHistory = true }
             circleButton("gearshape", label: "Settings") { showingSettings = true }
         }
         .padding(.horizontal, 24)
-        .frame(height: 64)
+        .padding(.vertical, 12)
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        return f
+    }()
+
+    /// Steps the whole page a day at a time. Forward stops at today: there is no
+    /// data ahead of now, and an empty screen reads as a bug rather than a date.
+    private var dayStepper: some View {
+        HStack(spacing: 0) {
+            stepButton("chevron.left", label: "Previous day", by: -1, enabled: true)
+            Rectangle().fill(Theme.hairline).frame(width: 1, height: 16)
+            stepButton("chevron.right", label: "Next day", by: 1, enabled: !isToday)
+        }
+        .background(Capsule().fill(Theme.wash))
+        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+
+    private func stepButton(_ icon: String, label: String, by days: Int,
+                            enabled: Bool) -> some View {
+        Button {
+            guard let moved = Calendar.current.date(byAdding: .day, value: days, to: day)
+            else { return }
+            withAnimation(.easeOut(duration: 0.15)) { day = moved }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(enabled ? Theme.textPrimary : Theme.textSecondary.opacity(0.4))
+                .frame(width: 32, height: 26)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     /// settings-btn: 40pt circle, white at 5%, 20pt glyph.
@@ -178,7 +250,7 @@ struct DashboardView: View {
     private var burnedCard: some View {
         ThemeCard(padding: 20) {
             VStack(spacing: 8) {
-                cardLabel("Calories burned today")
+                cardLabel("Calories burned")
                 if let e = todayEnergy, e.activeEnergyKcal > 0 {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text("\(Int(e.activeEnergyKcal))")
@@ -216,13 +288,12 @@ struct DashboardView: View {
     private var activitySleepCard: some View {
         ThemeCard(padding: 0) {
             HStack(spacing: 0) {
-                splitBlock(title: "Activity",
-                           value: todayEnergy.map { "\($0.steps) steps" })
+                // Type and minutes, per the sketch — steps moved to their own card.
+                splitBlock(title: "Activity", value: activitySummary)
                 Rectangle()
                     .fill(Theme.divider)
                     .frame(width: 1, height: 44)
-                splitBlock(title: "Sleep",
-                           value: lastSleep.map { "\($0.asleepMinutes / 60) h \($0.asleepMinutes % 60) m" })
+                splitBlock(title: "Sleep", value: sleepSummary)
             }
             .padding(.vertical, 18)
         }
@@ -253,7 +324,91 @@ struct DashboardView: View {
         }
     }
 
+    /// Steps stand alone rather than sharing the Activity column, which now
+    /// carries the day's workout instead.
+    private var stepsCard: some View {
+        ThemeCard(padding: 20) {
+            VStack(spacing: 8) {
+                cardLabel("Steps")
+                Text(todayEnergy.map { "\($0.steps)" } ?? "–")
+                    .font(Theme.text(28, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+        }
+    }
+
+    /// The meal you're most likely about to eat, with whatever is already in it.
+    /// Tapping opens the same search the diary uses, logging into that slot.
+    private var nextMealCard: some View {
+        let slot = nextMeal
+        let logged = todayLogs.filter { $0.mealRaw == slot.rawValue }
+        let kcal = Int(logged.reduce(0) { $0 + $1.kcal })
+        return Button { addingTo = slot } label: {
+            ThemeCard(padding: 20) {
+                VStack(spacing: 8) {
+                    cardLabel(isToday ? "Next meal" : "Last meal")
+                    Text(slot.rawValue.capitalized)
+                        .font(Theme.text(28, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(logged.isEmpty
+                         ? "Nothing logged — tap to add"
+                         : "\(logged.count) item\(logged.count == 1 ? "" : "s") · \(kcal) kcal")
+                        .font(Theme.text(13))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var weightCard: some View {
+        ThemeCard(padding: 20) {
+            VStack(spacing: 8) {
+                cardLabel("Weight")
+                Text(weightOnDay.map { units.weightString($0.weightKg) } ?? "–")
+                    .font(Theme.text(28, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+        }
+    }
+
+    private var restingHRCard: some View {
+        ThemeCard(padding: 20) {
+            VStack(spacing: 8) {
+                cardLabel("Resting HR")
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(todayVitals?.restingHR.map { "\(Int($0))" } ?? "–")
+                        .font(Theme.text(28, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("bpm")
+                        .font(Theme.text(16))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+
     // MARK: - Pieces
+
+    /// "Run · 42 min". Several workouts collapse to a count rather than a list —
+    /// the column is one line wide.
+    private var activitySummary: String? {
+        let all = todayWorkouts
+        guard !all.isEmpty else { return nil }
+        let minutes = Int(all.reduce(0) { $0 + $1.durationSeconds } / 60)
+        let name = all.count == 1
+            ? all[0].activity.displayName
+            : "\(all.count) sessions"
+        return "\(name) · \(minutes) min"
+    }
+
+    /// "92% · 7h 20m", dropping the efficiency when Health didn't record it.
+    private var sleepSummary: String? {
+        guard let s = lastSleep else { return nil }
+        let hours = "\(s.asleepMinutes / 60)h \(s.asleepMinutes % 60)m"
+        guard let eff = s.efficiency else { return hours }
+        return "\(Int(eff * 100))% · \(hours)"
+    }
 
     private func cardLabel(_ text: String) -> some View {
         Text(text)
