@@ -33,7 +33,7 @@ struct RootView: View {
             TabView(selection: $tab) {
                 DiaryView().tag(AppTab.diet)
                 TrainingView().tag(AppTab.train)
-                DashboardView().tag(AppTab.home)
+                DashboardView(tab: $tab).tag(AppTab.home)
                 WeightView().tag(AppTab.weight)
                 SleepView().tag(AppTab.sleep)
             }

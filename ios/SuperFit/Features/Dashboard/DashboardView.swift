@@ -14,6 +14,10 @@ import SwiftData
 ///   on; here those come from Health and the diary, and the gauge still reads "–"
 ///   when Health has given us nothing.
 struct DashboardView: View {
+    /// Owned by `RootView`. Cards that lead to a whole section switch tab rather
+    /// than pushing a second copy of a screen that already exists.
+    @Binding var tab: AppTab
+
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
@@ -31,7 +35,10 @@ struct DashboardView: View {
     @State private var addingTo: MealSlot?
     @State private var syncing = false
     @State private var showingHistory = false
-    @State private var showingProtein = false
+    @State private var showingMacro: TrackedMacro?
+    @State private var showingConsumed = false
+    @State private var showingSteps = false
+    @State private var showingRestingHR = false
     @State private var showingSettings = false
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
@@ -119,7 +126,10 @@ struct DashboardView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingHistory) { HistoryView() }
-            .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
+            .sheet(item: $showingMacro) { MacroAdherenceView(macro: $0) }
+            .sheet(isPresented: $showingConsumed) { ConsumedFoodsView(day: day) }
+            .sheet(isPresented: $showingSteps) { StepsHistoryView() }
+            .sheet(isPresented: $showingRestingHR) { RestingHRHistoryView() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(item: $addingTo) { slot in FoodSearchView(day: day, meal: slot) }
             .task { await refresh() }
@@ -248,7 +258,7 @@ struct DashboardView: View {
 
     /// calories-burned-card: pad 20, gap 8, value and suffix on one baseline.
     private var burnedCard: some View {
-        ThemeCard(padding: 20) {
+        cardButton { tab = .train } content: {
             VStack(spacing: 8) {
                 cardLabel("Calories burned")
                 if let e = todayEnergy, e.activeEnergyKcal > 0 {
@@ -269,7 +279,7 @@ struct DashboardView: View {
 
     /// calories-consumed-card: pad 20, gap 8, caption stacked under the value.
     private var consumedCard: some View {
-        ThemeCard(padding: 20) {
+        cardButton { showingConsumed = true } content: {
             VStack(spacing: 8) {
                 cardLabel("Calories consumed")
                 VStack(spacing: 4) {
@@ -308,16 +318,13 @@ struct DashboardView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 0) {
-                    Button { showingProtein = true } label: {
-                        macroColumn("Protein", todayLogs.reduce(0) { $0 + $1.proteinG },
-                                    target: macros?.proteinG)
-                    }
-                    .buttonStyle(.plain)
+                    macroButton(.protein, todayLogs.reduce(0) { $0 + $1.proteinG },
+                                target: macros?.proteinG)
                     Rectangle().fill(Theme.divider).frame(width: 1, height: 32)
-                    macroColumn("Carbs", todayLogs.reduce(0) { $0 + $1.carbsG },
+                    macroButton(.carbs, todayLogs.reduce(0) { $0 + $1.carbsG },
                                 target: macros?.carbG)
                     Rectangle().fill(Theme.divider).frame(width: 1, height: 32)
-                    macroColumn("Fats", todayLogs.reduce(0) { $0 + $1.fatG },
+                    macroButton(.fats, todayLogs.reduce(0) { $0 + $1.fatG },
                                 target: macros?.fatG)
                 }
             }
@@ -327,7 +334,7 @@ struct DashboardView: View {
     /// Steps stand alone rather than sharing the Activity column, which now
     /// carries the day's workout instead.
     private var stepsCard: some View {
-        ThemeCard(padding: 20) {
+        cardButton { showingSteps = true } content: {
             VStack(spacing: 8) {
                 cardLabel("Steps")
                 Text(todayEnergy.map { "\($0.steps)" } ?? "–")
@@ -362,7 +369,7 @@ struct DashboardView: View {
     }
 
     private var weightCard: some View {
-        ThemeCard(padding: 20) {
+        cardButton { tab = .weight } content: {
             VStack(spacing: 8) {
                 cardLabel("Weight")
                 Text(weightOnDay.map { units.weightString($0.weightKg) } ?? "–")
@@ -373,7 +380,7 @@ struct DashboardView: View {
     }
 
     private var restingHRCard: some View {
-        ThemeCard(padding: 20) {
+        cardButton { showingRestingHR = true } content: {
             VStack(spacing: 8) {
                 cardLabel("Resting HR")
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -410,6 +417,29 @@ struct DashboardView: View {
         return "\(Int(eff * 100))% · \(hours)"
     }
 
+    /// A whole card as one tap target.
+    ///
+    /// `.plain` throughout: the default button style tints every label inside
+    /// blue, which would repaint the numbers these cards exist to show.
+    private func cardButton<Content: View>(
+        _ action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            ThemeCard(padding: 20) { content() }
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// One macro column, tappable through to its own page.
+    private func macroButton(_ macro: TrackedMacro, _ grams: Double,
+                             target: Double?) -> some View {
+        Button { showingMacro = macro } label: {
+            macroColumn(macro.title, grams, target: target)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func cardLabel(_ text: String) -> some View {
         Text(text)
             .font(Theme.text(13, .medium))
@@ -443,12 +473,12 @@ struct DashboardView: View {
                 Text(label)
                     .font(Theme.text(12))
                     .foregroundStyle(Theme.textSecondary)
-                // Only protein opens a screen, so only protein gets the chevron.
-                if label == "Protein", target != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8))
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                // All three open a page now, so all three carry the chevron —
+                // and unconditionally: the page is worth reaching before a
+                // target exists, so the affordance can't depend on having one.
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Theme.textSecondary)
             }
             Text("\(Int(grams))g")
                 .font(Theme.text(15, .bold))

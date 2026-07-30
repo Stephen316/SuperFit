@@ -145,7 +145,27 @@ struct HistorySeries: Sendable {
         /// 95% of a 150 g target is 142.5 g — a near miss counts, a 15 g
         /// shortfall doesn't, so "days on target" stays a number worth trusting.
         static let tolerance = 0.95
-        var hit: Bool { actual >= target * Self.tolerance }
+        /// Carbs and fats are judged inside a band this wide either way.
+        static let bandTolerance = 0.10
+
+        /// Whether a day counts, which is not the same question for every macro.
+        enum Rule: Sendable {
+            /// More is fine, short is a miss. Protein: eating over target costs
+            /// nothing, so only the shortfall matters.
+            case floor
+            /// Over is as much a miss as under. Carbs and fats are a budget
+            /// inside a calorie target — doubling your fat is not adherence.
+            case band
+        }
+
+        func hit(_ rule: Rule) -> Bool {
+            switch rule {
+            case .floor: return actual >= target * Self.tolerance
+            case .band:  return abs(actual - target) <= target * Self.bandTolerance
+            }
+        }
+
+        var hit: Bool { hit(.floor) }
     }
 
     /// Daily protein against that day's target.
