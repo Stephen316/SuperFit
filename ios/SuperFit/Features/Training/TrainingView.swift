@@ -14,6 +14,8 @@ struct TrainingView: View {
     @State private var activeSession: TrainingSession?
     @State private var watch = WatchWorkoutMonitor()
     @State private var showingPicker = false
+    @State private var muscleQuery = ""
+    @State private var leastTrainedFirst = false
     @State private var liveActivity: WorkoutActivity?
     @State private var detailWorkout: WorkoutRecord?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
@@ -32,6 +34,27 @@ struct TrainingView: View {
                                   bodyweightFraction: fractions[id] ?? 0)
             }
         }
+    }
+
+    /// Rows for the weekly table: every group, whether trained or not.
+    ///
+    /// Including the untrained ones is the point — "least trained first" is
+    /// meaningless if a muscle you never touched simply isn't in the list, and
+    /// the gap is what the table exists to show.
+    private var weeklyRows: [(muscle: MuscleGroup, sets: Double)] {
+        let volume = thisWeekVolume
+        let term = muscleQuery.trimmingCharacters(in: .whitespaces)
+        return MuscleGroup.allCases
+            .map { (muscle: $0, sets: volume[$0] ?? 0) }
+            .filter { term.isEmpty || $0.muscle.displayName.localizedCaseInsensitiveContains(term) }
+            .sorted { a, b in
+                // Alphabetical tiebreak so the many zero rows keep a stable,
+                // findable order instead of shuffling on every redraw.
+                if a.sets != b.sets {
+                    return leastTrainedFirst ? a.sets < b.sets : a.sets > b.sets
+                }
+                return a.muscle.displayName < b.muscle.displayName
+            }
     }
 
     private var thisWeekVolume: [MuscleGroup: Double] {
@@ -99,19 +122,7 @@ struct TrainingView: View {
                         .padding(.vertical, 6)
                 }
 
-                if !thisWeekVolume.isEmpty {
-                    Section("This week — sets per muscle") {
-                        ForEach(thisWeekVolume.sorted { $0.value > $1.value }, id: \.key) { muscle, sets in
-                            HStack {
-                                Text(muscle.displayName)
-                                Spacer()
-                                Text("\(Int(sets.rounded())) sets")
-                                    .monospacedDigit()
-                                    .foregroundStyle(volumeColor(sets))
-                            }
-                        }
-                    }
-                }
+                weeklyTable
 
                 if !progressions.isEmpty {
                     Section("Strength — last 60 days") {
@@ -261,6 +272,66 @@ struct TrainingView: View {
         case .elevated: return .orange
         case .spike: return .red
         }
+    }
+
+    /// Every muscle group and what it got this week, sortable and searchable.
+    private var weeklyTable: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search muscles", text: $muscleQuery)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !muscleQuery.isEmpty {
+                    Button { muscleQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if weeklyRows.isEmpty {
+                Text("No muscle matches \"\(muscleQuery)\".")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(weeklyRows, id: \.muscle) { row in
+                HStack {
+                    Text(row.muscle.displayName)
+                    Spacer()
+                    Text(setsLabel(row.sets))
+                        .monospacedDigit()
+                        .foregroundStyle(row.sets == 0 ? .secondary : volumeColor(row.sets))
+                }
+            }
+        } header: {
+            HStack {
+                Text("This week")
+                Spacer()
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { leastTrainedFirst.toggle() }
+                } label: {
+                    Label(leastTrainedFirst ? "Least trained first" : "Most trained first",
+                          systemImage: leastTrainedFirst ? "arrow.up" : "arrow.down")
+                        .labelStyle(.iconOnly)
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.gold)
+                .accessibilityLabel(leastTrainedFirst
+                                    ? "Sorting least trained first. Tap to reverse."
+                                    : "Sorting most trained first. Tap to reverse.")
+            }
+        } footer: {
+            Text("Sets are weighted by how hard each lift works the muscle, so a "
+                 + "squat counts fully towards quads and partly towards lower back.")
+        }
+    }
+
+    /// One decimal, because these are tension-weighted and rounding 0.4 to "0"
+    /// would read as untrained when it isn't.
+    private func setsLabel(_ sets: Double) -> String {
+        sets == 0 ? "—" : String(format: "%.1f sets", sets)
     }
 
     private func volumeColor(_ sets: Double) -> Color {

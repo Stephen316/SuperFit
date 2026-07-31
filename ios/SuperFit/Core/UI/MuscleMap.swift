@@ -10,11 +10,10 @@ import SwiftUI
 /// lats and glutes on the back, forearms and calves on both. A muscle absent from
 /// a view simply isn't drawn there rather than being faked onto it.
 ///
-/// Two groups have no shape of their own, because the source anatomy doesn't
-/// separate them: `upperChest` is drawn as part of `chest`, and `sideDelts` as
-/// part of the front or rear deltoid. Volume still tracks all twenty separately —
-/// callers that want the merged regions to reflect both should fold the values
-/// before handing a colour over.
+/// All twenty groups are drawn separately. Two of them share a source path and
+/// are separated by clipping it: the pectoral is cut into clavicular and sternal
+/// heads, and the deltoid cap into its lateral head and the front or rear one —
+/// which is why side delts show on both views.
 struct MuscleMap: View {
     /// Colour for each group. Anything unspecified falls back to `untrained`.
     var colour: (MuscleGroup) -> Color
@@ -60,10 +59,19 @@ struct MuscleMap: View {
             for path in BodyDiagram.silhouette(side) {
                 context.fill(path.applying(t), with: .color(silhouette))
             }
-            for (muscle, paths) in BodyDiagram.muscles(side) {
-                let fill = colour(muscle)
-                for path in paths {
-                    context.fill(path.applying(t), with: .color(fill))
+            for region in BodyDiagram.regions(side) {
+                let path = region.path.applying(t)
+                let fill = colour(region.group)
+                guard let clip = region.clip else {
+                    context.fill(path, with: .color(fill))
+                    continue
+                }
+                // Two muscles share this shape, so only the window belonging to
+                // this one is painted. Layered so the clip can't leak into the
+                // next region.
+                context.drawLayer { layer in
+                    layer.clip(to: Path(clip.applying(t)))
+                    layer.fill(path, with: .color(fill))
                 }
             }
         }
@@ -79,7 +87,15 @@ enum BodyDiagram {
     /// The source figures are 724 wide by 1448 tall.
     static let aspect: CGFloat = 1448.0 / 724.0
 
-    static func muscles(_ side: Side) -> [(MuscleGroup, [Path])] {
+    /// A parsed region: which muscle, the shape, and the window of it that
+    /// belongs to that muscle when two share a path.
+    struct Region {
+        let group: MuscleGroup
+        let path: Path
+        let clip: CGRect?
+    }
+
+    static func regions(_ side: Side) -> [Region] {
         side == .front ? frontMuscles : backMuscles
     }
 
@@ -90,7 +106,7 @@ enum BodyDiagram {
     /// Which groups are drawn on which view, so a caller can tell whether a
     /// muscle it wants to highlight is actually visible there.
     static func visibleGroups(_ side: Side) -> Set<MuscleGroup> {
-        Set(muscles(side).map(\.0))
+        Set(regions(side).map(\.group))
     }
 
     // Parsed lazily and held: the data is ~150 paths of cubics, and reparsing it
@@ -101,8 +117,8 @@ enum BodyDiagram {
     private static let frontSilhouette = BodyArt.frontSilhouette.map(path(from:))
     private static let backSilhouette = BodyArt.backSilhouette.map(path(from:))
 
-    private static func parse(_ art: [(MuscleGroup, [String])]) -> [(MuscleGroup, [Path])] {
-        art.map { ($0.0, $0.1.map(path(from:))) }
+    private static func parse(_ art: [BodyArt.Region]) -> [Region] {
+        art.map { Region(group: $0.group, path: path(from: $0.d), clip: $0.clip) }
     }
 
     /// Absolute `M`, `C` and `Z` only — everything else was resolved to cubics
