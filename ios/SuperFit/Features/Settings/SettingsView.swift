@@ -92,6 +92,23 @@ struct SettingsView: View {
                     Text("Your health data stays on your device and your private iCloud. It is never sold or shared.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+
+                // The MIT licence requires its notice to travel with the work, so
+                // this is an obligation rather than a courtesy.
+                Section("Acknowledgements") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Muscle diagram")
+                        Text("Anatomy adapted from react-muscle-highlighter, "
+                             + "used under the MIT licence.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Food data")
+                        Text("USDA FoodData Central, and Open Food Facts under the "
+                             + "Open Database License.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

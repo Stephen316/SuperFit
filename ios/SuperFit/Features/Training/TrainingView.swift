@@ -90,6 +90,15 @@ struct TrainingView: View {
 
                 watchSection
 
+                Section("Muscles worked this week") {
+                    // Every muscle is individually colourable; the mapping from
+                    // weekly volume to a shade is deliberately not wired yet, so
+                    // for now the figure shows the anatomy and nothing more.
+                    MuscleMap()
+                        .frame(height: 260)
+                        .padding(.vertical, 6)
+                }
+
                 if !thisWeekVolume.isEmpty {
                     Section("This week — sets per muscle") {
                         ForEach(thisWeekVolume.sorted { $0.value > $1.value }, id: \.key) { muscle, sets in

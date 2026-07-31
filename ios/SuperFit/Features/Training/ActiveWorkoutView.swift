@@ -288,7 +288,9 @@ struct ExercisePickerView: View {
 
     private var filtered: [Exercise] {
         exercises.filter { e in
-            (query.isEmpty || e.name.localizedCaseInsensitiveContains(query))
+            // `matches` also checks the alias list, so "OHP" or "RDL" finds the
+            // lift while the row still shows its catalogue name.
+            e.matches(query)
             && (muscleFilter == nil || (e.tension[muscleFilter!] ?? 0) >= 3)
         }
     }
