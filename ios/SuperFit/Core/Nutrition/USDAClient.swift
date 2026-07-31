@@ -111,11 +111,28 @@ struct USDAClient: Sendable {
     /// tiers, so nothing is unreachable either way.
     func search(_ term: String, page: Int = 1, includeBranded: Bool = true,
                 limit: Int = USDAClient.pageSize) async throws -> [ResolvedFood] {
+        async let survey = searchSurvey(term, page: page, limit: limit)
+        let core = try await searchCore(term, page: page,
+                                        includeBranded: includeBranded, limit: limit)
+        var seen = Set(core.map(\.id))
+        var out = core
+        for food in await survey where seen.insert(food.id).inserted { out.append(food) }
+        return out
+    }
+
+    /// Generics and, where they're the local shelf, branded — the part worth
+    /// waiting for.
+    ///
+    /// Split from the survey set so a caller can show these the moment they land.
+    /// Together the two averaged about four seconds and the survey is the slower
+    /// and flakier half, so pairing them made every USDA result wait on the worst
+    /// one.
+    func searchCore(_ term: String, page: Int = 1, includeBranded: Bool = true,
+                    limit: Int = USDAClient.pageSize) async throws -> [ResolvedFood] {
         guard resolveKey() != nil else { return [] }
         let query = String(term.prefix(80)).trimmingCharacters(in: .whitespaces)
         guard query.count >= FoodSearch.minimumQueryLength else { return [] }
 
-        async let surveyFoods = surveySearch(query, page: page, limit: limit)
         async let brandedFoods = brandedSearch(query, page: page, limit: limit,
                                                include: includeBranded)
         let generics = try await request(query, page: page,
@@ -124,11 +141,20 @@ struct USDAClient: Sendable {
 
         var seen = Set(generics.map(\.id))
         var out = generics
-        for food in await brandedFoods + (await surveyFoods)
-        where seen.insert(food.id).inserted {
+        for food in await brandedFoods where seen.insert(food.id).inserted {
             out.append(food)
         }
         return out
+    }
+
+    /// The survey set on its own. Slow — measured near two seconds a try, and it
+    /// fails often enough to need retries — so it arrives whenever it arrives.
+    func searchSurvey(_ term: String, page: Int = 1,
+                      limit: Int = USDAClient.pageSize) async -> [ResolvedFood] {
+        guard resolveKey() != nil else { return [] }
+        let query = String(term.prefix(80)).trimmingCharacters(in: .whitespaces)
+        guard query.count >= FoodSearch.minimumQueryLength else { return [] }
+        return await surveySearch(query, page: page, limit: limit)
     }
 
     /// Additive like the survey set, and never throwing: losing the branded items

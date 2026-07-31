@@ -21,6 +21,7 @@
 | **5.15** | Food region: three-tier country sort (chosen country → market-adjacent countries OR'd into one request → global) · country selector in Settings, defaulting to the device region and naming it · store chips follow the selection | **done** |
 | **5.16** | Source-blind relevance: results ranked by provenance (own foods → generic whole foods → your country → neighbours → rest) rather than by which API returned them · provenance from Open Food Facts `countries_tags` and USDA `dataType`/`marketCountry` | **done** |
 | **5.17** | Search relevance: results ranked by how the name answers the query (`exact` → `headNoun` → `modifier` → `partial`) before provenance, so "rice" leads with rice and not rice cakes · picker groups the two under headings · USDA generics requested separately and 50 wide, branded only for a US region | **done** |
+| **5.18** | Search performance: results streamed per source rather than awaiting the slowest · USDA generic and survey legs split · decoded-result cache with a 6-hour expiry replacing an unbounded `URLCache` policy | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -58,6 +59,7 @@ Core/Nutrition/FoodResolver.swift            cache → USDA FDC → OFF, delete
 Core/Nutrition/FoodRegion.swift              countries, tags, market-adjacency
 Core/Nutrition/FoodRelevance.swift           name match then provenance, source-blind
 Core/Nutrition/FoodNameMatch.swift           reads the head of a food name
+Core/Nutrition/FoodSearchCache.swift         decoded results, 6h expiry, LRU
 Core/Nutrition/StoreBrand.swift              retailer own-brand filters per region
 Core/Nutrition/MealComposer.swift            meal totals, missing-ingredient handling
 Core/Nutrition/BarcodeScanner.swift          AVFoundation scanner + sim fallback

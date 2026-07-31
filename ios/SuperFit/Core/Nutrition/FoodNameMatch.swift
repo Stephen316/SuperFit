@@ -21,17 +21,24 @@ import Foundation
 /// arguably a chicken breast — but both fail *downwards*, into a lower band rather
 /// than a wrong one, and nothing is ever hidden.
 enum FoodNameMatch: Int, Comparable, Sendable {
-    /// The name is the thing searched for: "Rice", "Rice, white, long-grain".
+    /// The name is the thing searched for, in the order typed: "Rice",
+    /// "Rice, white, long-grain", or "Basmati Rice" for "basmati rice".
     case exact = 0
-    /// A kind of the thing searched for: "Brown Rice", "Basmati Rice".
-    case headNoun = 1
+    /// The same words, typed in a different order: "Basmati Rice" for
+    /// "rice basmati".
+    case exactAnyOrder = 1
+    /// A kind of the thing searched for, ending in it: "Brown Rice".
+    case headNoun = 2
+    /// A kind of it, with the words typed in a different order:
+    /// "Rice, white, long-grain" for "long grain rice".
+    case headNounAnyOrder = 3
     /// The words are there, but qualifying something else: "Rice Cakes".
-    case modifier = 2
-    /// A looser match — inside a longer word, or the words scattered apart.
-    case partial = 3
+    case modifier = 4
+    /// A looser match — inside a longer word, or only some words present.
+    case partial = 5
     /// The name doesn't answer the query at all; it matched on brand, or came in
     /// on a country tier. Ranked last, never dropped.
-    case none = 4
+    case none = 6
 
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 }
@@ -50,9 +57,18 @@ extension FoodNameMatch {
 
         let head = tokens(String(name.prefix { $0 != "," }))
         let whole = tokens(name)
+        let wantedSet = Set(wanted)
 
         // "Rice" and "Rice, white, long-grain" are both simply rice.
         if head == wanted || whole == wanted { return .exact }
+
+        // The same words in a different order. Typing "rice basmati" is a normal
+        // way to search — you think of the category first — and it should not cost
+        // you the result. Ranked just below the in-order match rather than equal
+        // to it, because English compounds carry meaning in their order: a search
+        // for "chocolate milk" should still put the drink above the bar.
+        if Set(head) == wantedSet, head.count == wanted.count { return .exactAnyOrder }
+        if Set(whole) == wantedSet, whole.count == wanted.count { return .exactAnyOrder }
 
         // Ends with what was searched, so that *is* the food: "Basmati Rice".
         // Measured against `head` only, never the whole name: in "Cereal, rice"
@@ -61,8 +77,19 @@ extension FoodNameMatch {
             return .headNoun
         }
 
+        // The same idea, order-insensitively: the food itself is one of the words
+        // typed, and every other word typed appears somewhere in the name. Catches
+        // "Rice, white, long-grain" for "long grain rice".
+        //
+        // Still anchored on the head word, which is what keeps "Rice Cakes" out —
+        // its head is "cakes", so no amount of reordering makes it a rice.
+        if let headWord = head.last, wantedSet.contains(headWord),
+           wantedSet.isSubset(of: Set(whole)) {
+            return .headNounAnyOrder
+        }
+
         // Present, but something else is the head: "Rice Cakes", "Rice Vinegar".
-        if contains(whole, wanted) { return .modifier }
+        if wantedSet.isSubset(of: Set(whole)) { return .modifier }
 
         // Every word is in there somewhere — scattered, or inside a longer word
         // ("riced"). Brand counts here so "tesco rice" still finds Tesco's rice,
@@ -73,17 +100,6 @@ extension FoodNameMatch {
             haystack.contains { $0 == want || $0.contains(want) }
         }
         return everyWordPresent ? .partial : .none
-    }
-
-    /// Whether `needle` appears in `haystack` as a contiguous run, so that a search
-    /// for "chicken breast" isn't answered by "chicken soup with breast of turkey".
-    private static func contains(_ haystack: [String], _ needle: [String]) -> Bool {
-        guard !needle.isEmpty, haystack.count >= needle.count else { return false }
-        for start in 0...(haystack.count - needle.count)
-        where Array(haystack[start ..< start + needle.count]) == needle {
-            return true
-        }
-        return false
     }
 
     /// Lowercased runs of letters and digits, so the punctuation these catalogues

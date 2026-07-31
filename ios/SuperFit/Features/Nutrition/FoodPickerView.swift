@@ -82,10 +82,17 @@ struct FoodPickerView: View {
             return [FoodSection(title: nil, foods: foods)]
         }
 
-        let ranked = FoodRelevance.ranked(foods, query: term, region: region,
-                                          ownIDs: storedIDs)
-        let isTheFood = ranked.filter { $0.match <= .headNoun }.map(\.food)
-        let namedAfterIt = ranked.filter { $0.match > .headNoun }.map(\.food)
+        // Partitioned, not re-ranked. The resolver has already ordered these, and
+        // ranking again here would silently disagree with it — this view doesn't
+        // know which foods were eaten recently, so its idea of the order is worse.
+        var isTheFood: [ResolvedFood] = []
+        var namedAfterIt: [ResolvedFood] = []
+        for food in foods {
+            let match = FoodNameMatch.match(name: food.name, brand: food.brand,
+                                            query: term)
+            if match <= .headNounAnyOrder { isTheFood.append(food) }
+            else { namedAfterIt.append(food) }
+        }
 
         // A heading with nothing to contrast against is just noise.
         guard !isTheFood.isEmpty, !namedAfterIt.isEmpty else {
@@ -341,11 +348,22 @@ struct FoodPickerView: View {
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             searching = true
-            let page = await FoodResolver(context: context).search(term, brand: store, region: region)
-            guard !Task.isCancelled else { return }
-            results = page.foods
-            hasMore = page.hasMore
             loadedPage = 1
+
+            // Results arrive per source rather than all at once, so the fast one
+            // paints while the slow one is still in flight. The stream yields the
+            // full ranked list each time, so this assigns rather than merges.
+            for await page in FoodResolver(context: context)
+                .stream(term, brand: store, region: region) {
+                guard !Task.isCancelled else { return }
+                results = page.foods
+                hasMore = page.hasMore
+                // Dropped on the first batch, not the last: leaving it up until
+                // every source landed would keep a spinner over a list that is
+                // already usable.
+                searching = false
+            }
+            guard !Task.isCancelled else { return }
             searching = false
         }
     }

@@ -11,19 +11,28 @@ import Foundation
 ///
 /// So the key is provenance:
 ///
-/// 1. **Your own foods** — logged before, or created by hand. Not a source
+/// 1. **Eaten in the last few days.** The strongest signal there is. A food diary
+///    is mostly the same foods over and over, so something logged on Tuesday is
+///    very likely what's being searched for on Thursday.
+/// 2. **Your own foods** — logged at some point, or created by hand. Not a source
 ///    preference: a food you've eaten is the strongest relevance signal there is,
 ///    and it's local by construction.
-/// 2. **Generic whole foods** — "rice, white, long-grain, cooked". No supplier, so
+/// 3. **Generic whole foods** — "rice, white, long-grain, cooked". No supplier, so
 ///    no country, and deliberately ranked above every branded product. Two
 ///    reasons: most logging is of ingredients rather than specific packets, and
 ///    the generic entries are the *better data* — Foundation and SR Legacy are
 ///    lab-analysed with full micronutrient profiles, where a crowd-sourced branded
 ///    entry often carries macros alone.
-/// 3. **Sold in your country** — the shelf you actually shop from, for when you do
+/// 4. **Sold in your country** — the shelf you actually shop from, for when you do
 ///    want the specific packet.
-/// 4. **Sold in a neighbouring country** — the same chains often span both.
-/// 5. **Everything else** — foreign retailers.
+/// 5. **Sold in a neighbouring country** — the same chains often span both.
+/// 6. **Everything else** — foreign retailers.
+///
+/// Recency sits *inside* the name-match tier, not above it. Eating Rice Krispies
+/// on Tuesday must not put them above actual rice when searching "rice" on
+/// Thursday — that is the exact complaint the name matching was built to fix. So a
+/// recent food leads the results that answer the query equally well, and no
+/// further.
 ///
 /// Provenance is the **second** key, not the first. It orders foods that answer
 /// the query equally well, and can't distinguish a thing from the things named
@@ -37,17 +46,22 @@ enum FoodRelevance {
 
     /// Lower sorts earlier.
     enum Band: Int, Comparable, Sendable {
-        case ownFood = 0
-        case generic = 1
-        case localRetail = 2
-        case neighbourRetail = 3
-        case foreignRetail = 4
+        case recentlyEaten = 0
+        case ownFood = 1
+        case generic = 2
+        case localRetail = 3
+        case neighbourRetail = 4
+        case foreignRetail = 5
 
         static func < (a: Band, b: Band) -> Bool { a.rawValue < b.rawValue }
     }
 
+    /// How far back counts as "recently eaten".
+    static let recentDays = 5
+
     static func band(for food: ResolvedFood, region: FoodRegion?,
-                     ownIDs: Set<String>) -> Band {
+                     ownIDs: Set<String>, recentIDs: Set<String> = []) -> Band {
+        if recentIDs.contains(food.id) { return .recentlyEaten }
         if ownIDs.contains(food.id) || food.source == .custom { return .ownFood }
         // Checked before the country bands: a generic outranks retail wherever it
         // happens to be catalogued, so its country — if a source even gives it
@@ -89,7 +103,8 @@ enum FoodRelevance {
     /// as an explicit tiebreak rather than relied on — without it, results would
     /// reshuffle between identical searches.
     static func ranked(_ foods: [ResolvedFood], query: String,
-                       region: FoodRegion?, ownIDs: Set<String>) -> [Ranked] {
+                       region: FoodRegion?, ownIDs: Set<String>,
+                       recentIDs: Set<String> = []) -> [Ranked] {
         // Written out rather than chained: the fluent version tips the type
         // checker over its time limit.
         var ranked: [Ranked] = []
@@ -99,7 +114,8 @@ enum FoodRelevance {
             // expensive part, and a comparator would repeat it O(n log n) times.
             let match = FoodNameMatch.match(name: food.name, brand: food.brand,
                                             query: query)
-            let band = band(for: food, region: region, ownIDs: ownIDs)
+            let band = band(for: food, region: region, ownIDs: ownIDs,
+                            recentIDs: recentIDs)
             ranked.append(Ranked(food: food, match: match, band: band,
                                  position: position))
         }
@@ -113,8 +129,9 @@ enum FoodRelevance {
     }
 
     static func ordered(_ foods: [ResolvedFood], query: String,
-                        region: FoodRegion?,
-                        ownIDs: Set<String>) -> [ResolvedFood] {
-        ranked(foods, query: query, region: region, ownIDs: ownIDs).map(\.food)
+                        region: FoodRegion?, ownIDs: Set<String>,
+                        recentIDs: Set<String> = []) -> [ResolvedFood] {
+        ranked(foods, query: query, region: region, ownIDs: ownIDs,
+               recentIDs: recentIDs).map(\.food)
     }
 }

@@ -241,6 +241,32 @@ setting the ranking does. Open Food Facts covers branded products everywhere.
 **Known gap:** USDA holds no "yoghurt", only "yogurt" — a British spelling returns
 zero USDA hits. Open Food Facts still answers.
 
+**Results stream in per source.** Awaiting every source made each search as slow
+as its slowest. Measured on one term:
+
+| Source | Latency | On the wire |
+|---|---|---|
+| Open Food Facts | **0.18s** | 8.7 KB |
+| USDA survey (per attempt, up to 3) | 1.84s | ~35 KB |
+| USDA generics | **2.04s** | **162 KB** gzipped (1.6 MB raw) |
+
+`FoodResolver.stream` yields the complete ranked list each time a leg answers, so
+local rows paint immediately and Open Food Facts lands about ten times sooner than
+USDA. The spinner clears on the first batch, not the last. USDA's generics and
+survey sets are fetched separately for the same reason — paired, every USDA result
+waited on the flakier half.
+
+Note the gzip column: USDA sends `content-encoding: gzip` and URLSession requests
+it by default, so a search costs roughly 200 KB, not the 1.6 MB the uncompressed
+response suggests.
+
+**Caching is `FoodSearchCache`, not `URLCache`.** Neither API sends a cache header,
+so the HTTP cache can only guess — and the session was telling it to guess forever
+via `returnCacheDataElseLoad`, which served the first answer for a term
+indefinitely, including a bad one. The app-level cache holds *decoded* results, so
+a repeat search skips the parse as well as the request, with a 6-hour expiry, a
+40-entry LRU bound, and empty results deliberately not cached.
+
 **Request cost and debounce.** One completed search is **5–7 HTTP requests**: USDA's
 stable datatypes (1), the survey dataset with its retries (1–3), and three Open
 Food Facts country tiers (3).

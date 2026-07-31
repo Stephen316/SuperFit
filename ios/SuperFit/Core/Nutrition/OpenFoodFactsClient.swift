@@ -290,7 +290,11 @@ extension URLSession {
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 20
         config.httpAdditionalHeaders = ["User-Agent": "SuperFit/1.0 (iOS)"]
-        config.requestCachePolicy = .returnCacheDataElseLoad
+        // Deliberately the default. Neither API sends a cache header, so
+        // `returnCacheDataElseLoad` meant "serve the first answer forever" —
+        // including a bad one. Search caching is `FoodSearchCache`, which has an
+        // expiry we control and holds results already decoded.
+        config.requestCachePolicy = .useProtocolCachePolicy
         return URLSession(configuration: config)
     }()
 

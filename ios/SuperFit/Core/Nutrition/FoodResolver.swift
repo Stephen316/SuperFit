@@ -19,13 +19,27 @@ enum FoodSearch {
 /// See docs/API_INTEGRATIONS.md.
 @MainActor
 final class FoodResolver {
-    private let off = OpenFoodFactsClient()
+    private let off: OpenFoodFactsClient
     private let usda: USDAClient
+    private let cache: FoodSearchCache
     private let context: ModelContext
 
-    init(context: ModelContext, usda: USDAClient = USDAClient()) {
+    /// Both clients are injectable. Only USDA was, which quietly meant any test
+    /// of this type reached the live Open Food Facts API — slow, flaky, and
+    /// returning whatever happens to be in the database today rather than what
+    /// the test set up.
+    /// The cache is injectable for the same reason the clients are: sharing one
+    /// process-wide instance makes tests order-dependent, where an entry stored by
+    /// one leaks into the next and quietly stands in for a request that was
+    /// supposed to be made.
+    init(context: ModelContext,
+         usda: USDAClient = USDAClient(),
+         off: OpenFoodFactsClient = OpenFoodFactsClient(),
+         cache: FoodSearchCache = .shared) {
         self.context = context
         self.usda = usda
+        self.off = off
+        self.cache = cache
     }
 
     func byBarcode(_ barcode: String) async -> ResolvedFood? {
@@ -90,12 +104,128 @@ final class FoodResolver {
         // mostly US branded — above every Tesco product for a UK user, and
         // provenance alone still can't tell rice from rice cakes.
         out = FoodRelevance.ordered(out, query: trimmed, region: region,
-                                    ownIDs: Set(local.map(\.id)))
+                                    ownIDs: Set(local.map(\.id)),
+                                    recentIDs: recentlyEatenIDs())
 
         // USDA reports no page count, so a full page implies another may exist.
         // Measured against the generic page, which is the widest of the requests.
         let usdaHasMore = usdaPage.count >= USDAClient.genericPageSize
         return SearchPage(foods: out, hasMore: usdaHasMore || (offPage?.hasMore ?? false))
+    }
+
+    /// The same search, delivered in pieces as each source answers.
+    ///
+    /// Awaiting everything made every search as slow as the slowest source.
+    /// Measured on one term: Open Food Facts answered in **0.18s** with 8.7 KB,
+    /// USDA's generics took **2.0s** and 1.6 MB, and the survey set another
+    /// **1.8s** per attempt with up to three attempts. So a list that could have
+    /// appeared in a fifth of a second waited two seconds, sometimes five.
+    ///
+    /// Each yield is the complete ranked list so far, not a delta, so the caller
+    /// assigns rather than merges and the ordering stays correct at every step.
+    func stream(_ term: String, page: Int = 1, brand: StoreBrand? = nil,
+                region: FoodRegion? = nil) -> AsyncStream<SearchPage> {
+        AsyncStream { continuation in
+            let work = Task { @MainActor in
+                let trimmed = term.trimmingCharacters(in: .whitespaces)
+                guard trimmed.count >= FoodSearch.minimumQueryLength || brand != nil else {
+                    continuation.yield(SearchPage(foods: [], hasMore: false))
+                    return continuation.finish()
+                }
+
+                let firstPage = page <= 1
+                let filteringByStore = brand != nil
+                let local = firstPage && !filteringByStore ? localMatches(trimmed) : []
+                let supplements = firstPage && !filteringByStore
+                    ? supplementMatches(trimmed) : []
+                let ownIDs = Set(local.map(\.id))
+                // Computed once per search, not per yield: it hits the store and
+                // the answer can't change while one search is in flight.
+                let recentIDs = self.recentlyEatenIDs()
+
+                // What's already on the device costs nothing, so it goes up
+                // immediately rather than behind a spinner waiting on a network.
+                var collected = local + supplements
+                var seen = Set(collected.map(\.id))
+                var hasMore = false
+                func publish() {
+                    continuation.yield(SearchPage(
+                        foods: FoodRelevance.ordered(collected, query: trimmed,
+                                                     region: region, ownIDs: ownIDs,
+                                                     recentIDs: recentIDs),
+                        hasMore: hasMore))
+                }
+                if !collected.isEmpty { publish() }
+
+                let usda = self.usda
+                let off = self.off
+                let wantsBranded = region?.code == "US"
+
+                let cache = self.cache
+                func key(_ leg: String) -> FoodSearchCache.Key {
+                    .init(leg: leg, query: trimmed, page: page,
+                          region: region, brand: brand)
+                }
+
+                // A cached leg is applied before anything is dispatched, so a
+                // repeated search paints from memory with no request at all.
+                var legsToFetch: [String] = ["off"]
+                if !filteringByStore { legsToFetch += ["usda-core", "usda-survey"] }
+                var pending: [String] = []
+                for leg in legsToFetch {
+                    guard let hit = cache.value(for: key(leg)) else {
+                        pending.append(leg)
+                        continue
+                    }
+                    for food in hit.foods where seen.insert(food.id).inserted {
+                        collected.append(food)
+                    }
+                    hasMore = hasMore || hit.hasMore
+                }
+                if !collected.isEmpty { publish() }
+                if pending.isEmpty { return continuation.finish() }
+
+                // Whatever wasn't cached, each publishing on arrival. Open Food
+                // Facts nearly always wins by an order of magnitude, which is the
+                // whole point.
+                await withTaskGroup(of: (leg: String, foods: [ResolvedFood], more: Bool).self) { group in
+                    if pending.contains("off") {
+                        group.addTask {
+                            let page = try? await off.search(trimmed, page: page,
+                                                             region: region, brand: brand)
+                            return ("off", page?.foods ?? [], page?.hasMore ?? false)
+                        }
+                    }
+                    if pending.contains("usda-core") {
+                        group.addTask {
+                            let foods = (try? await usda.searchCore(
+                                trimmed, page: page, includeBranded: wantsBranded)) ?? []
+                            return ("usda-core", foods,
+                                    foods.count >= USDAClient.genericPageSize)
+                        }
+                    }
+                    if pending.contains("usda-survey") {
+                        group.addTask {
+                            ("usda-survey", await usda.searchSurvey(trimmed, page: page), false)
+                        }
+                    }
+
+                    for await leg in group {
+                        if Task.isCancelled { break }
+                        cache.store(leg.foods, hasMore: leg.more, for: key(leg.leg))
+                        var added = false
+                        for food in leg.foods where seen.insert(food.id).inserted {
+                            collected.append(food)
+                            added = true
+                        }
+                        hasMore = hasMore || leg.more
+                        if added || leg.more { publish() }
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in work.cancel() }
+        }
     }
 
     /// Fills in USDA household measures, which the search endpoint omits.
@@ -179,6 +309,31 @@ final class FoodResolver {
         return ((try? context.fetch(d)) ?? [])
             .compactMap(\.asFood)
             .sorted { $0.name.count < $1.name.count }
+    }
+
+    /// Ids of everything eaten in the last few days, in both the forms a
+    /// `ResolvedFood` can carry: a cached remote item is keyed by its source id
+    /// ("fdc:171077", a barcode), a hand-made one by its UUID.
+    ///
+    /// Read per search rather than cached — five days is a moving window and a
+    /// food logged a minute ago should lead the next search, not the one after.
+    private func recentlyEatenIDs() -> Set<String> {
+        let cutoff = Calendar.current.date(byAdding: .day,
+                                           value: -FoodRelevance.recentDays,
+                                           to: .now) ?? .now
+        let logs = FetchDescriptor<NutritionLog>(
+            predicate: #Predicate { $0.date >= cutoff })
+        let eaten = Set(((try? context.fetch(logs)) ?? []).compactMap(\.foodID))
+        guard !eaten.isEmpty else { return [] }
+
+        let foods = FetchDescriptor<Food>(
+            predicate: #Predicate { eaten.contains($0.id) })
+        var out = Set<String>()
+        for food in (try? context.fetch(foods)) ?? [] {
+            out.insert(food.id.uuidString)
+            if let remote = food.remoteID { out.insert(remote) }
+        }
+        return out
     }
 
     private func localMatches(_ term: String) -> [ResolvedFood] {

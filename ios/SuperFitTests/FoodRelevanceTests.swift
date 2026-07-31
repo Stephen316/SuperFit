@@ -22,9 +22,10 @@ struct FoodRelevanceTests {
     /// provenance: with no term every result ties on name and the band decides.
     private func order(_ foods: [ResolvedFood], query: String = "",
                        region: FoodRegion? = .unitedKingdom,
-                       own: Set<String> = []) -> [String] {
+                       own: Set<String> = [],
+                       recent: Set<String> = []) -> [String] {
         FoodRelevance.ordered(foods, query: query, region: region,
-                              ownIDs: own).map(\.id)
+                              ownIDs: own, recentIDs: recent).map(\.id)
     }
 
     // MARK: Locality beats source
@@ -109,6 +110,54 @@ struct FoodRelevanceTests {
             food("my-recipe", source: .custom),
         ])
         #expect(result == ["my-recipe", "generic"])
+    }
+
+    // MARK: Recently eaten
+
+    /// A diary is mostly the same foods repeating, so something eaten this week
+    /// leads everything else that answers the query as well.
+    @Test func foodsEatenRecentlyLeadTheirTier() {
+        let result = order([
+            food("generic", source: .usda, generic: true),
+            food("local", countries: ["united-kingdom"]),
+            food("ate-on-tuesday", countries: ["spain"]),
+        ], recent: ["ate-on-tuesday"])
+        #expect(result == ["ate-on-tuesday", "generic", "local"])
+    }
+
+    /// Recency beats having merely logged it once, which is the whole distinction.
+    @Test func recentBeatsAnOlderOwnFood() {
+        let result = order([
+            food("logged-once-in-march"),
+            food("ate-yesterday"),
+        ], own: ["logged-once-in-march", "ate-yesterday"],
+           recent: ["ate-yesterday"])
+        #expect(result == ["ate-yesterday", "logged-once-in-march"])
+    }
+
+    /// The guard on the whole feature: eating Rice Krispies on Tuesday must not
+    /// put them above actual rice on Thursday. Recency orders within a name-match
+    /// tier, never across one.
+    @Test func recencyNeverOutranksABetterNameMatch() {
+        let result = order([
+            food("Rice, white, long-grain"),
+            food("Rice Krispies"),
+        ], query: "rice", recent: ["Rice Krispies"])
+        #expect(result == ["Rice, white, long-grain", "Rice Krispies"])
+    }
+
+    /// But inside a tier it still wins, so the packet you actually buy leads the
+    /// other packets.
+    @Test func recencyOrdersWithinAMatchTier() {
+        let result = order([
+            food("Rice Cakes"),
+            food("Rice Krispies"),
+        ], query: "rice", recent: ["Rice Krispies"])
+        #expect(result == ["Rice Krispies", "Rice Cakes"])
+    }
+
+    @Test func theRecentWindowIsFiveDays() {
+        #expect(FoodRelevance.recentDays == 5)
     }
 
     // MARK: Stability

@@ -70,12 +70,41 @@ struct FoodNameMatchTests {
         #expect(match("Chicken Breast", "chicken breast") == .exact)
     }
 
-    // MARK: Multi-word queries
+    // MARK: Multi-word queries, in any order
 
-    @Test func theWordsMustBeAdjacentNotMerelyPresent() {
-        // Both words appear, but not as the thing being searched for.
-        #expect(match("Chicken Soup with Breast Meat", "chicken breast") == .partial)
+    /// The reason this exists: typing the category first is a normal way to
+    /// search and must not cost you the result.
+    @Test func theWordsCanBeTypedInAnyOrder() {
+        #expect(match("Basmati Rice", "basmati rice") == .exact)
+        #expect(match("Basmati Rice", "rice basmati") == .exactAnyOrder)
+        #expect(match("Organic Basmati Rice", "rice basmati") == .headNounAnyOrder)
+        #expect(match("Rice, white, long-grain", "long grain rice") == .headNounAnyOrder)
+    }
+
+    /// Order still *ranks*, even though it no longer gates. English compounds mean
+    /// different things in different orders, so the drink beats the bar when the
+    /// drink is what was typed.
+    @Test func theOrderTypedStillBreaksTheTie() {
+        #expect(match("Chocolate Milk", "chocolate milk")
+                < match("Milk Chocolate", "chocolate milk"))
+        #expect(match("Milk Chocolate", "milk chocolate")
+                < match("Chocolate Milk", "milk chocolate"))
+    }
+
+    /// Reordering must not promote something that isn't the food. "Rice Cakes" are
+    /// cakes whichever way round you type it.
+    @Test func reorderingNeverRescuesAWrongHead() {
+        #expect(match("Rice Cakes", "cakes rice") == .exactAnyOrder)
+        #expect(match("Rice Cakes", "rice") == .modifier)
+        #expect(match("Chicken Rice Soup", "rice chicken") == .modifier)
+    }
+
+    @Test func aWholePhraseStillOutranksScatteredWords() {
         #expect(match("Free Range Chicken Breast", "chicken breast") == .headNoun)
+        // Both words are in there, but the food is a soup.
+        #expect(match("Chicken Soup with Breast Meat", "chicken breast") == .modifier)
+        #expect(match("Free Range Chicken Breast", "chicken breast")
+                < match("Chicken Soup with Breast Meat", "chicken breast"))
     }
 
     @Test func aQueryWithNoWordsInCommonDoesNotMatch() {
@@ -88,8 +117,8 @@ struct FoodNameMatchTests {
     /// The catalogues disagree about hyphens and apostrophes, so both sides fold
     /// to the same tokens.
     @Test func punctuationDoesNotChangeTheMatch() {
-        #expect(match("Rice, white, long-grain", "long grain rice") == .partial)
-        #expect(match("Sainsbury's Basmati Rice", "sainsburys rice") == .partial)
+        #expect(match("Rice, white, long-grain", "long grain rice") == .headNounAnyOrder)
+        #expect(match("Sainsbury's Basmati Rice", "sainsburys rice") == .headNounAnyOrder)
         #expect(match("Long-Grain Rice", "rice") == .headNoun)
     }
 
@@ -116,9 +145,10 @@ struct FoodNameMatchTests {
     }
 
     @Test func theBandsAreOrderedBestFirst() {
-        #expect(FoodNameMatch.exact < FoodNameMatch.headNoun)
-        #expect(FoodNameMatch.headNoun < FoodNameMatch.modifier)
-        #expect(FoodNameMatch.modifier < FoodNameMatch.partial)
-        #expect(FoodNameMatch.partial < FoodNameMatch.none)
+        let order: [FoodNameMatch] = [.exact, .exactAnyOrder, .headNoun,
+                                      .headNounAnyOrder, .modifier, .partial, .none]
+        for (better, worse) in zip(order, order.dropFirst()) {
+            #expect(better < worse)
+        }
     }
 }
