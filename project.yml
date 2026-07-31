@@ -22,6 +22,13 @@ options:
 settings:
   base:
     SWIFT_STRICT_CONCURRENCY: complete
+    # SE-0418. Without it every `#Predicate` on a @Model type warns that its
+    # key path literal isn't Sendable — `KeyPath<Food, UUID>` can't be, because
+    # a @Model class isn't. The proposal judges a key path literal by what it
+    # captures, not by its root and value types, and one with no subscript
+    # arguments captures nothing. On by default under the Swift 6 language
+    # mode; this turns it on early, where the warning is coming from.
+    SWIFT_UPCOMING_FEATURE_INFER_SENDABLE_FROM_CAPTURES: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     GCC_TREAT_WARNINGS_AS_ERRORS: NO
     MARKETING_VERSION: "1.0"
