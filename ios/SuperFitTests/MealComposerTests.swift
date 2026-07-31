@@ -23,11 +23,10 @@ struct MealComposerTests {
 
     // MARK: Scaling
 
-    @Test func ingredientsScaleFromPer100g() {
+    @Test func ingredientsScaleFromPer100g() throws {
         let (resolved, _) = MealComposer.ingredients(
             items: [(id: UUID(), foodID: oatsID, grams: 80)], foods: lookup)
-        let oats = try? #require(resolved.first)
-        guard let oats else { return }
+        let oats = try #require(resolved.first)
         #expect(abs(oats.total.kcal - 389 * 0.8) < 0.01)
         #expect(abs(oats.total.proteinG - 16.9 * 0.8) < 0.01)
         #expect(abs((oats.total.micros[Micronutrient.iron.rawValue] ?? 0) - 4.7 * 0.8) < 0.01)

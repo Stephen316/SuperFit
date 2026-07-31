@@ -154,13 +154,13 @@ struct FoodSearchTests {
 
     /// Three tiers: the chosen country, its neighbours, then everywhere.
     @Test func theThreeTiersMergeInPrecisionOrder() async throws {
-        func hit(_ code: String) -> String {
+        @Sendable func hit(_ code: String) -> String {
             """
             {"code": "\(code)", "product_name": "Milk \(code)", "brands": ["X"],
              "nutriments": {"energy-kcal_100g": 50, "proteins_100g": 3}}
             """
         }
-        func page(_ codes: [String]) -> Data {
+        @Sendable func page(_ codes: [String]) -> Data {
             """
             {"count": \(codes.count), "page": 1, "page_size": 25, "page_count": 1,
              "hits": [\(codes.map(hit).joined(separator: ","))]}

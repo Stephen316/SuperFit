@@ -63,15 +63,11 @@ struct CyclicalBaselineTests {
 
     // MARK: Fires on a genuine rhythm
 
-    @Test func detectsAMonthlyRhythmAndItsPeriod() {
-        let pattern = CyclicalBaseline.detect(series(days: 240, period: 28))
-        let found = try? #require(pattern)
-        #expect(found != nil)
-        if let found {
-            #expect(abs(found.periodDays - 28) <= 1)
-            #expect(found.cyclesObserved >= CyclicalBaseline.minCycles)
-            #expect(found.amplitude > 4)
-        }
+    @Test func detectsAMonthlyRhythmAndItsPeriod() throws {
+        let found = try #require(CyclicalBaseline.detect(series(days: 240, period: 28)))
+        #expect(abs(found.periodDays - 28) <= 1)
+        #expect(found.cyclesObserved >= CyclicalBaseline.minCycles)
+        #expect(found.amplitude > 4)
     }
 
     @Test func survivesMissingDaysAndDrift() {

@@ -5,6 +5,8 @@ import SwiftData
 
 /// Free function, not a method: the stub responder is `@Sendable` and runs off
 /// the main actor, so it can't call into the main-actor-isolated suite.
+// File scope, not members: the stub responder is `@Sendable` and runs off the
+// main actor, so it cannot reach anything isolated to the suite.
 private func isUSDAHost(_ url: URL) -> Bool {
     url.host?.contains("nal.usda.gov") == true
 }
@@ -15,6 +17,22 @@ private func isUSDAHost(_ url: URL) -> Bool {
 /// 8.7 KB, USDA's generics took 2.0s and 1.6 MB, and the survey set another 1.8s
 /// per attempt across up to three attempts. Awaiting everything made the fast
 /// answer wait on the slow one every single time.
+private let offJSON = """
+{"count": 1, "page": 1, "page_size": 25, "page_count": 1, "hits": [
+  {"code": "off-1", "product_name": "Tesco Chicken", "brands": ["Tesco"],
+   "countries_tags": ["en:united-kingdom"],
+   "nutriments": {"energy-kcal_100g": 106, "proteins_100g": 24}}
+]}
+""".data(using: .utf8)!
+
+private let usdaJSON = """
+{"foods": [
+  {"fdcId": 111, "description": "Chicken, raw", "dataType": "SR Legacy",
+   "foodNutrients": [{"nutrientId": 1008, "value": 165},
+                     {"nutrientId": 1003, "value": 31}]}
+]}
+""".data(using: .utf8)!
+
 @MainActor
 struct FoodSearchStreamTests {
 
@@ -33,21 +51,7 @@ struct FoodSearchStreamTests {
                             cache: FoodSearchCache())
     }
 
-    private static let offJSON = """
-    {"count": 1, "page": 1, "page_size": 25, "page_count": 1, "hits": [
-      {"code": "off-1", "product_name": "Tesco Chicken", "brands": ["Tesco"],
-       "countries_tags": ["en:united-kingdom"],
-       "nutriments": {"energy-kcal_100g": 106, "proteins_100g": 24}}
-    ]}
-    """.data(using: .utf8)!
 
-    private static let usdaJSON = """
-    {"foods": [
-      {"fdcId": 111, "description": "Chicken, raw", "dataType": "SR Legacy",
-       "foodNutrients": [{"nutrientId": 1008, "value": 165},
-                         {"nutrientId": 1003, "value": 31}]}
-    ]}
-    """.data(using: .utf8)!
 
 
 
@@ -62,7 +66,7 @@ struct FoodSearchStreamTests {
     /// scheduler rather than the behaviour.
     @Test func resultsArriveProgressivelyRatherThanInOneLump() async {
         let r = resolver { url in
-            (200, isUSDAHost(url) ? Self.usdaJSON : Self.offJSON)
+            (200, isUSDAHost(url) ? usdaJSON : offJSON)
         }
         var batches: [[String]] = []
         for await page in r.stream("chicken", region: .unitedKingdom) {
@@ -80,7 +84,7 @@ struct FoodSearchStreamTests {
     @Test func aHangingSourceStillLetsTheOthersThrough() async {
         let r = resolver { url in
             if isUSDAHost(url) { return (503, Data()) }
-            return (200, Self.offJSON)
+            return (200, offJSON)
         }
         var last: [String] = []
         for await page in r.stream("chicken", region: .unitedKingdom) {
@@ -91,17 +95,17 @@ struct FoodSearchStreamTests {
 
     /// Every yield is the whole list, so the view assigns rather than merges —
     /// and the last one holds everything both sources returned.
-    @Test func eachYieldIsTheCompleteListSoFar() async {
+    @Test func eachYieldIsTheCompleteListSoFar() async throws {
         let r = resolver { url in
-            (200, isUSDAHost(url) ? Self.usdaJSON : Self.offJSON)
+            (200, isUSDAHost(url) ? usdaJSON : offJSON)
         }
         var batches: [[String]] = []
         for await page in r.stream("chicken", region: .unitedKingdom) {
             batches.append(page.foods.map(\.id))
         }
-        let final = try? #require(batches.last)
-        #expect(final?.contains("off-1") == true)
-        #expect(final?.contains("fdc:111") == true)
+        let final = try #require(batches.last)
+        #expect(final.contains("off-1"))
+        #expect(final.contains("fdc:111"))
         // Never shrinks: a later yield always contains everything an earlier one did.
         for (earlier, later) in zip(batches, batches.dropFirst()) {
             #expect(Set(earlier).isSubset(of: Set(later)))
@@ -111,7 +115,7 @@ struct FoodSearchStreamTests {
     /// No result is ever listed twice, however many sources returned it.
     @Test func resultsAreNotDuplicatedAcrossYields() async {
         let r = resolver { url in
-            (200, isUSDAHost(url) ? Self.usdaJSON : Self.offJSON)
+            (200, isUSDAHost(url) ? usdaJSON : offJSON)
         }
         var final: [String] = []
         for await page in r.stream("chicken", region: .unitedKingdom) {
@@ -124,7 +128,7 @@ struct FoodSearchStreamTests {
     /// the list would visibly reshuffle as each source landed.
     @Test func everyYieldIsRanked() async {
         let r = resolver { url in
-            (200, isUSDAHost(url) ? Self.usdaJSON : Self.offJSON)
+            (200, isUSDAHost(url) ? usdaJSON : offJSON)
         }
         for await page in r.stream("chicken", region: .unitedKingdom) {
             let ids = page.foods.map(\.id)

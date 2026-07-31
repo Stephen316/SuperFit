@@ -68,32 +68,28 @@ struct CardioLoadTests {
 
     // MARK: ACWR behaviour
 
-    @Test func steadyTrainingSitsAtOne() {
-        let result = try? #require(acwr(steady()))
-        if let result {
-            #expect(abs(result.ratio - 1.0) < 0.15)
-            #expect(result.band == .optimal)
-        }
+    @Test func steadyTrainingSitsAtOne() throws {
+        let result = try #require(acwr(steady()))
+        #expect(abs(result.ratio - 1.0) < 0.15)
+        #expect(result.band == .optimal)
     }
 
-    @Test func aSuddenBigWeekReadsAsASpike() {
+    @Test func aSuddenBigWeekReadsAsASpike() throws {
         var records = steady()
         // Three extra hard sessions in the last week only.
         for offset in [-5, -3, -1] {
             records.append(CardioRecord(date: day(offset), durationMinutes: 90,
                                         avgHeartRate: 165))
         }
-        let result = try? #require(acwr(records))
-        if let result { #expect(result.ratio > 1.5) }
+        let result = try #require(acwr(records))
+        #expect(result.ratio > 1.5)
     }
 
-    @Test func taperingReadsAsDetraining() {
+    @Test func taperingReadsAsDetraining() throws {
         let records = steady().filter { $0.date < self.day(-7) }
-        let result = try? #require(acwr(records))
-        if let result {
-            #expect(result.ratio < 0.8)
-            #expect(result.band == .detraining)
-        }
+        let result = try #require(acwr(records))
+        #expect(result.ratio < 0.8)
+        #expect(result.band == .detraining)
     }
 
     /// 1.3 is the top of the optimal band, matching the lifting ACWR.

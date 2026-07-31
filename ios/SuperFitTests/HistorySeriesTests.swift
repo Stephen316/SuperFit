@@ -123,15 +123,15 @@ struct HistorySeriesTests {
     // MARK: Change
 
     /// Endpoint-to-endpoint would let one noisy weigh-in define the period.
-    @Test func changeUsesEdgeAveragesNotSinglePoints() {
+    @Test func changeUsesEdgeAveragesNotSinglePoints() throws {
         var values = [Double](repeating: 80, count: 20)
         values[0] = 95          // one bad reading at the start
         let points = values.enumerated().map {
             HistoryPoint(date: day(-19 + $0.offset), value: $0.element)
         }
-        let change = try? #require(HistorySeries.change(points, edgeDays: 7))
+        let change = try #require(HistorySeries.change(points, edgeDays: 7))
         // A raw first-to-last read would say −15; averaging the edges says ~−2.
-        if let change { #expect(abs(change) < 3) }
+        #expect(abs(change) < 3)
     }
 
     @Test func changeIsNilWithoutEnoughPoints() {
@@ -276,7 +276,10 @@ struct HistorySeriesTests {
     }
 }
 
-extension HistoryPoint: Equatable {
+// `@retroactive` because `HistoryPoint` belongs to the app module, not the test
+// one: without it the compiler warns that the owner adding `Equatable` later
+// would silently change behaviour here.
+extension HistoryPoint: @retroactive Equatable {
     public static func == (a: HistoryPoint, b: HistoryPoint) -> Bool {
         a.date == b.date && a.value == b.value
     }
