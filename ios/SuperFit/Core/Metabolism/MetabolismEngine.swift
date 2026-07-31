@@ -77,6 +77,20 @@ struct MetabolismEngine: Sendable {
     /// kcal per kg of body-mass change (standard mixed-tissue value).
     static let kcalPerKg = 7700.0
 
+    /// Fastest weekly weight change, as a fraction of bodyweight, that is treated
+    /// as real tissue when inferring TDEE.
+    ///
+    /// The inference assumes a weight change *is* stored or burned energy, so a
+    /// wrong number doesn't produce a slightly wrong answer — it produces an
+    /// absurd one. Measured on this engine: a single mistyped weigh-in of 89 kg
+    /// instead of 80 gives a +9 kg/week slope and a TDEE of **452 kcal**.
+    ///
+    /// 1.5% a week is well clear of any real cut or bulk — a hard cut runs near
+    /// 1%, and beyond that you are measuring water, glycogen or a typo. The
+    /// *reported* trend is left untouched so the user still sees what they
+    /// actually logged; only the energy inference is clamped.
+    static let maxPlausibleWeeklyChangeFraction = 0.015
+
     struct Prior: Sendable {
         let sex: BiologicalSex
         let ageYears: Double
@@ -129,7 +143,11 @@ struct MetabolismEngine: Sendable {
         // them, so the intake side has to as well.
         let avgIntake = imputedAverageIntake(window)
 
-        let rawTDEE = avgIntake - slopePerDay * Self.kcalPerKg
+        // Clamped before it becomes energy: see maxPlausibleWeeklyChangeFraction.
+        let referenceWeight = smoothed.last?.value ?? daily.last?.value ?? 75
+        let maxPerDay = referenceWeight * Self.maxPlausibleWeeklyChangeFraction / 7
+        let inferenceSlope = slopePerDay.clamped(to: -maxPerDay...maxPerDay)
+        let rawTDEE = avgIntake - inferenceSlope * Self.kcalPerKg
 
         let coverage = Double(intakes.count) / Double(max(windowDays, 1))
         let weighIns = smoothed.count

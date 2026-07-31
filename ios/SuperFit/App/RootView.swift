@@ -37,7 +37,12 @@ struct RootView: View {
                 WeightView().tag(AppTab.weight)
                 SleepView().tag(AppTab.sleep)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            // Deliberately *not* `.page`. Its horizontal paging gesture wins over
+            // every List row swipe in the app, so swipe-to-delete silently did
+            // nothing anywhere — swiping a weigh-in changed tab instead. The
+            // default style keeps each tab alive (so scroll positions and search
+            // text survive switching) and leaves row swipes to the rows.
+            .toolbar(.hidden, for: .tabBar)
             .ignoresSafeArea(.keyboard)
 
             TabBar(selection: $tab)
