@@ -26,6 +26,49 @@ struct WeightView: View {
         metrics.sorted { $0.date < $1.date }.suffix(90)
     }
 
+    /// Anchoring the axis to zero makes the chart useless: 5 kg on a 100 kg body
+    /// is a 5% wiggle, drawn as a flat line squashed against the top of the
+    /// frame. The domain tracks the data instead.
+    ///
+    /// The floor is the other half of it. Without one, a fortnight of genuinely
+    /// stable weight is stretched to fill the frame and 200 g of overnight water
+    /// swing is drawn like a trend — the opposite error, and the worse of the
+    /// two, because it invites a diet change in response to noise.
+    private static let minimumSpanKg = 2.0
+
+    private var yDomain: ClosedRange<Double> {
+        var values: [Double] = []
+        for m in chartData {
+            values.append(m.weightKg)
+            if let t = m.trendWeightKg { values.append(t) }
+        }
+        guard let low = values.min(), let high = values.max() else { return 0...1 }
+        // 20% wider than whatever it settles on, so the lightest and heaviest
+        // days aren't drawn on the frame itself.
+        let span = max(high - low, Self.minimumSpanKg) * 1.2
+        let centre = (high + low) / 2
+        // displayWeight is a plain factor, so it converts a span as well as a
+        // weight — no need to convert the bounds separately.
+        return units.displayWeight(centre - span / 2)...units.displayWeight(centre + span / 2)
+    }
+
+    /// Chosen before the labels, not after: at these ranges whole numbers repeat
+    /// themselves down the axis ("81, 81, 82, 82") and Charts' own spacing has
+    /// no idea the duplicates are unreadable.
+    private var yStep: Double {
+        let span = yDomain.upperBound - yDomain.lowerBound
+        let candidates: [Double] = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50]
+        return candidates.first { span / $0 <= 6 } ?? 100
+    }
+
+    /// Decimals follow the step, not the value: a half-kilo step needs them to
+    /// avoid repeating itself, and a 2.5 step needs them or the mark at 82.5
+    /// prints as "82 kg" against a grid line that isn't 82.
+    private func yLabel(_ v: Double) -> String {
+        let wholeSteps = yStep == yStep.rounded()
+        return String(format: "%.\(wholeSteps ? 0 : 1)f %@", v, units.weightUnit)
+    }
+
     private var trendSlopePerWeek: Double {
         let recs = metrics.map { DailyRecord(date: $0.date, intakeKcal: nil, weightKg: $0.weightKg) }
         return MetabolismEngine()
@@ -53,12 +96,13 @@ struct WeightView: View {
                             }
                         }
                     }
+                    .chartYScale(domain: yDomain)
                     .chartYAxis {
-                        AxisMarks { value in
+                        AxisMarks(values: .stride(by: yStep)) { value in
                             AxisGridLine()
                             AxisValueLabel {
                                 if let v = value.as(Double.self) {
-                                    Text("\(Int(v)) \(units.weightUnit)")
+                                    Text(yLabel(v))
                                 }
                             }
                         }
