@@ -12,6 +12,10 @@ import UIKit
 /// Two halves to the fix. `ThemeAppearance` reaches the UIKit views SwiftUI
 /// wraps, because there is no SwiftUI API to opt a navigation bar out of glass.
 /// The components below replace the controls worth rebuilding outright.
+/// Every UIKit appearance proxy is main-actor isolated, so the whole type is.
+/// Without this the 30-odd property writes below each warn under strict
+/// concurrency, which is on for this project.
+@MainActor
 enum ThemeAppearance {
 
     /// Call once at launch, before any window is shown.

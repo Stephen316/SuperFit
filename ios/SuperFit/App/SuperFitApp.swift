@@ -7,7 +7,14 @@ struct SuperFitApp: App {
 
     /// Before any window exists, so no bar is ever drawn as glass first and
     /// restyled after.
-    init() { ThemeAppearance.apply() }
+    ///
+    /// `assumeIsolated` rather than a `@MainActor init`: the App protocol's
+    /// requirement is nonisolated, and SwiftUI builds the App on the main thread
+    /// regardless, so this asserts what is already true instead of changing the
+    /// conformance.
+    init() {
+        MainActor.assumeIsolated { ThemeAppearance.apply() }
+    }
 
     var body: some Scene {
         WindowGroup {
