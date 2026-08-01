@@ -24,6 +24,7 @@ struct AccountView: View {
             dangerSection
         }
         .navigationTitle("Account")
+        .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
         .themedList()
         .task { await account.refreshCredentialState() }

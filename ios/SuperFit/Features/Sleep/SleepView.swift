@@ -42,6 +42,7 @@ struct SleepView: View {
                 }
             }
             .navigationTitle("Sleep")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -53,6 +54,7 @@ struct SleepView: View {
                         Text("\(window)d").font(.subheadline)
                     }
                 }
+                .withoutGlassBackground()
             }
             .themedList()
             .settingsToolbar()

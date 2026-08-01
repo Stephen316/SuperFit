@@ -6,6 +6,7 @@ struct SettingsToolbarModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.toolbar {
             ToolbarItem(placement: .topBarTrailing) { SettingsGear() }
+            .withoutGlassBackground()
         }
     }
 }
@@ -111,10 +112,12 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
             }
         }
     }

@@ -47,6 +47,7 @@ struct MealBuilderView: View {
                 ingredientsSection
             }
             .navigationTitle(existing == nil ? "New meal" : "Edit meal")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
@@ -54,10 +55,12 @@ struct MealBuilderView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { finish() }
                 }
+                .withoutGlassBackground()
                 if logTo != nil && !ingredients.resolved.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Log meal") { logMeal() }.fontWeight(.semibold)
                     }
+                    .withoutGlassBackground()
                 }
             }
             .sheet(isPresented: $addingIngredient) {
@@ -242,11 +245,13 @@ private struct MealIngredientView: View {
                 }
             }
             .navigationTitle("Add ingredient")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Add") {
                         onAdd(grams)
@@ -254,6 +259,7 @@ private struct MealIngredientView: View {
                     }
                     .disabled(grams <= 0 || grams > 5000)
                 }
+                .withoutGlassBackground()
             }
             .task {
                 if let portion = options.first, portion != .gram, portion != .ounce {

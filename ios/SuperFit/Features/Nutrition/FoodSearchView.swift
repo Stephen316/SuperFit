@@ -16,12 +16,14 @@ struct FoodSearchView: View {
                            onPickMeal: { loggingMeal = $0 },
                            onPick: { logging = $0 })
                 .navigationTitle("Add to \(meal.rawValue.capitalized)")
+                .themedChrome()
                 .navigationBarTitleDisplayMode(.inline)
                 .themedList()
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel") { dismiss() }
                     }
+                    .withoutGlassBackground()
                 }
                 .sheet(item: $logging) { food in
                     LogFoodView(food: food, day: day, meal: meal) { dismiss() }
@@ -115,6 +117,7 @@ struct LogFoodView: View {
                 }
             }
             .navigationTitle("Log food")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
@@ -127,6 +130,7 @@ struct LogFoodView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Back") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Log") {
                         if alreadyTakenAsSupplement {
@@ -137,6 +141,7 @@ struct LogFoodView: View {
                     }
                     .disabled(grams <= 0 || grams > 5000)
                 }
+                .withoutGlassBackground()
             }
         }
     }

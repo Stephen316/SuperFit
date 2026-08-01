@@ -146,9 +146,11 @@ struct NutritionView: View {
                 }
             }
             .navigationTitle(averaging ? "Nutrition — 7-day average" : "Nutrition")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItemGroup(placement: .topBarLeading) {
                     Button { shift(-1) } label: { Image(systemName: "chevron.left") }
                         .accessibilityLabel("Previous day")
@@ -161,6 +163,7 @@ struct NutritionView: View {
                     }
                     .accessibilityLabel(averaging ? "Show single day" : "Show 7-day average")
                 }
+                .withoutGlassBackground()
             }
             .themedList()
             .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }

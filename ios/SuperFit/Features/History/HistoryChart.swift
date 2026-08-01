@@ -95,7 +95,7 @@ struct HistoryChartCard<Content: ChartContent>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }

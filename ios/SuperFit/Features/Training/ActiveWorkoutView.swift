@@ -53,6 +53,7 @@ struct ActiveWorkoutView: View {
                 }
             }
             .navigationTitle(session.templateName ?? "Workout")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
@@ -60,10 +61,12 @@ struct ActiveWorkoutView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
                 }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(session.endedAt == nil ? "Finish" : "Done") { finish() }
                         .fontWeight(.semibold)
                 }
+                .withoutGlassBackground()
             }
             .sheet(isPresented: $pickingExercise) {
                 ExercisePickerView { exercise in
@@ -318,10 +321,12 @@ struct ExercisePickerView: View {
             }
             .searchable(text: $query, prompt: "Search exercises")
             .navigationTitle("Add exercise")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("All muscles") { muscleFilter = nil }
@@ -334,9 +339,11 @@ struct ExercisePickerView: View {
                               : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { creatingCustom = true } label: { Image(systemName: "plus") }
                 }
+                .withoutGlassBackground()
             }
             .sheet(isPresented: $creatingCustom) {
                 CustomExerciseView { exercise in
@@ -409,14 +416,17 @@ struct CustomExerciseView: View {
                 }
             }
             .navigationTitle("New exercise")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }.disabled(!isValid)
                 }
+                .withoutGlassBackground()
             }
         }
     }

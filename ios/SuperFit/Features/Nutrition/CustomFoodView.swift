@@ -76,14 +76,17 @@ struct CustomFoodView: View {
                 }
             }
             .navigationTitle("Custom food")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }.disabled(!isValid)
                 }
+                .withoutGlassBackground()
             }
         }
     }

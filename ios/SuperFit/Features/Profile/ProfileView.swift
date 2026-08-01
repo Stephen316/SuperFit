@@ -59,6 +59,7 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("Profile")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()

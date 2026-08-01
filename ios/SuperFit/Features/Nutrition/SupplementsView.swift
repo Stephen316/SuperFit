@@ -45,10 +45,12 @@ struct SupplementsView: View {
                 }
             }
             .navigationTitle("Supplements")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
             }
             .sheet(isPresented: $adding) {
                 SupplementPickerView(day: day)
@@ -179,6 +181,7 @@ struct SupplementPickerView: View {
                 }
             }
             .navigationTitle(selected?.name ?? "Add supplement")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
@@ -187,6 +190,7 @@ struct SupplementPickerView: View {
                         if selected == nil { dismiss() } else { selected = nil }
                     }
                 }
+                .withoutGlassBackground()
                 if selected != nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Add") {
@@ -198,11 +202,13 @@ struct SupplementPickerView: View {
                         }
                         .fontWeight(.semibold)
                     }
+                    .withoutGlassBackground()
                 } else {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { creatingCustom = true } label: { Image(systemName: "plus") }
                             .accessibilityLabel("Create custom supplement")
                     }
+                    .withoutGlassBackground()
                 }
             }
             .alert("Already logged today", isPresented: $confirmingDuplicate) {
@@ -376,14 +382,17 @@ struct CustomSupplementView: View {
                 }
             }
             .navigationTitle("Custom supplement")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { save() }.disabled(!isValid)
                 }
+                .withoutGlassBackground()
             }
         }
     }

@@ -51,11 +51,13 @@ struct ConsumedFoodsView: View {
                 }
             }
             .navigationTitle("Calories consumed")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
             }
         }
     }
@@ -73,7 +75,7 @@ struct ConsumedFoodsView: View {
         .frame(maxWidth: .infinity)
         .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }
@@ -114,7 +116,7 @@ struct ConsumedFoodsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }

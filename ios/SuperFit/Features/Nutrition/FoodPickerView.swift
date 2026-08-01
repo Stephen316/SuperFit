@@ -172,6 +172,7 @@ struct FoodPickerView: View {
                     Button { scanning = true } label: { Image(systemName: "barcode.viewfinder") }
                         .accessibilityLabel("Scan barcode")
                 }
+                .withoutGlassBackground()
             }
         }
     }
@@ -312,6 +313,7 @@ struct FoodPickerView: View {
                 }
             }
             .navigationTitle("Scan barcode")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }

@@ -57,6 +57,18 @@ enum Theme {
 
     static let cardRadius: CGFloat = 28
     static let tabBarRadius: CGFloat = 36
+
+    /// Card radius away from the dashboard.
+    ///
+    /// The 28pt bevel is sized for the home screen's full-width cards, one per
+    /// row. Reused on the denser screens — where boxes are smaller and often
+    /// stacked — that much rounding eats the corners and the content starts
+    /// fighting the curve. Same shape and border, less of it.
+    static let cardRadiusCompact: CGFloat = 18
+
+    /// Radius for controls rather than containers: search fields, pickers, the
+    /// small bordered boxes that sit inline with text.
+    static let controlRadius: CGFloat = 14
 }
 
 extension Color {
@@ -81,6 +93,9 @@ extension Color {
 /// read as a fractionally larger, softer card.
 struct ThemeCard<Content: View>: View {
     var padding: CGFloat = 18
+    /// Defaults to the dashboard's bevel. Denser screens pass
+    /// `Theme.cardRadiusCompact`.
+    var radius: CGFloat = Theme.cardRadius
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -88,11 +103,11 @@ struct ThemeCard<Content: View>: View {
             .frame(maxWidth: .infinity)
             .padding(padding)
             .background(
-                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(Theme.surface)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(Theme.hairline, lineWidth: 1)
             )
     }
@@ -167,7 +182,9 @@ struct ThemedScreen<Content: View>: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        // Was `.hidden`, which on iOS 26 leaves the bar as Liquid Glass floating
+        // over the gradient. Opaque and themed, matching every other screen.
+        .themedChrome()
         .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }

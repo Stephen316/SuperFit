@@ -49,12 +49,14 @@ struct ActivityPickerView: View {
             }
             .searchable(text: $search, prompt: "Find an activity")
             .navigationTitle("New workout")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
                 }
+                .withoutGlassBackground()
             }
         }
     }
@@ -198,6 +200,7 @@ struct ActivityStartOptionsView: View {
             }
         }
         .navigationTitle(activity.displayName)
+        .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
         .themedList()
     }

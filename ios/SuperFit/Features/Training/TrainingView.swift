@@ -192,6 +192,7 @@ struct TrainingView: View {
                 }
             }
             .navigationTitle("Train")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .settingsToolbar()

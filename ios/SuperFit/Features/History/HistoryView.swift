@@ -55,21 +55,24 @@ struct HistoryView: View {
                 .scrollIndicators(.hidden)
             }
             .navigationTitle("Trends")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }.themedToolbarButton()
+                }
+                .withoutGlassBackground()
             }
             .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
         }
     }
 
     private var rangePicker: some View {
-        Picker("Range", selection: $range) {
-            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-        }
-        .pickerStyle(.segmented)
+        ThemeSegmentedControl(
+            options: HistoryRange.allCases.map { ($0, $0.label) },
+            selection: $range)
     }
 
     // MARK: - Energy
@@ -235,7 +238,7 @@ struct HistoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }

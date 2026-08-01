@@ -178,6 +178,7 @@ struct WeightView: View {
         NavigationStack {
             entries
             .navigationTitle("Weight")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
             .toolbar {
@@ -188,6 +189,7 @@ struct WeightView: View {
                     .disabled(syncing)
                     .accessibilityLabel("Sync with Apple Health")
                 }
+                .withoutGlassBackground()
             }
             .themedList()
             .settingsToolbar()

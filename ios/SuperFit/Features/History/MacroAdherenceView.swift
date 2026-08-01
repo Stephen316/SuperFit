@@ -77,10 +77,9 @@ struct MacroAdherenceView: View {
                 Theme.background
                 ScrollView {
                     VStack(spacing: 14) {
-                        Picker("Range", selection: $range) {
-                            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
+                        ThemeSegmentedControl(
+                            options: HistoryRange.allCases.map { ($0, $0.label) },
+                            selection: $range)
 
                         summaryCard
                         chartCard
@@ -92,11 +91,13 @@ struct MacroAdherenceView: View {
                 .scrollIndicators(.hidden)
             }
             .navigationTitle(macro.title)
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
             }
         }
     }
@@ -182,7 +183,7 @@ struct MacroAdherenceView: View {
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }
@@ -245,7 +246,7 @@ struct MacroAdherenceView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }

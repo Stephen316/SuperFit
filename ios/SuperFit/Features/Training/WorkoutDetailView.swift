@@ -32,10 +32,12 @@ struct WorkoutDetailView: View {
                 sourceSection
             }
             .navigationTitle(workout.activity.displayName)
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
             }
         }
     }
