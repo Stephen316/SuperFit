@@ -43,8 +43,19 @@ private func records(days: Int, intake: Double, startWeight: Double,
         // −0.5 kg/week = −0.0714 kg/day
         let recs = records(days: 30, intake: 2600, startWeight: 82, kgPerDay: -0.0714)
         let est = e.estimate(records: recs, windowDays: 30, prior: prior)
-        // TDEE ≈ 2600 + 550 = 3150; Theil–Sen is exact on a clean trend
-        #expect(abs(est.tdeeKcal - 3150) < 30)
+        // The measured term is exactly 2600 + 550 = 3150 — Theil–Sen is exact on
+        // a clean trend, and the slope assertion below pins that.
+        //
+        // The reported figure falls short of it because confidence cannot reach
+        // 1: `intakeSystematicErrorFraction` leaves a residual self-report error
+        // that averaging cannot remove. The remainder is the prior's pull.
+        // Previously this read `< 30`, which only held while confidence could
+        // reach exactly 1.
+        #expect(est.tdeeKcal > 3050, "got \(est.tdeeKcal), measured term is 3150")
+        #expect(est.tdeeKcal < 3160)
+        // The ceiling is set by the residual systematic log error, not by
+        // anything about this trend.
+        #expect(est.confidence > 0.8)
         #expect(abs(est.trendSlopeKgPerWeek - (-0.5)) < 0.02)
     }
 
