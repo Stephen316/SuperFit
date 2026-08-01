@@ -330,7 +330,7 @@ struct WeightView: View {
     }
 
     private func recomputeTrend() {
-        AggregationService(context: context).fillWeightTrend()
+        AggregationService(context: context).refreshWeightDerived()
     }
 
     private func syncFromHealth() async {
