@@ -31,6 +31,16 @@ struct ResolvedFood: Sendable, Identifiable {
     /// Household measures, when the source lists them. Empty is normal —
     /// branded items usually carry only `servingGrams`.
     var portions: [FoodPortion] = []
+
+    /// Open Food Facts `countries_tags` for this product, without the `en:`
+    /// prefix — the countries it's actually sold in. Empty when the source
+    /// doesn't say, which is not the same as "sold nowhere".
+    var countryTags: [String] = []
+
+    /// A whole food rather than a retailer's product: "Rice, white, long-grain,
+    /// cooked". Has no country because it has no supplier, so it must not be
+    /// ranked as foreign — plain rice is plain rice wherever you buy it.
+    var isGeneric: Bool = false
 }
 
 /// A unit the user can log in: a named portion, grams, or ounces.

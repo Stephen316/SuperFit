@@ -1,7 +1,23 @@
 import SwiftUI
 import SwiftData
 
+/// Laid out against the `fitness-tracker` frame in the Figma file, read through
+/// the REST API rather than measured off a screenshot: every size, colour, gap and
+/// padding below is the literal value on the corresponding node.
+///
+/// Two deliberate departures, both requested:
+///
+/// - The tab bar's background runs to the bottom of the screen. The frame floats
+///   it with 32pt beneath, which on a real device would show the gradient through
+///   the home-indicator strip.
+/// - Everything stays live. The frame is a mockup with 50, 432 and 1899 painted
+///   on; here those come from Health and the diary, and the gauge still reads "–"
+///   when Health has given us nothing.
 struct DashboardView: View {
+    /// Owned by `RootView`. Cards that lead to a whole section switch tab rather
+    /// than pushing a second copy of a screen that already exists.
+    @Binding var tab: AppTab
+
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
@@ -10,10 +26,23 @@ struct DashboardView: View {
     @Query(sort: \RecoveryScoreRecord.date, order: .reverse) private var recoveries: [RecoveryScoreRecord]
     @Query(sort: \DailyEnergy.date, order: .reverse) private var energy: [DailyEnergy]
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
+    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+    @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
 
+    /// The day on screen. Every card reads from this rather than "now", so the
+    /// arrows under the title move the whole page together.
+    @State private var day = Calendar.current.startOfDay(for: .now)
+    @State private var addingTo: MealSlot?
     @State private var syncing = false
     @State private var showingHistory = false
-    @State private var showingProtein = false
+    @State private var showingMacro: TrackedMacro?
+    @State private var showingConsumed = false
+    @State private var showingSteps = false
+    @State private var showingRestingHR = false
+    @State private var showingSettings = false
+    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var profile: UserProfile? { profiles.first }
     private var latestWeight: Double? { metrics.first?.basisWeightKg }
@@ -33,43 +62,76 @@ struct DashboardView: View {
                                          proteinPerKg: override)
     }
 
-    private var todayLogs: [NutritionLog] {
-        nutrition.filter { Calendar.current.isDateInToday($0.date) }
+    private func onDay(_ date: Date) -> Bool {
+        Calendar.current.isDate(date, inSameDayAs: day)
     }
 
-    private var todayRecovery: RecoveryScoreRecord? {
-        recoveries.first { Calendar.current.isDateInToday($0.date) }
+    private var isToday: Bool { Calendar.current.isDateInToday(day) }
+
+    private var todayLogs: [NutritionLog] { nutrition.filter { onDay($0.date) } }
+    private var todayRecovery: RecoveryScoreRecord? { recoveries.first { onDay($0.date) } }
+    private var todayEnergy: DailyEnergy? { energy.first { onDay($0.date) } }
+    private var lastSleep: SleepData? { sleep.first { onDay($0.date) } }
+    private var todayVitals: DailyVitals? { vitals.first { onDay($0.date) } }
+    private var todayWorkouts: [WorkoutRecord] { workouts.filter { onDay($0.startedAt) } }
+
+    /// The weight to show is the last one recorded on or before the day being
+    /// viewed — stepping back a day shouldn't blank it just because nothing was
+    /// weighed that morning.
+    private var weightOnDay: BodyMetrics? {
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
+        return metrics.first { $0.date < end }
     }
 
-    private var todayEnergy: DailyEnergy? {
-        energy.first { Calendar.current.isDateInToday($0.date) }
+    /// The meal slot closest to the time of day, so the card offers the one you
+    /// are most likely about to eat. On a past day there is no "about to", so it
+    /// falls back to the last slot of the day.
+    private var nextMeal: MealSlot {
+        guard isToday else { return .dinner }
+        switch Calendar.current.component(.hour, from: .now) {
+        case ..<11: return .breakfast
+        case ..<16: return .lunch
+        case ..<21: return .dinner
+        default: return .snack
+        }
     }
-
-    private var lastSleep: SleepData? { sleep.first }
 
     var body: some View {
         NavigationStack {
-            ThemedScreen(title: "") {
-                recoveryHeader
-                burnedCard
-                consumedCard
-                activitySleepCard
-                macrosCard
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showingHistory = true } label: {
-                        Image(systemName: "chart.xyaxis.line")
-                            .font(.system(size: 19))
-                            .foregroundStyle(Theme.textPrimary)
+            ZStack {
+                Theme.background
+                VStack(spacing: 0) {
+                    headerRow
+                    ScrollView {
+                        VStack(spacing: 20) {          // dashboard-content, gap 20
+                            recoverySection
+                            burnedCard
+                            consumedCard
+                            activitySleepCard
+                            macrosCard
+                            stepsCard
+                            nextMealCard
+                            weightCard
+                            restingHRCard
+                        }
+                        .padding(.horizontal, 20)      // dashboard-content, pad 20
+                        // bottom-spacer is 40 in the frame; the tab bar's own 72
+                        // sits under it, and the design's trailing 32 is absorbed
+                        // by running the bar to the screen edge.
+                        .padding(.bottom, 112)
                     }
-                    .accessibilityLabel("Trends")
+                    .scrollIndicators(.hidden)
+                    .refreshable { await refresh() }
                 }
-                ToolbarItem(placement: .topBarTrailing) { SettingsGear() }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingHistory) { HistoryView() }
-            .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
-            .refreshable { await refresh() }
+            .sheet(item: $showingMacro) { MacroAdherenceView(macro: $0) }
+            .sheet(isPresented: $showingConsumed) { ConsumedFoodsView(day: day) }
+            .sheet(isPresented: $showingSteps) { StepsHistoryView() }
+            .sheet(isPresented: $showingRestingHR) { RestingHRHistoryView() }
+            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(item: $addingTo) { slot in FoodSearchView(day: day, meal: slot) }
             .task { await refresh() }
         }
     }
@@ -82,92 +144,252 @@ struct DashboardView: View {
         AggregationService(context: context).runAll()
     }
 
+    // MARK: - Header
+
+    /// header-row: 64 tall, 24 horizontal padding, title left and controls right.
+    ///
+    /// The frame shows one control. Trends would have nowhere to live, and losing
+    /// it would cost a whole screen, so it sits beside the gear in the same 40pt
+    /// treatment rather than being dropped.
+    private var headerRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(isToday ? "Today" : Self.dayFormatter.string(from: day))
+                    .font(Theme.text(18, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                dayStepper
+            }
+            Spacer(minLength: 0)
+            circleButton("chart.xyaxis.line", label: "Trends") { showingHistory = true }
+            circleButton("gearshape", label: "Settings") { showingSettings = true }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        return f
+    }()
+
+    /// Steps the whole page a day at a time. Forward stops at today: there is no
+    /// data ahead of now, and an empty screen reads as a bug rather than a date.
+    private var dayStepper: some View {
+        HStack(spacing: 0) {
+            stepButton("chevron.left", label: "Previous day", by: -1, enabled: true)
+            Rectangle().fill(Theme.hairline).frame(width: 1, height: 16)
+            stepButton("chevron.right", label: "Next day", by: 1, enabled: !isToday)
+        }
+        .background(Capsule().fill(Theme.wash))
+        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+
+    private func stepButton(_ icon: String, label: String, by days: Int,
+                            enabled: Bool) -> some View {
+        Button {
+            guard let moved = Calendar.current.date(byAdding: .day, value: days, to: day)
+            else { return }
+            withAnimation(.easeOut(duration: 0.15)) { day = moved }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(enabled ? Theme.textPrimary : Theme.textSecondary.opacity(0.4))
+                .frame(width: 32, height: 26)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    /// settings-btn: 40pt circle, white at 5%, 20pt glyph.
+    private func circleButton(_ icon: String, label: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(Theme.wash))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
     // MARK: - Cards
 
-    private var recoveryHeader: some View {
+    /// recovery-section: 110pt gauge container, 12pt gap, then the two labels 2 apart.
+    ///
+    /// The ring is the Health-backed element on this screen: no sleep or heart
+    /// data means no score, and it says so rather than drawing a zero.
+    private var recoverySection: some View {
         let recovery = todayRecovery
         let hasData = (recovery?.dataCompleteness ?? 0) > 0
         let score = recovery?.score ?? 0
-        return VStack(spacing: 4) {
+        return VStack(spacing: 12) {
             ZStack {
+                // 94pt frame with a 6pt stroke gives a 100pt outer and 88pt inner
+                // ring — the frame's innerRadius of 0.88.
                 Circle()
-                    .stroke(Theme.gold.opacity(hasData ? 0.30 : 0.15), lineWidth: 14)
-                    .frame(width: 190, height: 190)
+                    .stroke(Theme.wash, lineWidth: 6)
+                    .frame(width: 94, height: 94)
                 if hasData {
                     Circle()
                         .trim(from: 0, to: score / 100)
-                        .stroke(Theme.gold, style: .init(lineWidth: 14, lineCap: .round))
+                        .stroke(Theme.gold, style: .init(lineWidth: 6, lineCap: .butt))
                         .rotationEffect(.degrees(-90))
-                        .frame(width: 190, height: 190)
+                        .frame(width: 94, height: 94)
                 }
                 Text(hasData ? "\(Int(score))" : "–")
-                    .font(Theme.font(64, .regular))
+                    .font(Theme.text(32, .heavy))
                     .foregroundStyle(Theme.textPrimary)
             }
-            Text("Recovery")
-                .font(Theme.font(30))
-                .foregroundStyle(Theme.textSecondary)
-            Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
-                .font(Theme.font(20))
-                .foregroundStyle(Theme.textPrimary)
-        }
-        .padding(.top, 4)
-        .padding(.bottom, 10)
-    }
-
-    private var burnedCard: some View {
-        ThemeCard {
-            if let e = todayEnergy, e.activeEnergyKcal > 0 {
-                StatBlock(title: "Calories burned today",
-                          value: "\(Int(e.activeEnergyKcal))",
-                          suffix: "/\(Int(e.activeEnergyKcal + e.basalEnergyKcal)) kcal")
-            } else {
-                StatBlock(title: "Calories burned today", value: "No data yet", valueSize: 20)
+            .frame(width: 110, height: 110)
+            VStack(spacing: 2) {
+                Text("Recovery")
+                    .font(Theme.text(18, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
+                    .font(Theme.text(13, .medium))
+                    .foregroundStyle(hasData ? Theme.gold : Theme.textSecondary)
             }
         }
     }
 
-    private var consumedCard: some View {
-        ThemeCard(padding: 22) {
-            StatBlock(title: "Calories consumed",
-                      value: "\(Int(todayLogs.reduce(0) { $0 + $1.kcal }))",
-                      caption: macros.map { "of \(Int($0.kcal)) kcal" } ?? "set a goal to see a target",
-                      valueSize: 42)
+    /// calories-burned-card: pad 20, gap 8, value and suffix on one baseline.
+    private var burnedCard: some View {
+        cardButton { tab = .train } content: {
+            VStack(spacing: 8) {
+                cardLabel("Calories burned")
+                if let e = todayEnergy, e.activeEnergyKcal > 0 {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(Int(e.activeEnergyKcal))")
+                            .font(Theme.text(28, .bold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("/\(Int(e.activeEnergyKcal + e.basalEnergyKcal)) kcal")
+                            .font(Theme.text(16))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                } else {
+                    noData
+                }
+            }
         }
     }
 
+    /// calories-consumed-card: pad 20, gap 8, caption stacked under the value.
+    private var consumedCard: some View {
+        cardButton { showingConsumed = true } content: {
+            VStack(spacing: 8) {
+                cardLabel("Calories consumed")
+                VStack(spacing: 4) {
+                    Text("\(Int(todayLogs.reduce(0) { $0 + $1.kcal }))")
+                        .font(Theme.text(28, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(macros.map { "of \(Int($0.kcal)) kcal" } ?? "set a goal to see a target")
+                        .font(Theme.text(13))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+
+    /// activity-sleep-card: 18 vertical padding, a 44pt hairline between columns.
     private var activitySleepCard: some View {
-        ThemeCard(padding: 22) {
+        ThemeCard(padding: 0) {
             HStack(spacing: 0) {
-                splitBlock(title: "Activity",
-                           value: todayEnergy.map { "\($0.steps) steps" },
-                           caption: todayEnergy.map { "\(Int($0.activeEnergyKcal)) kcal active" })
+                // Type and minutes, per the sketch — steps moved to their own card.
+                splitBlock(title: "Activity", value: activitySummary)
                 Rectangle()
                     .fill(Theme.divider)
-                    .frame(width: 1, height: 92)
-                splitBlock(title: "Sleep",
-                           value: lastSleep.map { "\($0.asleepMinutes / 60) h \($0.asleepMinutes % 60) m" },
-                           caption: lastSleep?.efficiency.map { "\(Int($0 * 100))% efficiency" })
+                    .frame(width: 1, height: 44)
+                splitBlock(title: "Sleep", value: sleepSummary)
+            }
+            .padding(.vertical, 18)
+        }
+    }
+
+    /// macros-card: pad 18, 14 between title and row, 32pt hairlines between columns.
+    private var macrosCard: some View {
+        ThemeCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Macros")
+                    .font(Theme.text(14, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 0) {
+                    macroButton(.protein, todayLogs.reduce(0) { $0 + $1.proteinG },
+                                target: macros?.proteinG)
+                    Rectangle().fill(Theme.divider).frame(width: 1, height: 32)
+                    macroButton(.carbs, todayLogs.reduce(0) { $0 + $1.carbsG },
+                                target: macros?.carbG)
+                    Rectangle().fill(Theme.divider).frame(width: 1, height: 32)
+                    macroButton(.fats, todayLogs.reduce(0) { $0 + $1.fatG },
+                                target: macros?.fatG)
+                }
             }
         }
     }
 
-    private var macrosCard: some View {
-        ThemeCard(padding: 20) {
-            VStack(spacing: 12) {
-                Text("Macros")
-                    .font(Theme.font(15))
+    /// Steps stand alone rather than sharing the Activity column, which now
+    /// carries the day's workout instead.
+    private var stepsCard: some View {
+        cardButton { showingSteps = true } content: {
+            VStack(spacing: 8) {
+                cardLabel("Steps")
+                Text(todayEnergy.map { "\($0.steps)" } ?? "–")
+                    .font(Theme.text(28, .bold))
                     .foregroundStyle(Theme.textPrimary)
-                HStack(spacing: 0) {
-                    Button { showingProtein = true } label: {
-                        macroColumn("Protein", todayLogs.reduce(0) { $0 + $1.proteinG },
-                                    target: macros?.proteinG)
-                    }
-                    .buttonStyle(.plain)
-                    Rectangle().fill(Theme.divider).frame(width: 1, height: 70)
-                    macroColumn("Carbs", todayLogs.reduce(0) { $0 + $1.carbsG })
-                    Rectangle().fill(Theme.divider).frame(width: 1, height: 70)
-                    macroColumn("Fats", todayLogs.reduce(0) { $0 + $1.fatG })
+            }
+        }
+    }
+
+    /// The meal you're most likely about to eat, with whatever is already in it.
+    /// Tapping opens the same search the diary uses, logging into that slot.
+    private var nextMealCard: some View {
+        let slot = nextMeal
+        let logged = todayLogs.filter { $0.mealRaw == slot.rawValue }
+        let kcal = Int(logged.reduce(0) { $0 + $1.kcal })
+        return Button { addingTo = slot } label: {
+            ThemeCard(padding: 20) {
+                VStack(spacing: 8) {
+                    cardLabel(isToday ? "Next meal" : "Last meal")
+                    Text(slot.rawValue.capitalized)
+                        .font(Theme.text(28, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(logged.isEmpty
+                         ? "Nothing logged — tap to add"
+                         : "\(logged.count) item\(logged.count == 1 ? "" : "s") · \(kcal) kcal")
+                        .font(Theme.text(13))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var weightCard: some View {
+        cardButton { tab = .weight } content: {
+            VStack(spacing: 8) {
+                cardLabel("Weight")
+                Text(weightOnDay.map { units.weightString($0.weightKg) } ?? "–")
+                    .font(Theme.text(28, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+        }
+    }
+
+    private var restingHRCard: some View {
+        cardButton { showingRestingHR = true } content: {
+            VStack(spacing: 8) {
+                cardLabel("Resting HR")
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(todayVitals?.restingHR.map { "\(Int($0))" } ?? "–")
+                        .font(Theme.text(28, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("bpm")
+                        .font(Theme.text(16))
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -175,40 +397,95 @@ struct DashboardView: View {
 
     // MARK: - Pieces
 
-    private func splitBlock(title: String, value: String?, caption: String?) -> some View {
-        VStack(spacing: 6) {
+    /// "Run · 42 min". Several workouts collapse to a count rather than a list —
+    /// the column is one line wide.
+    private var activitySummary: String? {
+        let all = todayWorkouts
+        guard !all.isEmpty else { return nil }
+        let minutes = Int(all.reduce(0) { $0 + $1.durationSeconds } / 60)
+        let name = all.count == 1
+            ? all[0].activity.displayName
+            : "\(all.count) sessions"
+        return "\(name) · \(minutes) min"
+    }
+
+    /// "92% · 7h 20m", dropping the efficiency when Health didn't record it.
+    private var sleepSummary: String? {
+        guard let s = lastSleep else { return nil }
+        let hours = "\(s.asleepMinutes / 60)h \(s.asleepMinutes % 60)m"
+        guard let eff = s.efficiency else { return hours }
+        return "\(Int(eff * 100))% · \(hours)"
+    }
+
+    /// A whole card as one tap target.
+    ///
+    /// `.plain` throughout: the default button style tints every label inside
+    /// blue, which would repaint the numbers these cards exist to show.
+    private func cardButton<Content: View>(
+        _ action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            ThemeCard(padding: 20) { content() }
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// One macro column, tappable through to its own page.
+    private func macroButton(_ macro: TrackedMacro, _ grams: Double,
+                             target: Double?) -> some View {
+        Button { showingMacro = macro } label: {
+            macroColumn(macro.title, grams, target: target)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func cardLabel(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.text(13, .medium))
+            .foregroundStyle(Theme.textSecondary)
+    }
+
+    private var noData: some View {
+        Text("No data yet")
+            .font(Theme.text(16))
+            .foregroundStyle(Theme.textSecondary)
+    }
+
+    /// col-activity / col-sleep: 14/600 title over a 12/400 line, 4 apart.
+    private func splitBlock(title: String, value: String?) -> some View {
+        VStack(spacing: 4) {
             Text(title)
-                .font(Theme.font(20))
+                .font(Theme.text(14, .semibold))
                 .foregroundStyle(Theme.textPrimary)
             Text(value ?? "No data yet")
-                .font(Theme.font(value == nil ? 15 : 18))
-                .foregroundStyle(value == nil ? Theme.textSecondary : Theme.textPrimary)
-            if let caption {
-                Text(caption)
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.textSecondary)
-            }
+                .font(Theme.text(12))
+                .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
 
+    /// macro-*: 12/400 label, 15/700 value, 10/400 target, 4 apart.
     private func macroColumn(_ label: String, _ grams: Double,
                              target: Double? = nil) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 3) {
                 Text(label)
-                    .font(Theme.font(16))
-                    .foregroundStyle(Theme.textPrimary)
-                // Only protein is tappable, so only protein gets the chevron.
-                if target != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                    .font(Theme.text(12))
+                    .foregroundStyle(Theme.textSecondary)
+                // All three open a page now, so all three carry the chevron —
+                // and unconditionally: the page is worth reaching before a
+                // target exists, so the affordance can't depend on having one.
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Theme.textSecondary)
             }
-            Text("\(Int(grams)) g")
-                .font(Theme.font(30))
+            Text("\(Int(grams))g")
+                .font(Theme.text(15, .bold))
                 .foregroundStyle(Theme.textPrimary)
+            Text(target.map { "of \(Int($0))g" } ?? " ")
+                .font(Theme.text(10))
+                .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }

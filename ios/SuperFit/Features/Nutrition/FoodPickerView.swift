@@ -30,6 +30,19 @@ struct FoodPickerView: View {
     @State private var buildingMeal = false
     @State private var searchTask: Task<Void, Never>?
     @State private var confirmingDelete: ResolvedFood?
+    @State private var hasMore = false
+    @State private var loadingMore = false
+    @State private var loadedPage = 1
+    @State private var store: StoreBrand?
+    @AppStorage(FoodRegionSetting.storageKey) private var foodRegionRaw = FoodRegionSetting.automatic
+
+    /// The chosen country drives both the search ranking and which retailers the
+    /// chips offer, so changing it in Settings moves both together.
+    private var region: FoodRegion? {
+        FoodRegionSetting.effective(stored: foodRegionRaw)
+    }
+
+    private var stores: [StoreBrand] { StoreBrand.forRegion(region?.code) }
 
     /// Ids of everything in the user's own list — custom foods and anything
     /// previously logged. Built once per render rather than fetched per row.
@@ -47,6 +60,69 @@ struct FoodPickerView: View {
         return filter == .all ? results : results.filter { ids.contains($0.id) }
     }
 
+    /// A run of results under one heading. A nil title means a plain ungrouped
+    /// list, which is what a store browse or a single-category result should be.
+    private struct FoodSection: Identifiable {
+        let title: String?
+        let foods: [ResolvedFood]
+        var id: String { title ?? "" }
+    }
+
+    /// Splits the results into the food that was asked for and everything else
+    /// merely named after it.
+    ///
+    /// Ordering already puts rice above rice cakes, but a heading is what makes
+    /// that legible: the complaint was that searching "rice" showed rice cakes and
+    /// Rice Krispies with no actual rice in sight, and a reordered but unlabelled
+    /// list still leaves you scanning for where one group ends.
+    private var sections: [FoodSection] {
+        let foods = visible
+        let term = query.trimmingCharacters(in: .whitespaces)
+        guard term.count >= FoodSearch.minimumQueryLength else {
+            return [FoodSection(title: nil, foods: foods)]
+        }
+
+        // Partitioned, not re-ranked. The resolver has already ordered these, and
+        // ranking again here would silently disagree with it — this view doesn't
+        // know which foods were eaten recently, so its idea of the order is worse.
+        var isTheFood: [ResolvedFood] = []
+        var namedAfterIt: [ResolvedFood] = []
+        for food in foods {
+            let match = FoodNameMatch.match(name: food.name, brand: food.brand,
+                                            query: term)
+            if match <= .headNounAnyOrder { isTheFood.append(food) }
+            else { namedAfterIt.append(food) }
+        }
+
+        // A heading with nothing to contrast against is just noise.
+        guard !isTheFood.isEmpty, !namedAfterIt.isEmpty else {
+            return [FoodSection(title: nil, foods: foods)]
+        }
+        return [FoodSection(title: term.capitalized, foods: isTheFood),
+                FoodSection(title: "Other matches", foods: namedAfterIt)]
+    }
+
+    /// Hoists `storedIDs` out of the row loop: it walks every stored food to build
+    /// a set, and reading it per row rebuilt that set once per result.
+    @ViewBuilder
+    private func foodRows(_ foods: [ResolvedFood]) -> some View {
+        let ids = storedIDs
+        ForEach(foods) { food in
+            Button { onPick(food) } label: { row(food) }
+                // Swipe reveals a red bin; a full swipe removes it outright,
+                // matching the delete gesture everywhere else in iOS.
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    if ids.contains(food.id) {
+                        Button(role: .destructive) {
+                            delete(food)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+        }
+    }
+
     private var matchingMeals: [SavedMeal] {
         guard showsMeals else { return [] }
         guard !query.isEmpty else { return meals }
@@ -58,22 +134,19 @@ struct FoodPickerView: View {
             if !matchingMeals.isEmpty && filter != .all || (showsMeals && !matchingMeals.isEmpty) {
                 mealsSection
             }
-            if visible.isEmpty && !searching && query.count >= 2 {
+            if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
                 emptyRow
             }
-            ForEach(visible) { food in
-                Button { onPick(food) } label: { row(food) }
-                    // Swipe reveals a red bin; a full swipe removes it outright,
-                    // matching the delete gesture everywhere else in iOS.
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        if storedIDs.contains(food.id) {
-                            Button(role: .destructive) {
-                                delete(food)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
+            let sections = sections
+            if sections.count == 1 {
+                foodRows(sections[0].foods)
+            } else {
+                ForEach(sections) { section in
+                    Section(section.title ?? "") { foodRows(section.foods) }
+                }
+            }
+            if hasMore && filter == .all && !visible.isEmpty {
+                loadMoreRow
             }
             creationRow
         }
@@ -82,6 +155,12 @@ struct FoodPickerView: View {
         .safeAreaInset(edge: .top) { filterBar }
         .onChange(of: query) { runSearch() }
         .onChange(of: filter) { if filter == .mine { runSearch() } }
+        .onChange(of: foodRegionRaw) {
+            // A chip for a retailer that doesn't operate in the new country would
+            // otherwise stay selected and silently return nothing.
+            if let store, !stores.contains(store) { self.store = nil }
+            runSearch()
+        }
         .sheet(isPresented: $scanning) { scannerSheet }
         .sheet(isPresented: $creatingCustom) {
             CustomFoodView { food in onPick(food) }
@@ -93,6 +172,7 @@ struct FoodPickerView: View {
                     Button { scanning = true } label: { Image(systemName: "barcode.viewfinder") }
                         .accessibilityLabel("Scan barcode")
                 }
+                .withoutGlassBackground()
             }
         }
     }
@@ -100,13 +180,51 @@ struct FoodPickerView: View {
     // MARK: - Pieces
 
     private var filterBar: some View {
-        Picker("Filter", selection: $filter) {
-            ForEach(FoodFilter.allCases) { Text($0.label).tag($0) }
+        VStack(spacing: 8) {
+            Picker("Filter", selection: $filter) {
+                ForEach(FoodFilter.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+
+            if filter == .all && !stores.isEmpty { storeBar }
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .background(.bar)
+    }
+
+    /// Own-brand filters for the local retailers.
+    ///
+    /// Labelled "own brand" rather than "sold at" because that's what it is:
+    /// Open Food Facts indexes who made a product, and its stocked-in field
+    /// returns nothing. This finds Tesco Finest pasta, not a jar of Hellmann's
+    /// bought in Tesco, and the label shouldn't promise the second.
+    private var storeBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(stores) { brand in
+                    let selected = store == brand
+                    Button {
+                        store = selected ? nil : brand
+                        runSearch()
+                    } label: {
+                        Text(brand.displayName)
+                            .font(.caption.weight(selected ? .semibold : .regular))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(selected ? Theme.gold.opacity(0.25) : .clear)
+                                    .overlay(Capsule().stroke(
+                                        selected ? Theme.gold : Theme.hairline.opacity(0.4),
+                                        lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(selected ? Theme.gold : .secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     private func row(_ food: ResolvedFood) -> some View {
@@ -195,9 +313,27 @@ struct FoodPickerView: View {
                 }
             }
             .navigationTitle("Scan barcode")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
+    }
+
+    private var loadMoreRow: some View {
+        Button(action: loadMore) {
+            HStack {
+                Spacer()
+                if loadingMore {
+                    ProgressView()
+                } else {
+                    Text("Load more results")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.gold)
+                }
+                Spacer()
+            }
+        }
+        .disabled(loadingMore)
     }
 
     // MARK: - Actions
@@ -206,11 +342,56 @@ struct FoodPickerView: View {
         searchTask?.cancel()
         let term = query
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(400))   // debounce
+            // One completed search is 5–7 requests: USDA's stable datatypes, the
+            // survey dataset with its retries, and three Open Food Facts country
+            // tiers. At 400 ms an ordinary mid-word pause fired its own search, so
+            // typing one word could cost three of those. 600 ms covers normal
+            // typing gaps and still reads as instant.
+            try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             searching = true
-            results = await FoodResolver(context: context).search(term)
+            loadedPage = 1
+
+            // Results arrive per source rather than all at once, so the fast one
+            // paints while the slow one is still in flight. The stream yields the
+            // full ranked list each time, so this assigns rather than merges.
+            for await page in FoodResolver(context: context)
+                .stream(term, brand: store, region: region) {
+                guard !Task.isCancelled else { return }
+                results = page.foods
+                hasMore = page.hasMore
+                // Dropped on the first batch, not the last: leaving it up until
+                // every source landed would keep a spinner over a list that is
+                // already usable.
+                searching = false
+            }
+            guard !Task.isCancelled else { return }
             searching = false
+        }
+    }
+
+    /// Appends the next page. Deliberately a button rather than infinite scroll:
+    /// each page is two network calls, and past the first 25 the results are
+    /// rarely what was wanted — paging should be a decision, not a side effect
+    /// of scrolling.
+    private func loadMore() {
+        guard !loadingMore, hasMore else { return }
+        let term = query
+        let next = loadedPage + 1
+        loadingMore = true
+        Task {
+            let page = await FoodResolver(context: context).search(term, page: next,
+                                                                   brand: store,
+                                                                   region: region)
+            guard !Task.isCancelled, term == query else {
+                loadingMore = false
+                return
+            }
+            let known = Set(results.map(\.id))
+            results.append(contentsOf: page.foods.filter { !known.contains($0.id) })
+            hasMore = page.hasMore
+            loadedPage = next
+            loadingMore = false
         }
     }
 

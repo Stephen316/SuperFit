@@ -30,14 +30,34 @@ fast and idempotent; running it when nothing changed does nothing.
 
 ## Signing
 
-The generated project has no team set — that's per-developer and can't live in
-version control. In Xcode: target **SuperFit → Signing & Capabilities → Team**,
-and do the same for **SuperFitTests**.
+Only needed to build on a real device; simulator builds are unsigned.
 
-`ios/SuperFit/SupportingFiles/SuperFit.entitlements` declares HealthKit and
-CloudKit. Change `iCloud.com.superfit.app` to a container that exists under your
-own team, or remove the CloudKit entries — `AppSchema.makeContainer` degrades to
-a local-only store when CloudKit is unavailable, so the app still runs.
+Copy the template and fill in your Team ID, then re-generate:
+
+```bash
+cp Secrets.example.xcconfig Secrets.xcconfig
+xcodegen generate
+```
+
+`Secrets.xcconfig` is gitignored — the team is per-developer and can't live in
+version control. It reaches both targets through `Signing.xcconfig`, which the
+project references. Don't set the team in Xcode's Signing & Capabilities editor
+instead: that writes into the generated `.xcodeproj` and the next
+`xcodegen generate` erases it.
+
+`ios/SuperFit/SupportingFiles/SuperFit.entitlements` declares HealthKit only.
+Sign in with Apple and CloudKit were removed: a free personal Apple team cannot
+sign either, and requesting a capability the team can't issue a profile for
+fails the whole device build. `AppSchema.makeContainer` falls back to an on-disk
+local store, so data persists — it just doesn't sync between devices. The file
+records the exact keys to restore under a paid membership.
+
+Personal-team provisioning profiles expire after 7 days, so a device build needs
+re-signing from Xcode about weekly.
+
+The bundle identifier `com.stephenh.superfit` must be registered as an App ID
+under your team before a provisioning profile can be issued. Bundle IDs are
+unique across all Apple developers, so a fork needs its own.
 
 ## Requirements
 

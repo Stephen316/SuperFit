@@ -213,14 +213,13 @@ struct SupplementTests {
 
     /// Supplements are per serving, foods are per 100 g. The conversion has to
     /// round-trip or a logged scoop would carry the wrong macros.
-    @Test func perServingConvertsToPer100gAndBack() {
+    @Test func perServingConvertsToPer100gAndBack() throws {
         let whey = Supplement(name: "Whey", category: .protein, servingLabel: "30 g scoop",
                               servingGrams: 30,
                               profile: NutrientProfile(kcal: 113, proteinG: 25, carbsG: 2,
                                                        fatG: 0.5,
                                                        micros: [Micronutrient.calcium.rawValue: 120]))
-        let food = try? #require(whey.asFood)
-        guard let food else { return }
+        let food = try #require(whey.asFood)
 
         #expect(food.servingGrams == 30)
         #expect(food.source == .supplement)

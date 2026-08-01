@@ -52,17 +52,22 @@ struct CyclicalBaselineTests {
         #expect(CyclicalBaseline.detect(series(days: 200, period: 7)) == nil)
     }
 
+    /// Any sub-physiological rhythm aliases onto a multiple of itself inside
+    /// 21–35, not just the weekly one: 10 read as 30 and 14 as 28.
+    @Test func rejectsOtherSubPhysiologicalRhythms() {
+        for period in [5, 10, 12, 14, 17] {
+            #expect(CyclicalBaseline.detect(series(days: 240, period: period)) == nil,
+                    "a \(period)-day rhythm must not be reported as monthly")
+        }
+    }
+
     // MARK: Fires on a genuine rhythm
 
-    @Test func detectsAMonthlyRhythmAndItsPeriod() {
-        let pattern = CyclicalBaseline.detect(series(days: 240, period: 28))
-        let found = try? #require(pattern)
-        #expect(found != nil)
-        if let found {
-            #expect(abs(found.periodDays - 28) <= 1)
-            #expect(found.cyclesObserved >= CyclicalBaseline.minCycles)
-            #expect(found.amplitude > 4)
-        }
+    @Test func detectsAMonthlyRhythmAndItsPeriod() throws {
+        let found = try #require(CyclicalBaseline.detect(series(days: 240, period: 28)))
+        #expect(abs(found.periodDays - 28) <= 1)
+        #expect(found.cyclesObserved >= CyclicalBaseline.minCycles)
+        #expect(found.amplitude > 4)
     }
 
     @Test func survivesMissingDaysAndDrift() {

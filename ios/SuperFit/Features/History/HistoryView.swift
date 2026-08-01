@@ -55,21 +55,24 @@ struct HistoryView: View {
                 .scrollIndicators(.hidden)
             }
             .navigationTitle("Trends")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }.themedToolbarButton()
+                }
+                .withoutGlassBackground()
             }
             .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
         }
     }
 
     private var rangePicker: some View {
-        Picker("Range", selection: $range) {
-            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
-        }
-        .pickerStyle(.segmented)
+        ThemeSegmentedControl(
+            options: HistoryRange.allCases.map { ($0, $0.label) },
+            selection: $range)
     }
 
     // MARK: - Energy
@@ -93,6 +96,10 @@ struct HistoryView: View {
                                   from: start, to: .now)
     }
 
+    private var intakePoints: [HistoryPoint] {
+        HistorySeries.intake(records: dailyRecords).filter { $0.date >= start }
+    }
+
     /// Expenditure and intake on one axis, with the gap between them shaded.
     ///
     /// Two separate charts made the reader subtract by eye to answer the only
@@ -110,8 +117,8 @@ struct HistoryView: View {
             title: "Energy balance",
             headline: average.map { "\($0 >= 0 ? "+" : "")\(Int($0.rounded())) kcal/day" },
             change: bands.last.map { "burning \(Int($0.value))" },
-            yLabel: { "\(Int($0))" },
             height: 190,
+            yLabel: { "\(Int($0))" },
             content: {
                 // The gap is the story; the lines just bound it.
                 ForEach(balancePairs(bands: bands, intake: intakeMean)) { pair in
@@ -231,7 +238,7 @@ struct HistoryView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
                 .stroke(Theme.hairline, lineWidth: 1)
         )
     }
@@ -264,8 +271,8 @@ struct HistoryView: View {
         return HistoryChartCard(
             title: "Weekly change",
             headline: points.last.map { units.weightDeltaString($0.value) },
-            yLabel: { String(format: "%+.1f", $0) },
             height: 150,
+            yLabel: { String(format: "%+.1f", $0) },
             content: {
                 RectangleMark(
                     xStart: .value("Start", start),

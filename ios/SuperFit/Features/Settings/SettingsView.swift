@@ -6,6 +6,7 @@ struct SettingsToolbarModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.toolbar {
             ToolbarItem(placement: .topBarTrailing) { SettingsGear() }
+            .withoutGlassBackground()
         }
     }
 }
@@ -18,6 +19,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @AppStorage(FoodRegionSetting.storageKey) private var foodRegionRaw = FoodRegionSetting.automatic
 
     var body: some View {
         NavigationStack {
@@ -58,6 +60,23 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
 
+                Section {
+                    Picker("Country", selection: $foodRegionRaw) {
+                        Text(FoodRegionSetting.automaticLabel())
+                            .tag(FoodRegionSetting.automatic)
+                        ForEach(FoodRegion.all) { region in
+                            Text(region.displayName).tag(region.code)
+                        }
+                    }
+                } header: {
+                    Text("Food database")
+                } footer: {
+                    Text("Ranks that country's products first in food search, then "
+                         + "neighbouring countries, then everywhere else. Nothing is "
+                         + "hidden — set this to where you buy your food, which isn't "
+                         + "always where your phone is configured.")
+                }
+
                 Section("Data sources") {
                     NavigationLink {
                         ConnectedServicesView()
@@ -74,12 +93,31 @@ struct SettingsView: View {
                     Text("Your health data stays on your device and your private iCloud. It is never sold or shared.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+
+                // The MIT licence requires its notice to travel with the work, so
+                // this is an obligation rather than a courtesy.
+                Section("Acknowledgements") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Muscle diagram")
+                        Text("Anatomy adapted from react-muscle-highlighter, "
+                             + "used under the MIT licence.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Food data")
+                        Text("USDA FoodData Central, and Open Food Facts under the "
+                             + "Open Database License.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("Settings")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                .withoutGlassBackground()
             }
         }
     }

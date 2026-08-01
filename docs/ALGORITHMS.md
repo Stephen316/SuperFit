@@ -273,6 +273,43 @@ score = 100 × (0.35·sleep + 0.30·hrv + 0.20·rhr + 0.15·load)
 **ACWR** = (7-day training volume) / (28-day average 7-day volume). ~0.8–1.3 is the
 "sweet spot"; >1.5 spikes injury risk → load sub-score drops.
 
+The sweet spot is **closed at 1.3** — an ACWR of exactly 1.3 scores as optimal, not
+penalised. Gabbett's band is inclusive at its upper edge, and a boundary that
+penalises the value it names reads as a defect to anyone checking the number
+against the paper. Swift has no exclusive lower bound, so the penalised band above
+it is written as an upper bound and resolved by first-match-wins rather than making
+all four bands half-open and moving the error to 1.5 instead.
+
+### Cardio load (reported separately)
+
+Lifting load is tonnage (kg x reps). Cardio has no tonnage, so it carries its own
+currency: **Banister TRIMP** — duration x heart-rate-reserve intensity, weighted
+exponentially so hard minutes outrank easy ones. Max HR uses **Tanaka**
+(`208 - 0.7 x age`) rather than `220 - age`, which is materially biased past 40.
+
+The two are **never summed**. They share no unit, and adding them would let an
+easy 90-minute walk cancel a heavy squat session — the ratio would move without
+either kind of training having changed. Two ratios each answer a question you can
+act on; one blended ratio answers neither. Bands match the lifting ACWR, closed at
+1.3 for the same reason.
+
+**Missing heart rate suppresses the ratio rather than substituting duration.**
+Mixing TRIMP for some sessions with raw minutes for others puts two units in one
+series. Excluding the unmeasured ones instead biases the ratio when the gaps fall
+unevenly between the 7- and 28-day windows: measured at 14% distortion with an 80%
+coverage gate, ~7% at 90%. The gate is **90%**, and below it nothing is shown. In
+practice a watch records heart rate on every workout, so this only bites on manual
+entries.
+
+Windows are half-open at the far end. `date >= start` spans eight days for a
+seven-day window, which picked up a fifth session in a four-a-week routine and
+reported a steady block as a 1.25 ramp.
+
+This figure is **not fed into the recovery score.** `RecoveryEngine` bands ACWR
+from lifting tonnage, and every stored recovery score was computed that way;
+introducing a second load source would move historical scores with no real logged
+cardio yet to validate against. It stands as its own number until there is.
+
 ### Recommendation bands
 ```
 90–100 : Push intensity — add load or a top set
@@ -330,6 +367,27 @@ than none.
 | Span of history | >= 90 days |
 | Adjusted R² of the profile | >= 0.10 |
 | Amplitude vs residual SD | >= 0.33 |
+| Best sub-21-day fit vs chosen | < 0.85x |
+
+**Harmonic rejection.** Restricting the search to 21-35 days excludes a short
+period as an *answer* but not as a *cause*: a 7-day training rhythm divides 21, 28
+and 35 exactly, so it folds perfectly at all three and was reported as a 21-day
+cycle. Measured on 240-day series, 10-day rhythms read as 30 and 14-day as 28 —
+the weekly case that surfaced it was not the only one.
+
+Testing whether the profile repeats within itself does not work: rotating a smooth
+profile by one day barely changes it, so that test fires on every genuine rhythm.
+What separates the cases is whether a *shorter* period explains the residuals
+about as well. For a genuine monthly rhythm the best sub-21 fit is near zero
+adjusted R² (28-day data: 0.470 chosen vs -0.003 short); for an aliased weekly one
+the short fit edges ahead (0.255 vs 0.269).
+
+The 0.85 threshold sits mid-plateau. Swept over 405 monthly configurations
+(periods 21-35 x amplitude x noise x span), 162 sub-physiological ones, and 48
+rhythm-free ones, every value from 0.70 to 0.95 gave zero false rejects, zero
+misreported periods, zero false accepts and zero false positives; 1.0 left four
+exact-doubling aliases through, 0.60 began suppressing genuine rhythms. The
+false-positive rate on rhythm-free data stays at 0%.
 | Every phase position | >= 2 observations |
 
 Measured false-positive rate on rhythm-free data -- flat, drifting, and

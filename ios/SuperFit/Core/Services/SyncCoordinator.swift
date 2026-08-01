@@ -104,7 +104,7 @@ final class SyncCoordinator {
     /// lean mass is what the engines use.
     private func upsertComposition(bodyFat: [SampleValue], leanMass: [SampleValue]) {
         let rows = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
-        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
+        let byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
                                uniquingKeysWith: { a, _ in a })
 
         // Several readings a day: keep the last, matching the weight behaviour.

@@ -6,7 +6,7 @@ enum AppSchema {
         UserProfile.self, BodyMetrics.self, DailyEnergy.self,
         Food.self, NutritionLog.self,
         SavedMeal.self, SavedMealItem.self,
-        Exercise.self, TrainingSession.self, SetEntry.self,
+        Exercise.self, TrainingSession.self, SetEntry.self, WorkoutRecord.self,
         WorkoutTemplate.self, WorkoutTemplateItem.self,
         SleepData.self, DailyVitals.self,
         RecoveryScoreRecord.self, MetabolicEstimateRecord.self,

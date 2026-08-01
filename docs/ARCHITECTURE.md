@@ -63,6 +63,9 @@ protocol HealthProvider {
 
 1. **Ingest** — `HealthKitManager` background-delivers new samples (weight, sleep,
    HRV, RHR, active energy, workouts). `SyncCoordinator` upserts them into SwiftData.
+   Workouts go through `WorkoutSyncService` instead, because they are event-keyed
+   rather than day-keyed: a day holds any number of workouts, so each needs the
+   source's own identifier to stay idempotent across repeated observer fires.
 2. **Aggregate** — nightly job rolls raw samples into `DailyEnergy`, `SleepData`,
    and a smoothed `BodyMetrics` trend point.
 3. **Estimate** — `MetabolismEngine` recomputes TDEE over 7/14/30-day windows and

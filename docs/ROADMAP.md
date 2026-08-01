@@ -16,6 +16,12 @@
 | **5.10** | Body composition: sync body fat and lean mass from Apple Health · optional measured body-fat entry · Katch-McArdle basal when lean mass is known, Mifflin otherwise | **done** |
 | **5.11** | Historical trends: energy balance (TDEE vs intake, gap shaded) · weight with a rate-of-change disclosure against the guardrails · lean mass, recovery, HRV/RHR, sleep, weekly volume per muscle, e1RM per lift · protein adherence from tapping the protein target · 30d/90d/6m/1y ranges | **done** |
 | **5.12** | Saved meals: builder that persists as ingredients are added, each searched through the shared food search · label entry per serving or per 100 g · "My foods" filter · swipe-to-delete foods and meals from search | **done** |
+| **5.13** | Multi-sport workouts: 40-activity taxonomy across 7 groups · finished watch workouts persisted with every metric HealthKit exposes (distance, HR avg/max/min, elevation, cadence, power, swim strokes, laps, source device) · idempotent import keyed on the source's own ID, skipping watch strength blocks that duplicate a logged gym session · Garmin `/workouts` enrichment for fields Apple Health drops · activity picker on "New workout" offering start-live or import-from-watch · GPS-tracked live cardio · cardio-only ACWR from TRIMP, reported separately from lifting | **done** |
+| **5.14** | Food search reach: USDA Survey (FNDDS) added for foods as eaten · Open Food Facts moved off the deprecated CGI endpoint to the current search service · results sorted by device region so the local shelf leads without hiding imports · "Load more" pagination across both sources | **done** |
+| **5.15** | Food region: three-tier country sort (chosen country → market-adjacent countries OR'd into one request → global) · country selector in Settings, defaulting to the device region and naming it · store chips follow the selection | **done** |
+| **5.16** | Source-blind relevance: results ranked by provenance (own foods → generic whole foods → your country → neighbours → rest) rather than by which API returned them · provenance from Open Food Facts `countries_tags` and USDA `dataType`/`marketCountry` | **done** |
+| **5.17** | Search relevance: results ranked by how the name answers the query (`exact` → `headNoun` → `modifier` → `partial`) before provenance, so "rice" leads with rice and not rice cakes · picker groups the two under headings · USDA generics requested separately and 50 wide, branded only for a US region | **done** |
+| **5.18** | Search performance: results streamed per source rather than awaiting the slowest · USDA generic and survey legs split · decoded-result cache with a 6-hour expiry replacing an unbounded `URLCache` policy | **done** |
 | 6 | AI coaching assistant (on-device summarization + guidance over the estimates) | deferred — only after phases 1–5 are proven stable and consistent in real use |
 
 Phase 1 intentionally implements the three domain engines early even though they
@@ -50,10 +56,21 @@ Core/Nutrition/NutrientTargets.swift         RDAs adjusted for sex/age/goal/trai
 Core/Nutrition/SupplementCatalog.swift       51 supplements w/ per-serving nutrients
 Core/Nutrition/SupplementIntake.swift        resolves daily/one-off/skip into a day
 Core/Nutrition/FoodResolver.swift            cache → USDA FDC → OFF, delete
+Core/Nutrition/FoodRegion.swift              countries, tags, market-adjacency
+Core/Nutrition/FoodRelevance.swift           name match then provenance, source-blind
+Core/Nutrition/FoodNameMatch.swift           reads the head of a food name
+Core/Nutrition/FoodSearchCache.swift         decoded results, 6h expiry, LRU
+Core/Nutrition/StoreBrand.swift              retailer own-brand filters per region
 Core/Nutrition/MealComposer.swift            meal totals, missing-ingredient handling
 Core/Nutrition/BarcodeScanner.swift          AVFoundation scanner + sim fallback
 Core/Training/TrainingAnalytics.swift        tension-weighted volume + e1RM progression
 Core/Training/ExerciseLibrary.swift          56-exercise catalog w/ 1-5 tension scores
+Core/Training/WorkoutActivity.swift          40 activities, metrics each one carries
+Core/Training/WorkoutImporter.swift          idempotent import + strength de-duplication
+Core/Training/CardioLoad.swift               TRIMP load + cardio-only ACWR
+Core/Health/WorkoutActivity+HealthKit.swift  two-way HKWorkoutActivityType mapping
+Core/Health/LocationTracker.swift            GPS distance for live outdoor sessions
+Core/Services/WorkoutSyncService.swift       workouts into SwiftData, Garmin enrichment
 Core/Health/WatchWorkoutMonitor.swift        live session mirroring + finished observer
 Core/Services/SyncCoordinator.swift          HealthKit → SwiftData day-keyed upserts
 Core/Services/AggregationService.swift       trend fill, TDEE records, recovery score
@@ -80,6 +97,9 @@ Features/Nutrition/MealBuilderView.swift     build/edit/log a saved meal
 Features/Nutrition/CustomFoodView.swift      custom foods w/ consistency check
 Features/Training/TrainingView.swift         start/history, weekly volume, strength
 Features/Training/ActiveWorkoutView.swift    set logging, RIR, rest timer, picker
+Features/Training/ActivityPickerView.swift   activity picker, live vs import
+Features/Training/LiveCardioView.swift       timed session w/ GPS distance and pace
+Features/Training/WorkoutDetailView.swift    every metric a workout captured
 SuperFitTests/MetabolismEngineTests.swift
 SuperFitTests/RecoveryEngineTests.swift
 SuperFitTests/NutritionClientTests.swift     fixture-based decode tests

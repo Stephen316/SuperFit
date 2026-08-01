@@ -7,8 +7,17 @@ struct TrainingView: View {
     @Query private var exercises: [Exercise]
     @Query(sort: \WorkoutTemplate.createdAt, order: .reverse) private var savedTemplates: [WorkoutTemplate]
 
+    @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
+    @Query private var profiles: [UserProfile]
+    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+
     @State private var activeSession: TrainingSession?
     @State private var watch = WatchWorkoutMonitor()
+    @State private var showingPicker = false
+    @State private var muscleQuery = ""
+    @State private var leastTrainedFirst = false
+    @State private var liveActivity: WorkoutActivity?
+    @State private var detailWorkout: WorkoutRecord?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -27,11 +36,48 @@ struct TrainingView: View {
         }
     }
 
+    /// Rows for the weekly table: every group, whether trained or not.
+    ///
+    /// Including the untrained ones is the point — "least trained first" is
+    /// meaningless if a muscle you never touched simply isn't in the list, and
+    /// the gap is what the table exists to show.
+    private var weeklyRows: [(muscle: MuscleGroup, sets: Double)] {
+        let volume = thisWeekVolume
+        let term = muscleQuery.trimmingCharacters(in: .whitespaces)
+        return MuscleGroup.allCases
+            .map { (muscle: $0, sets: volume[$0] ?? 0) }
+            .filter { term.isEmpty || $0.muscle.displayName.localizedCaseInsensitiveContains(term) }
+            .sorted { a, b in
+                // Alphabetical tiebreak so the many zero rows keep a stable,
+                // findable order instead of shuffling on every redraw.
+                if a.sets != b.sets {
+                    return leastTrainedFirst ? a.sets < b.sets : a.sets > b.sets
+                }
+                return a.muscle.displayName < b.muscle.displayName
+            }
+    }
+
     private var thisWeekVolume: [MuscleGroup: Double] {
         let cal = Calendar(identifier: .iso8601)
         guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
         let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
         return VolumeAggregator().weeklySets(records: allRecords, muscles: muscles, week: week)
+    }
+
+    /// Cardio ACWR, or nil when too few workouts carry heart rate to answer.
+    private var cardioLoad: CardioLoadAnalyzer.Result? {
+        guard let profile = profiles.first,
+              let restingHR = vitals.compactMap(\.restingHR).first
+        else { return nil }
+        let records = workouts
+            .filter { !$0.activity.isStrength }
+            .map { CardioRecord(date: $0.startedAt,
+                                durationMinutes: $0.durationSeconds / 60,
+                                avgHeartRate: $0.avgHeartRate) }
+        return CardioLoadAnalyzer().acwr(records: records,
+                                         restingHR: restingHR,
+                                         age: Double(profile.ageYears),
+                                         isFemale: profile.sex == .female)
     }
 
     private var progressions: [ExerciseProgression] {
@@ -54,46 +100,29 @@ struct TrainingView: View {
         NavigationStack {
             List {
                 Section {
-                    if savedTemplates.isEmpty {
-                        Button { start(named: nil) } label: {
-                            Label("Start workout", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                        }
-                    } else {
-                        Menu {
-                            Section("My workouts") {
-                                ForEach(savedTemplates) { template in
-                                    Button(template.name) { start(named: template.name) }
-                                }
-                            }
-                            Divider()
-                            Button("Empty workout") { start(named: nil) }
-                        } label: {
-                            Label("Start workout", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                        }
+                    Button { showingPicker = true } label: {
+                        Label("New workout", systemImage: "plus.circle.fill")
+                            .font(.headline)
                     }
                 } footer: {
                     if savedTemplates.isEmpty {
-                        Text("Finish a workout to save it as a reusable template.")
+                        Text("Pick any activity — gym, run, ride, swim — or import "
+                             + "one your watch already recorded.")
                     }
                 }
 
                 watchSection
 
-                if !thisWeekVolume.isEmpty {
-                    Section("This week — sets per muscle") {
-                        ForEach(thisWeekVolume.sorted { $0.value > $1.value }, id: \.key) { muscle, sets in
-                            HStack {
-                                Text(muscle.displayName)
-                                Spacer()
-                                Text("\(Int(sets.rounded())) sets")
-                                    .monospacedDigit()
-                                    .foregroundStyle(volumeColor(sets))
-                            }
-                        }
-                    }
+                Section("Muscles worked this week") {
+                    // Every muscle is individually colourable; the mapping from
+                    // weekly volume to a shade is deliberately not wired yet, so
+                    // for now the figure shows the anatomy and nothing more.
+                    MuscleMap()
+                        .frame(height: 260)
+                        .padding(.vertical, 6)
                 }
+
+                weeklyTable
 
                 if !progressions.isEmpty {
                     Section("Strength — last 60 days") {
@@ -111,9 +140,44 @@ struct TrainingView: View {
                     }
                 }
 
-                Section("History") {
+                if let load = cardioLoad {
+                    Section {
+                        HStack {
+                            Text("Cardio load")
+                            Spacer()
+                            Text(String(format: "%.2f", load.ratio))
+                                .monospacedDigit()
+                            Text(load.band.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(bandColor(load.band))
+                        }
+                    } footer: {
+                        Text("Acute:chronic ratio for cardio only, from heart-rate "
+                             + "load. Reported separately from lifting — the two "
+                             + "have no shared unit — and not folded into your "
+                             + "recovery score.")
+                    }
+                }
+
+                if !workouts.isEmpty {
+                    Section("Activities") {
+                        ForEach(workouts.prefix(30)) { workout in
+                            Button { detailWorkout = workout } label: {
+                                WorkoutRow(workout: workout, units: units)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .onDelete { offsets in
+                            let shown = Array(workouts.prefix(30))
+                            for i in offsets { context.delete(shown[i]) }
+                            try? context.save()
+                        }
+                    }
+                }
+
+                Section("Gym history") {
                     if sessions.isEmpty {
-                        Text("No workouts yet.").foregroundStyle(.secondary)
+                        Text("No gym workouts yet.").foregroundStyle(.secondary)
                     }
                     ForEach(sessions.prefix(30)) { session in
                         Button { activeSession = session } label: {
@@ -128,17 +192,43 @@ struct TrainingView: View {
                 }
             }
             .navigationTitle("Train")
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .themedList()
             .settingsToolbar()
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)
                 await watch.start()
+                await WorkoutSyncService(context: context).sync()
             }
             .fullScreenCover(item: $activeSession) { session in
                 ActiveWorkoutView(session: session)
             }
+            .fullScreenCover(item: $liveActivity) { activity in
+                LiveCardioView(activity: activity)
+            }
+            .sheet(item: $detailWorkout) { workout in
+                WorkoutDetailView(workout: workout)
+            }
+            .sheet(isPresented: $showingPicker) {
+                ActivityPickerView(
+                    savedTemplates: savedTemplates,
+                    recentWatchWorkouts: unimportedWatchWorkouts,
+                    onStartStrength: { start(named: $0) },
+                    onStartLive: { liveActivity = $0 },
+                    onImport: { sample in
+                        WorkoutSyncService(context: context).apply([sample])
+                        try? context.save()
+                    })
+            }
         }
+    }
+
+    /// Watch workouts that aren't already stored, so the picker never offers to
+    /// import something twice.
+    private var unimportedWatchWorkouts: [WorkoutSample] {
+        let stored = Set(workouts.compactMap(\.externalID))
+        return watch.todaysWorkouts.filter { !stored.contains($0.externalID) }
     }
 
     @ViewBuilder
@@ -163,18 +253,86 @@ struct TrainingView: View {
             }
         } else if !watch.todaysWorkouts.isEmpty {
             Section("Today from Apple Watch") {
-                ForEach(watch.todaysWorkouts.indices, id: \.self) { i in
-                    let w = watch.todaysWorkouts[i]
+                ForEach(watch.todaysWorkouts, id: \.externalID) { w in
                     HStack {
-                        Image(systemName: "applewatch")
-                        Text(w.activityName)
+                        Image(systemName: w.activity.symbolName)
+                        Text(w.activity.displayName)
                         Spacer()
-                        Text("\(Int(w.end.timeIntervalSince(w.start) / 60)) min · \(Int(w.activeEnergyKcal)) kcal")
+                        Text("\(Int(w.durationSeconds / 60)) min · \(Int(w.activeEnergyKcal)) kcal")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
         }
+    }
+
+    private func bandColor(_ band: CardioLoadAnalyzer.Result.Band) -> Color {
+        switch band {
+        case .optimal: return .green
+        case .detraining: return .secondary
+        case .elevated: return .orange
+        case .spike: return .red
+        }
+    }
+
+    /// Every muscle group and what it got this week, sortable and searchable.
+    private var weeklyTable: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search muscles", text: $muscleQuery)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !muscleQuery.isEmpty {
+                    Button { muscleQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if weeklyRows.isEmpty {
+                Text("No muscle matches \"\(muscleQuery)\".")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(weeklyRows, id: \.muscle) { row in
+                HStack {
+                    Text(row.muscle.displayName)
+                    Spacer()
+                    Text(setsLabel(row.sets))
+                        .monospacedDigit()
+                        .foregroundStyle(row.sets == 0 ? .secondary : volumeColor(row.sets))
+                }
+            }
+        } header: {
+            HStack {
+                Text("This week")
+                Spacer()
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { leastTrainedFirst.toggle() }
+                } label: {
+                    Label(leastTrainedFirst ? "Least trained first" : "Most trained first",
+                          systemImage: leastTrainedFirst ? "arrow.up" : "arrow.down")
+                        .labelStyle(.iconOnly)
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.gold)
+                .accessibilityLabel(leastTrainedFirst
+                                    ? "Sorting least trained first. Tap to reverse."
+                                    : "Sorting most trained first. Tap to reverse.")
+            }
+        } footer: {
+            Text("Sets are weighted by how hard each lift works the muscle, so a "
+                 + "squat counts fully towards quads and partly towards lower back.")
+        }
+    }
+
+    /// One decimal, because these are tension-weighted and rounding 0.4 to "0"
+    /// would read as untrained when it isn't.
+    private func setsLabel(_ sets: Double) -> String {
+        sets == 0 ? "—" : String(format: "%.1f sets", sets)
     }
 
     private func volumeColor(_ sets: Double) -> Color {
@@ -189,6 +347,46 @@ struct TrainingView: View {
         context.insert(session)
         try? context.save()
         activeSession = session
+    }
+}
+
+struct WorkoutRow: View {
+    let workout: WorkoutRecord
+    let units: UnitSystem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: workout.activity.symbolName)
+                .foregroundStyle(Theme.gold)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(workout.activity.displayName)
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(workout.startedAt, format: .dateTime.month().day())
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text(summary)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var summary: String {
+        var parts = ["\(Int(workout.durationSeconds / 60)) min"]
+        if workout.activity.metrics.contains(.distance),
+           let metres = workout.distanceMetres, metres > 0 {
+            parts.append(units == .metric
+                         ? String(format: "%.2f km", metres / 1000)
+                         : String(format: "%.2f mi", metres / 1609.344))
+        }
+        if workout.activeEnergyKcal > 0 {
+            parts.append("\(Int(workout.activeEnergyKcal)) kcal")
+        }
+        if let hr = workout.avgHeartRate { parts.append("\(Int(hr)) bpm") }
+        return parts.joined(separator: " · ")
     }
 }
 

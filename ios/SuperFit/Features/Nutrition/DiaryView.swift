@@ -68,6 +68,7 @@ struct DiaryView: View {
                 }
             }
             .navigationTitle(day.formatted(.dateTime.weekday(.wide).month().day()))
+            .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
@@ -77,6 +78,7 @@ struct DiaryView: View {
                         .disabled(Calendar.current.isDateInToday(day))
                         .accessibilityLabel("Next day")
                 }
+                .withoutGlassBackground()
             }
             .themedList()
             .settingsToolbar()

@@ -7,15 +7,55 @@ import SwiftData
 enum MetricSource: String, Codable, Sendable { case manual, healthKit }
 enum MealSlot: String, Codable, CaseIterable, Sendable { case breakfast, lunch, dinner, snack }
 enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom, supplement }
+/// The muscles volume is tracked against.
+///
+/// Split finer than the obvious thirteen because the coarse version can't answer
+/// the questions the tracking exists for. "Shoulders" hides the single most
+/// common imbalance in a training week — pressing hammers the front delts while
+/// the rear delts get nothing — and one "back" figure can read as well-trained on
+/// pulldowns alone while the rhomboids and mid-traps go untouched.
+///
+/// Not split further than this on purpose. Gastrocnemius versus soleus, or upper
+/// versus lower lats, are real distinctions that almost nobody programmes around,
+/// and every extra case is another judgement call on all 130 catalogued lifts.
 enum MuscleGroup: String, Codable, CaseIterable, Sendable {
-    case chest, back, lowerBack, traps, shoulders, biceps, triceps, forearms
-    case quads, hamstrings, glutes, calves, core
+    case upperChest, chest
+    case frontDelts, sideDelts, rearDelts
+    case lats, upperBack, traps, lowerBack
+    case biceps, triceps, forearms
+    case abs, obliques
+    case quads, hamstrings, glutes, adductors, abductors
+    case calves
 
     var displayName: String {
         switch self {
-        case .lowerBack: return "Lower back"
-        default: return rawValue.capitalized
+        case .upperChest: return "Upper chest"
+        case .frontDelts: return "Front delts"
+        case .sideDelts:  return "Side delts"
+        case .rearDelts:  return "Rear delts"
+        case .upperBack:  return "Upper back"
+        case .lowerBack:  return "Lower back"
+        default:          return rawValue.capitalized
         }
+    }
+
+    /// Raw values written before the split, mapped to their closest new case.
+    ///
+    /// Only reachable through custom exercises — built-ins are re-synced from the
+    /// catalogue. Each maps to the reading the old label most often meant:
+    /// "shoulders" was usually lateral work, "back" usually lats, "core" usually
+    /// the rectus rather than the obliques.
+    static let legacyNames: [String: MuscleGroup] = [
+        "shoulders": .sideDelts,
+        "back": .lats,
+        "core": .abs,
+    ]
+
+    /// Decodes a stored raw value, falling back to the pre-split names.
+    init?(stored raw: String) {
+        if let m = MuscleGroup(rawValue: raw) { self = m; return }
+        guard let m = MuscleGroup.legacyNames[raw] else { return nil }
+        self = m
     }
 }
 enum ExerciseCategory: String, Codable, Sendable { case barbell, dumbbell, machine, cable, bodyweight }
@@ -300,14 +340,28 @@ final class Exercise {
     /// Share of bodyweight moved (0 for externally loaded lifts). Feeds training
     /// load so unweighted work isn't scored as zero effort.
     var bodyweightFraction: Double = 0
+    /// Other names this lift answers to — "RDL", "military press", "bent over
+    /// row". Matched when searching, **never shown**: one lift under one name
+    /// keeps the list scannable and a year of logs comparable.
+    var aliases: [String] = []
 
     init(name: String, category: ExerciseCategory, tension: [MuscleGroup: Int],
-         bodyweightFraction: Double = 0, isCustom: Bool = false) {
+         bodyweightFraction: Double = 0, isCustom: Bool = false,
+         aliases: [String] = []) {
         self.name = name
         self.categoryRaw = category.rawValue
         self.isCustom = isCustom
         self.bodyweightFraction = bodyweightFraction
+        self.aliases = aliases
         self.tension = tension
+    }
+
+    /// Whether this lift answers to `term`, by its own name or any alias.
+    func matches(_ term: String) -> Bool {
+        let q = term.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        if name.localizedCaseInsensitiveContains(q) { return true }
+        return aliases.contains { $0.localizedCaseInsensitiveContains(q) }
     }
 
     var tension: [MuscleGroup: Int] {
@@ -315,7 +369,7 @@ final class Exercise {
             var out: [MuscleGroup: Int] = [:]
             for entry in tensionRaw {
                 let parts = entry.split(separator: ":")
-                guard parts.count == 2, let m = MuscleGroup(rawValue: String(parts[0])),
+                guard parts.count == 2, let m = MuscleGroup(stored: String(parts[0])),
                       let s = Int(parts[1]) else { continue }
                 out[m] = s.clamped(to: 1...5)
             }
@@ -330,7 +384,7 @@ final class Exercise {
     }
 
     var primaryMuscle: MuscleGroup {
-        tension.max { $0.value < $1.value }?.key ?? .core
+        tension.max { $0.value < $1.value }?.key ?? .abs
     }
 }
 
@@ -358,6 +412,89 @@ final class WorkoutTemplateItem {
     init(order: Int, exerciseID: UUID) {
         self.order = order
         self.exerciseID = exerciseID
+    }
+}
+
+enum WorkoutSource: String, Codable, Sendable {
+    case appleHealth, garmin, manual, liveSession
+
+    var displayName: String {
+        switch self {
+        case .appleHealth: return "Apple Health"
+        case .garmin: return "Garmin"
+        case .manual: return "Manual entry"
+        case .liveSession: return "Tracked in SuperFit"
+        }
+    }
+}
+
+/// A non-strength workout — a run, ride, swim, class — imported from a watch or
+/// tracked in the app.
+///
+/// Kept separate from `TrainingSession` rather than bolted onto it: a session is
+/// a list of sets against the exercise catalog, and forcing a 10 km run into that
+/// shape would mean a set with no exercise, no weight and no reps. They share the
+/// history view, not the schema.
+///
+/// `externalID` is the source's own identifier (HealthKit's workout UUID), which
+/// is what makes repeated imports idempotent — the observer query fires on every
+/// change to the workout store, not once per new workout.
+@Model
+final class WorkoutRecord {
+    var id: UUID = UUID()
+    var externalID: String?
+    var startedAt: Date = Date()
+    var endedAt: Date = Date()
+    var activityRaw: String = WorkoutActivity.other.rawValue
+    var sourceRaw: String = WorkoutSource.appleHealth.rawValue
+    var sourceName: String?
+
+    var activeEnergyKcal: Double = 0
+    var totalEnergyKcal: Double?
+    var distanceMetres: Double?
+    var avgHeartRate: Double?
+    var maxHeartRate: Double?
+    var minHeartRate: Double?
+    var elevationGainMetres: Double?
+    var avgCadence: Double?
+    var avgPowerWatts: Double?
+    var swimStrokeCount: Double?
+    var swimStrokeStyle: String?
+    /// Laps as JSON — a handful of values per lap, only ever read as a whole,
+    /// and a relationship would add a CloudKit-synced table for no query benefit.
+    var lapsJSON: Data?
+    var notes: String?
+
+    init(startedAt: Date = .now, endedAt: Date = .now,
+         activity: WorkoutActivity = .other, source: WorkoutSource = .manual) {
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.activityRaw = activity.rawValue
+        self.sourceRaw = source.rawValue
+    }
+
+    var activity: WorkoutActivity {
+        get { WorkoutActivity(rawValue: activityRaw) ?? .other }
+        set { activityRaw = newValue.rawValue }
+    }
+
+    var source: WorkoutSource {
+        get { WorkoutSource(rawValue: sourceRaw) ?? .appleHealth }
+        set { sourceRaw = newValue.rawValue }
+    }
+
+    var laps: [WorkoutLapSample] {
+        get { lapsJSON.flatMap { try? JSONDecoder().decode([WorkoutLapSample].self, from: $0) } ?? [] }
+        set { lapsJSON = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+
+    var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
+
+    /// Metres per second, or nil when the activity carries no distance. Guarded
+    /// on duration as well: a zero-length workout would divide by zero.
+    var averageSpeed: Double? {
+        guard let distanceMetres, distanceMetres > 0, durationSeconds > 0 else { return nil }
+        return distanceMetres / durationSeconds
     }
 }
 

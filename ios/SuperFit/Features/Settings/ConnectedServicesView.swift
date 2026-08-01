@@ -78,6 +78,7 @@ struct ConnectedServicesView: View {
             }
         }
         .navigationTitle("Connected services")
+        .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
             .themedList()
         .keyboardDoneButton()

@@ -27,9 +27,10 @@ struct SleepAnalyticsTests {
         #expect(abs(s.debtMinutes - 90) < 0.001)
     }
 
-    @Test func efficiencyUsesInBedTime() {
+    @Test func efficiencyUsesInBedTime() throws {
         let s = SleepAnalytics().summary([night(0, asleep: 450, inBed: 500)])!
-        #expect(abs(s.averageEfficiency - 0.9) < 0.001)
+        let efficiency = try #require(s.averageEfficiency)
+        #expect(abs(efficiency - 0.9) < 0.001)
     }
 
     @Test func surplusNightsDoNotOffsetDebt() {

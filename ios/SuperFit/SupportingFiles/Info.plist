@@ -18,16 +18,23 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Substituted from Secrets.xcconfig at build time; empty when unset, which
+	     USDAKeyStore treats as absent and falls back to the settings screen. -->
+	<key>USDAAPIKey</key>
+	<string>$(USDA_API_KEY)</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>SuperFit reads your weight, activity, sleep, and heart data to estimate your true energy expenditure and recovery. Your health data stays on your device and your private iCloud. It is never sold or shared.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>SuperFit can save workouts you log back to Apple Health so your fitness data stays in one place.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>SuperFit uses the camera to scan food barcodes for fast, accurate nutrition logging.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SuperFit follows your location during an outdoor run, ride, or walk you start in the app, to measure distance and pace. Location is used only while a workout is running and never leaves your device.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
 		<string>processing</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
@@ -43,7 +50,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.superfit.app</string>
+			<string>com.stephenh.superfit</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>superfit</string>

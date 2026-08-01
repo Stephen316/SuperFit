@@ -79,15 +79,31 @@ struct QARegressionTests {
         #expect(r.effectiveLoadKg(bodyweightKg: 80) == 100)
     }
 
+    /// Isometric holds: no reps, so no rep-based tonnage by design. Named
+    /// explicitly rather than pattern-matched, so adding one is a decision.
+    private static let isometricHolds: Set<String> = [
+        "Plank", "Side Plank", "Hollow Hold",
+    ]
+
+    /// Loaded lifts that also move you. A dumbbell split squat is your bodyweight
+    /// on one leg plus the dumbbells; scoring only the dumbbells would badly
+    /// under-read the effort.
+    private static let loadedButAlsoBodyweight: Set<String> = [
+        "Bulgarian Split Squat", "Split Squat", "Walking Lunge", "Reverse Lunge",
+        "Step-Up",
+    ]
+
     @Test func everyBodyweightCatalogEntryCarriesAFraction() {
-        for (name, category, _, fraction) in ExerciseLibrary.catalog where category == .bodyweight {
-            // Plank is isometric: no reps, so no rep-based tonnage by design.
-            if name == "Plank" { continue }
-            #expect(fraction > 0, "\(name) would score zero training load")
+        for e in ExerciseLibrary.catalog where e.category == .bodyweight {
+            if Self.isometricHolds.contains(e.name) {
+                #expect(e.bodyweight == 0, "\(e.name) is a hold and should carry no fraction")
+                continue
+            }
+            #expect(e.bodyweight > 0, "\(e.name) would score zero training load")
         }
-        for (name, category, _, fraction) in ExerciseLibrary.catalog where category != .bodyweight {
-            #expect(fraction == 0 || name.contains("Split Squat") || name.contains("Lunge"),
-                    "\(name) unexpectedly carries a bodyweight fraction")
+        for e in ExerciseLibrary.catalog where e.category != .bodyweight {
+            #expect(e.bodyweight == 0 || Self.loadedButAlsoBodyweight.contains(e.name),
+                    "\(e.name) unexpectedly carries a bodyweight fraction")
         }
     }
 

@@ -6,16 +6,28 @@ enum Theme {
 
     // MARK: Colour
 
-    static let gold = Color(hex: 0xBDA632)
-    static let backgroundTop = Color(hex: 0x0C2526)
-    static let backgroundBottom = Color.black
-    static let surface = Color(hex: 0x0C2526)
-    static let tabBar = Color(hex: 0x061414)
+    // Sampled from the Figma file via the REST API, not by eye: every value here
+    // is the literal fill on the corresponding node.
+    /// The app's one accent, everywhere: tab icons, gauges, charts, links.
+    ///
+    /// The mustard the Figma file strokes the home glyph with, not the limier
+    /// `#C4D13C` it fills the recovery gauge with. The file uses both, a couple of
+    /// hundred hue degrees apart, and having two near-identical yellows made the
+    /// selected tab look like a different shade of wrong next to everything else.
+    /// One wins, and it's the one on the icon you look at most.
+    static let gold = Color(hex: 0xC3A920)
+    static let backgroundTop = Color(hex: 0x0C2627) // frame gradient stop 0
+    static let backgroundBottom = Color.black       // frame gradient stop 1
+    static let surface = Color(hex: 0x0F1D20)       // every card fill
+    static let tabBar = Color(hex: 0x0A181B)        // bottom-navigation
+    static let homeWell = Color(hex: 0x162D33)      // the raised home circle
 
     static let textPrimary = Color.white
-    static let textSecondary = Color.white.opacity(0.55)
-    static let hairline = Color.white.opacity(0.55)
-    static let divider = Color.white.opacity(0.35)
+    static let textSecondary = Color(hex: 0x799195) // every muted label
+    static let hairline = Color(hex: 0x1D3437)
+    static let divider = Color(hex: 0x1D3437)
+    /// The gauge track and the settings button share this wash.
+    static let wash = Color.white.opacity(0.05)
 
     /// The app's backdrop. Fixed to the screen, so scrolling content moves over
     /// a still gradient rather than dragging it along.
@@ -35,8 +47,28 @@ enum Theme {
         .system(size: size, weight: weight, design: .rounded)
     }
 
+    /// The Figma file sets Inter throughout. Inter isn't on iOS and isn't
+    /// redistributable here, and SF Pro — not the rounded cut used elsewhere —
+    /// is by far the closest native match: same grotesque skeleton and flat
+    /// terminals. Used for anything laid out against that file.
+    static func text(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight)
+    }
+
     static let cardRadius: CGFloat = 28
     static let tabBarRadius: CGFloat = 36
+
+    /// Card radius away from the dashboard.
+    ///
+    /// The 28pt bevel is sized for the home screen's full-width cards, one per
+    /// row. Reused on the denser screens — where boxes are smaller and often
+    /// stacked — that much rounding eats the corners and the content starts
+    /// fighting the curve. Same shape and border, less of it.
+    static let cardRadiusCompact: CGFloat = 18
+
+    /// Radius for controls rather than containers: search fields, pickers, the
+    /// small bordered boxes that sit inline with text.
+    static let controlRadius: CGFloat = 14
 }
 
 extension Color {
@@ -49,10 +81,21 @@ extension Color {
     }
 }
 
-/// Outlined card: no fill, hairline border, generous radius — the design's
-/// defining shape. Content supplies its own padding via `padding`.
+/// Filled card with a hairline border — the design's defining shape. Content
+/// supplies its own padding via `padding`.
+///
+/// Both, not either: the Figma cards carry a solid `#0F1D20` *and* a 1pt
+/// `#1D3437` stroke. The stroke is nearly invisible against the fill, but it's
+/// what separates a card from the background where the gradient runs darkest.
+///
+/// `strokeBorder` rather than `stroke`, because the file sets the alignment to
+/// inside — a centred stroke would sit half a point outside the corner radius and
+/// read as a fractionally larger, softer card.
 struct ThemeCard<Content: View>: View {
     var padding: CGFloat = 18
+    /// Defaults to the dashboard's bevel. Denser screens pass
+    /// `Theme.cardRadiusCompact`.
+    var radius: CGFloat = Theme.cardRadius
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -60,8 +103,12 @@ struct ThemeCard<Content: View>: View {
             .frame(maxWidth: .infinity)
             .padding(padding)
             .background(
-                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                    .stroke(Theme.hairline, lineWidth: 1)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
             )
     }
 }
@@ -135,7 +182,9 @@ struct ThemedScreen<Content: View>: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        // Was `.hidden`, which on iOS 26 leaves the bar as Liquid Glass floating
+        // over the gradient. Opaque and themed, matching every other screen.
+        .themedChrome()
         .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }

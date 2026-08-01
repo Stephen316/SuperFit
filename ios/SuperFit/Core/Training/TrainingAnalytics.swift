@@ -34,7 +34,10 @@ struct VolumeAggregator: Sendable {
                     muscles: [UUID: [MuscleGroup: Int]],
                     week: DateInterval) -> [MuscleGroup: Double] {
         var out: [MuscleGroup: Double] = [:]
-        for r in records where !r.isWarmup && week.contains(r.date) {
+        // Half-open, not `week.contains`: DateInterval.contains includes `end`,
+        // and a week's end is the next week's start, so a set logged at midnight
+        // on a Monday counted towards both weeks.
+        for r in records where !r.isWarmup && r.date >= week.start && r.date < week.end {
             guard let tension = muscles[r.exerciseID] else { continue }
             for (muscle, score) in tension {
                 out[muscle, default: 0] += Double(score) / 5

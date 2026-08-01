@@ -68,6 +68,25 @@ struct TDEEEstimate: Sendable {
     /// Mifflin-St Jeor otherwise. Carried so `calorieTarget` can refuse to
     /// prescribe below it.
     var basalKcal: Double = 0
+
+    /// Standard error of `tdeeKcal`, in kcal/day.
+    ///
+    /// Falls out of the same inverse-variance blend that produces `confidence`.
+    /// Combining two estimates is more precise than either alone, so:
+    ///
+    ///     1/σ_post² = 1/σ_prior² + 1/σ_measured²   ⟹   σ_post = σ_prior·√(1 − c)
+    ///
+    /// At c = 0 this is the prior's own spread, which is the right answer: a
+    /// day-one target is a population formula and carries a population formula's
+    /// error. At c = 1 it would be zero, which is why
+    /// `intakeSystematicErrorFraction` exists to stop c ever reaching 1.
+    var standardErrorKcal: Double = 0
+
+    /// The interval `tdeeKcal` actually lives in, at ~95%.
+    var interval95: ClosedRange<Double> {
+        let half = 1.96 * standardErrorKcal
+        return (tdeeKcal - half)...(tdeeKcal + half)
+    }
 }
 
 /// Adaptive TDEE from the relationship between logged intake and the smoothed
@@ -76,6 +95,193 @@ struct MetabolismEngine: Sendable {
 
     /// kcal per kg of body-mass change (standard mixed-tissue value).
     static let kcalPerKg = 7700.0
+
+    /// Fastest weekly weight change, as a fraction of bodyweight, that is treated
+    /// as real tissue when inferring TDEE.
+    ///
+    /// The inference assumes a weight change *is* stored or burned energy, so a
+    /// wrong number doesn't produce a slightly wrong answer — it produces an
+    /// absurd one. Measured on this engine: a single mistyped weigh-in of 89 kg
+    /// instead of 80 gives a +9 kg/week slope and a TDEE of **452 kcal**.
+    ///
+    /// 1.5% a week is well clear of any real cut or bulk — a hard cut runs near
+    /// 1%, and beyond that you are measuring water, glycogen or a typo. The
+    /// *reported* trend is left untouched so the user still sees what they
+    /// actually logged; only the energy inference is clamped.
+    static let maxPlausibleWeeklyChangeFraction = 0.015
+
+    // MARK: - When the measurement is allowed to count
+    //
+    // Three hard bounds, then a continuous precision test. The bounds exist
+    // because below them the precision test cannot even be computed; everything
+    // above them is decided by how much the data actually pins TDEE down.
+
+    /// Two points still place a line; they just cannot say how noisy it is.
+    /// That is what `assumedDailyWeightSD` is for, so the floor here is only the
+    /// point below which there is no line at all.
+    static let minWeighInsForInference = 2
+
+    /// Day-to-day bodyweight scatter, in kg, before the user's own weigh-ins
+    /// have shown otherwise. Water, glycogen and gut content move a person this
+    /// much overnight regardless of energy balance.
+    ///
+    /// Used as a prior rather than an assumption: it stands alone at two
+    /// weigh-ins, and is progressively displaced by the observed scatter as the
+    /// series grows. This is what stops three nearly-collinear readings from
+    /// reporting near-zero error and claiming certainty they haven't earned.
+    static let assumedDailyWeightSD = 0.7
+
+    /// Weight of that prior, in pseudo-observations. At 3, the observed scatter
+    /// is worth more than the prior once there are ~5 weigh-ins.
+    static let weightSDPriorStrength = 3.0
+
+    /// Shortest span the weigh-ins must cover. Leverage, not count: five
+    /// weigh-ins inside three days pin a slope far worse than five across a
+    /// fortnight, because the slope's precision goes as the spread of the
+    /// *dates*, not the number of readings.
+    static let minWeighInSpanDays = 7.0
+
+    /// Below this there is no usable intake average to difference the weight
+    /// trend against.
+    static let minIntakeDaysForInference = 3
+
+    // Food-log error, split by whether repetition can wash it out.
+    //
+    // This app is built for people who weigh their food and train seriously, so
+    // it does not assume the population-level under-reporting the literature
+    // finds in free-living adults (commonly 10–30%). It assumes ~90–95% accuracy
+    // and, importantly, that the misses go both ways.
+    //
+    // That distinction is worth more than the headline figure. Random error
+    // averages out — over n logged days the error on the *mean* falls as 1/√n —
+    // whereas systematic error does not, no matter how long the streak. Folding
+    // both into one constant, as this used to, quietly asserted that a careful
+    // logger can never do better than a sloppy one.
+
+    /// Error that survives averaging: database entries a little off, cooking
+    /// losses, the same oil under-counted every time. Small for a weigher, but
+    /// never zero — which is what keeps confidence short of 1.
+    static let intakeSystematicErrorFraction = 0.025
+
+    /// Day-to-day random error: portions estimated by eye, an unlogged coffee,
+    /// a restaurant meal. Averages down across logged days.
+    static let intakeRandomErrorFraction = 0.07
+
+    /// Day-to-day swing in intake, as a fraction of the mean, used as a floor
+    /// when the logged days don't reveal it themselves.
+    ///
+    /// Without it, a run of identically-logged days implies the *unlogged* days
+    /// are known exactly, and skipping food logging costs nothing at all. Even
+    /// consistent eaters move ~20% between a training day and a rest day.
+    static let intakeDayVariationFraction = 0.20
+
+    /// Relative error of the prior. Mifflin-St Jeor carries roughly ±10% on
+    /// basal, and the activity multiplier is a five-way bucket worth about
+    /// ±15%; in quadrature, ~18%.
+    static let priorRelativeError = 0.18
+
+    /// Standard error of the measured TDEE in kcal/day, or `nil` when the bounds
+    /// above are not met.
+    ///
+    ///     σ_measured² = (kcalPerKg · σ_slope)² + σ_intake²
+    ///     σ_slope     = σ_residual / √Σ(xᵢ - x̄)²
+    ///
+    /// The `√Σ(xᵢ - x̄)²` term is what makes this robust to skipped days: a gap
+    /// removes one point's contribution to the spread rather than invalidating
+    /// the series, so confidence dips and recovers instead of resetting.
+    /// Where the uncertainty in a measured TDEE comes from.
+    ///
+    /// Worth surfacing rather than hiding: the two terms behave completely
+    /// differently. The weight term shrinks as history accumulates; the intake
+    /// term does not shrink at all, because it is bias rather than noise —
+    /// logging the same wrong number for a month gives a very precise estimate
+    /// of a wrong number.
+    struct UncertaintyBreakdown: Sendable {
+        /// From not knowing the weight trend exactly, × 7700 kcal/kg.
+        let weightTrendKcal: Double
+        /// From not knowing what was actually eaten.
+        let intakeKcal: Double
+        var combinedKcal: Double {
+            (weightTrendKcal * weightTrendKcal + intakeKcal * intakeKcal).squareRoot()
+        }
+        /// Share of the variance owed to the food log, 0…1.
+        var intakeShare: Double {
+            let total = combinedKcal * combinedKcal
+            return total > 0 ? (intakeKcal * intakeKcal) / total : 0
+        }
+    }
+
+    /// `UncertaintyBreakdown` for a set of records, or nil below the bounds.
+    func uncertaintyBreakdown(records: [DailyRecord], windowDays: Int,
+                              asOf: Date = Date()) -> UncertaintyBreakdown? {
+        let cal = Calendar(identifier: .gregorian)
+        let start = cal.date(byAdding: .day, value: -windowDays, to: asOf) ?? asOf
+        let window = records
+            .filter { $0.date >= start && $0.date <= asOf }
+            .sorted { $0.date < $1.date }
+        return measurementStandardError(daily: dailyWeightSeries(window),
+                                        intakes: window.compactMap(\.intakeKcal),
+                                        windowDays: windowDays,
+                                        avgIntake: imputedAverageIntake(window))
+    }
+
+    private func measurementStandardError(daily: [Point], intakes: [Double],
+                                          windowDays: Int,
+                                          avgIntake: Double) -> UncertaintyBreakdown? {
+        guard daily.count >= Self.minWeighInsForInference,
+              intakes.count >= Self.minIntakeDaysForInference,
+              let first = daily.first?.day, let last = daily.last?.day,
+              last - first >= Self.minWeighInSpanDays
+        else { return nil }
+
+        // Scatter of the weigh-ins about their own trend line, shrunk toward the
+        // physiological prior so that a short or unluckily tidy series cannot
+        // claim more precision than it has.
+        let slope = theilSenSlopePerDay(daily)
+        let intercept = median(daily.map { $0.value - slope * $0.day })
+        let residuals = daily.map { $0.value - (intercept + slope * $0.day) }
+        let dof = Double(max(0, daily.count - 2))
+        let observedVar = dof > 0 ? residuals.reduce(0) { $0 + $1 * $1 } / dof : 0
+        let priorVar = Self.assumedDailyWeightSD * Self.assumedDailyWeightSD
+        let pooledVar = (dof * observedVar + Self.weightSDPriorStrength * priorVar)
+            / (dof + Self.weightSDPriorStrength)
+        let residualSD = pooledVar.squareRoot()
+
+        let meanDay = daily.reduce(0) { $0 + $1.day } / Double(daily.count)
+        let sxx = daily.reduce(0) { $0 + ($1.day - meanDay) * ($1.day - meanDay) }
+        guard sxx > 0 else { return nil }
+        let weightTermSD = (residualSD / sxx.squareRoot()) * Self.kcalPerKg
+
+        // Intake: sampling error over the days that were not logged, plus the
+        // self-report error that never goes away.
+        let k = Double(intakes.count)
+        let mean = intakes.reduce(0, +) / k
+        let observedIntakeVar = k > 1
+            ? intakes.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / (k - 1)
+            : 0
+        let floorIntakeVar = (Self.intakeDayVariationFraction * mean)
+            * (Self.intakeDayVariationFraction * mean)
+        let variance = max(observedIntakeVar, floorIntakeVar)
+        let unlogged = max(0, Double(windowDays) - k)
+        let days = Double(max(windowDays, 1))
+        let imputationVar = (unlogged * unlogged * (variance / k) + unlogged * variance)
+            / (days * days)
+        // Systematic error passes straight through to the mean; random error is
+        // divided by the number of days that were actually logged.
+        let systematic = Self.intakeSystematicErrorFraction * avgIntake
+        let random = Self.intakeRandomErrorFraction * avgIntake
+        let reportVar = systematic * systematic + (random * random) / k
+        let intakeSD = (imputationVar + reportVar).squareRoot()
+
+        return UncertaintyBreakdown(weightTrendKcal: weightTermSD, intakeKcal: intakeSD)
+    }
+
+    private func median(_ xs: [Double]) -> Double {
+        guard !xs.isEmpty else { return 0 }
+        let s = xs.sorted()
+        let mid = s.count / 2
+        return s.count.isMultiple(of: 2) ? (s[mid - 1] + s[mid]) / 2 : s[mid]
+    }
 
     struct Prior: Sendable {
         let sex: BiologicalSex
@@ -129,17 +335,11 @@ struct MetabolismEngine: Sendable {
         // them, so the intake side has to as well.
         let avgIntake = imputedAverageIntake(window)
 
-        let rawTDEE = avgIntake - slopePerDay * Self.kcalPerKg
-
-        let coverage = Double(intakes.count) / Double(max(windowDays, 1))
-        let weighIns = smoothed.count
-        let dataMaturity = min(1, Double(windowDays) / 14)
-        let weighInDensity = min(1, Double(weighIns) / (Double(windowDays) / 3))
-        // Coverage still discounts: imputed days are inference, not measurement,
-        // and a window that is mostly imputed deserves less weight against the
-        // prior — even though the imputation itself is unbiased.
-        let confidence = (coverage * dataMaturity * weighInDensity)
-            .clamped(to: 0...1)
+        // Clamped before it becomes energy: see maxPlausibleWeeklyChangeFraction.
+        let referenceWeight = smoothed.last?.value ?? daily.last?.value ?? 75
+        let maxPerDay = referenceWeight * Self.maxPlausibleWeeklyChangeFraction / 7
+        let inferenceSlope = slopePerDay.clamped(to: -maxPerDay...maxPerDay)
+        let rawTDEE = avgIntake - inferenceSlope * Self.kcalPerKg
 
         // Prior: passive BMR + measured active energy when HealthKit has it
         // (÷0.9 grosses up for the ~10% thermic effect of food); otherwise the
@@ -152,6 +352,27 @@ struct MetabolismEngine: Sendable {
             priorTDEE = passiveBMR * prior.activity.factor
         }
 
+        // Confidence is now derived, not assembled from coverage heuristics.
+        //
+        // The measurement and the prior are two estimates of the same quantity
+        // with different precisions, so they combine by inverse variance:
+        //
+        //     confidence = σ_prior² / (σ_prior² + σ_measured²)
+        //
+        // which is the weight a precision-weighted mean gives the measurement.
+        // Everything the old heuristic was groping at falls out of σ_measured:
+        // few weigh-ins, a short span, noisy scales and sparse food logging all
+        // inflate it, and skipping a day costs exactly the leverage that day
+        // would have contributed — no cliff, no special case.
+        let measuredSD = measurementStandardError(daily: daily, intakes: intakes,
+                                                  windowDays: windowDays,
+                                                  avgIntake: avgIntake)
+        let priorSD = Self.priorRelativeError * priorTDEE
+        let confidence: Double = {
+            guard let sd = measuredSD?.combinedKcal, sd > 0, priorSD > 0 else { return 0 }
+            return (priorSD * priorSD / (priorSD * priorSD + sd * sd)).clamped(to: 0...1)
+        }()
+
         let blended = intakes.isEmpty
             ? priorTDEE
             : confidence * rawTDEE + (1 - confidence) * priorTDEE
@@ -163,7 +384,8 @@ struct MetabolismEngine: Sendable {
             avgIntakeKcal: avgIntake.rounded(),
             smoothedWeightKg: smoothed.last?.value ?? 0,
             windowDays: windowDays,
-            basalKcal: passiveBMR.rounded()
+            basalKcal: passiveBMR.rounded(),
+            standardErrorKcal: (priorSD * (1 - confidence).squareRoot()).rounded()
         )
     }
 

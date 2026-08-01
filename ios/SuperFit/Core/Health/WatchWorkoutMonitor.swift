@@ -84,9 +84,14 @@ final class WatchWorkoutMonitor {
     private func installFinishedWorkoutObserver() {
         guard observerQuery == nil else { return }
         let query = HKObserverQuery(sampleType: .workoutType(), predicate: nil) { [weak self] _, completion, _ in
+            // HealthKit's completion handler isn't Sendable, so it can't cross
+            // into the main-actor task. Wrapped so what crosses is a value the
+            // compiler can check, and HealthKit still gets told we're done —
+            // failing to call it makes it stop delivering updates.
+            let finish = UncheckedSendable(completion)
             Task { @MainActor in
                 await self?.refreshTodaysWorkouts()
-                completion()
+                finish.value()
             }
         }
         observerQuery = query
@@ -102,7 +107,11 @@ private final class MirroredSessionHandler: NSObject, HKWorkoutSessionDelegate {
         var ended = false
     }
 
-    static var key: UInt8 = 0
+    /// Only its *address* is used, as the associated-object key — the value is
+    /// never read or written. `objc_setAssociatedObject` takes it `inout`, so it
+    /// has to be a `var`; `nonisolated(unsafe)` is the assertion that sharing it
+    /// is safe, which it is when nothing ever touches the value.
+    nonisolated(unsafe) static var key: UInt8 = 0
     private let onUpdate: (Update) -> Void
 
     init(onUpdate: @escaping (Update) -> Void) {
@@ -160,3 +169,14 @@ final class WatchWorkoutMonitor {
 }
 
 #endif
+
+/// Carries a value across an isolation boundary that the compiler can't verify.
+///
+/// Needed for HealthKit's completion handlers: they are plain closures, not
+/// `@Sendable`, but HealthKit does expect them to be called from wherever the
+/// work finished. The unchecked conformance is the assertion that the closure is
+/// safe to call once, from one place — which is how it is used here.
+private struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}

@@ -17,12 +17,44 @@ struct SleepSample: Sendable {
     var wakeTime: Date?
 }
 
+/// One lap or split within a workout — a pool length, a manual lap press, or a
+/// segment the watch marked itself.
+struct WorkoutLapSample: Sendable, Codable, Equatable {
+    let index: Int
+    let start: Date
+    let durationSeconds: Double
+    var distanceMetres: Double?
+    var avgHeartRate: Double?
+}
+
+/// A finished workout with everything the source recorded.
+///
+/// Every metric past the first four is optional, and stays `nil` when the source
+/// didn't measure it. A treadmill run has no elevation and a swim has no power;
+/// storing those as 0 would make an absence indistinguishable from a measurement,
+/// which is the same failure the recovery engine avoids for sleep efficiency.
 struct WorkoutSample: Sendable {
+    let externalID: String
     let start: Date
     let end: Date
-    let activityName: String
+    let activity: WorkoutActivity
     let activeEnergyKcal: Double
-    let avgHeartRate: Double?
+
+    var totalEnergyKcal: Double?
+    var distanceMetres: Double?
+    var avgHeartRate: Double?
+    var maxHeartRate: Double?
+    var minHeartRate: Double?
+    var elevationGainMetres: Double?
+    var avgCadence: Double?
+    var avgPowerWatts: Double?
+    var swimStrokeCount: Double?
+    var swimStrokeStyle: String?
+    var laps: [WorkoutLapSample] = []
+    /// Device or app that recorded it — "Apple Watch", "Garmin Connect".
+    var sourceName: String?
+
+    var durationSeconds: Double { end.timeIntervalSince(start) }
 }
 
 struct DailyActivity: Sendable {

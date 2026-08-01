@@ -49,6 +49,52 @@ Returns an array of daily recovery metrics. Requires `Authorization: Bearer {ses
 
 All fields are optional; any missing field is treated as "no data for that metric."
 
+### Workouts endpoint
+**GET** `/garmin/workouts?start={ISO8601}&end={ISO8601}`
+
+Returns activities. Requires `Authorization: Bearer {sessionToken}`.
+
+**This endpoint is enrichment, not a second source of truth.** Garmin Connect
+already writes activities to Apple Health, so the same run normally arrives twice.
+`WorkoutSyncService` matches on start time within two minutes and fills in only
+the fields Apple Health has no place for — power, cadence, training effect. An
+activity with no HealthKit counterpart (Connect's Apple Health sync switched off)
+is imported whole instead.
+
+**Response** (JSON):
+```json
+[
+  {
+    "id": "9876543210",
+    "startTime": "2026-07-25T06:14:00Z",
+    "durationSeconds": 2735,
+    "activityType": "running",
+    "activeKilocalories": 612,
+    "distanceMeters": 8043.2,
+    "averageHeartRate": 148,
+    "maxHeartRate": 171,
+    "elevationGainMeters": 96,
+    "averageCadence": 172,
+    "averagePowerWatts": 268,
+    "aerobicTrainingEffect": 3.4,
+    "anaerobicTrainingEffect": 1.2
+  }
+]
+```
+
+Only `id`, `startTime`, `durationSeconds` and `activityType` are required; every
+other field is optional and absent means "not measured", never zero.
+
+`activityType` takes Garmin's own activity keys (`running`, `trail_running`,
+`lap_swimming`, `road_biking`, `indoor_cycling`, …). Unrecognised keys import as
+`other` rather than failing to decode, so a Garmin activity type newer than this
+build still arrives.
+
+Training effect is passed through as Garmin's raw 0–5 aerobic/anaerobic pair and
+rendered as text. It is deliberately not converted into any of the app's own
+scores: it comes from Garmin's model, and mapping it onto a SuperFit number would
+imply a shared basis that doesn't exist.
+
 ### Webhook endpoint
 **POST** `/garmin/webhook`
 
@@ -60,7 +106,7 @@ Garmin sends new data here whenever the user syncs. The backend upserts it into 
 2. Register your backend app with Garmin:
    - Consumer name: "SuperFit"
    - Callback URL: `https://yourdomain.com/garmin/callback` (or your staging equivalent)
-   - Request permissions: Daily stress (for HRV/rMSSD), sleep
+   - Request permissions: Daily stress (for HRV/rMSSD), sleep, activities
 3. Garmin assigns you a **consumer key** and **consumer secret**. Store the secret server-side in an env var (never commit it).
 4. Register a webhook: tell Garmin to POST to `https://yourdomain.com/garmin/webhook` whenever data changes.
 

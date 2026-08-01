@@ -59,6 +59,21 @@ final class AggregationService {
         try? context.save()
     }
 
+    /// Everything downstream of a change to the weight series.
+    ///
+    /// The smoothed trend alone is not enough: the calorie and macro targets are
+    /// read from a stored `MetabolicEstimateRecord`, so rebuilding the trend and
+    /// stopping there leaves the corrected weight showing in the list while the
+    /// dashboard keeps quoting a target derived from the old one.
+    ///
+    /// Deliberately not `runAll` — recovery and the cyclical baselines are driven
+    /// by sleep and HRV, and a weigh-in cannot move them.
+    func refreshWeightDerived() {
+        fillWeightTrend()
+        upsertMetabolicEstimates()
+        try? context.save()
+    }
+
     // MARK: - Weight trend
 
     func fillWeightTrend() {

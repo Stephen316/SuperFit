@@ -1,6 +1,10 @@
 import SwiftUI
 #if canImport(AVFoundation) && !targetEnvironment(simulator)
-import AVFoundation
+// `@preconcurrency` because AVFoundation predates strict concurrency and marks
+// almost nothing `Sendable` — including `AVCaptureSession`, which Apple documents
+// as safe to start and stop off the main thread. Without this every use of it
+// here is a warning about a race that the framework's own contract rules out.
+@preconcurrency import AVFoundation
 
 /// Camera barcode scanner (EAN-13 / EAN-8 / UPC-E). Fires once per scan.
 struct BarcodeScannerView: UIViewControllerRepresentable {
@@ -14,7 +18,12 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: ScannerController, context: Context) {}
 
-    final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    // The delegate conformance is `@preconcurrency` because the protocol is
+    // declared nonisolated while `UIViewController` is main-actor. That would be a
+    // real hazard if the callbacks arrived anywhere else, but the delegate is
+    // registered with `queue: .main` below, so they don't.
+    final class ScannerController: UIViewController,
+                                   @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
         var onScan: ((String) -> Void)?
         private let session = AVCaptureSession()
         private var didFire = false
