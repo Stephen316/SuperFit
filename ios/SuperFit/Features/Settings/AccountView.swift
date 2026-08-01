@@ -8,6 +8,8 @@ import AuthenticationServices
 struct AccountView: View {
     @Environment(\.modelContext) private var context
     @State private var account = AccountManager()
+    @State private var cloud = SupabaseAccount()
+    @State private var backup: SupabaseBackup?
 
     @State private var exportDocument: ArchiveDocument?
     @State private var exporting = false
@@ -19,6 +21,13 @@ struct AccountView: View {
     var body: some View {
         Form {
             identitySection
+            if let backup {
+                CloudAccountSection(account: cloud, backup: backup) { archive in
+                    // Straight into the existing confirmation, so a cloud
+                    // restore is as hard to do by accident as a file one.
+                    pendingImport = archive
+                }
+            }
             syncSection
             backupSection
             dangerSection
@@ -27,7 +36,12 @@ struct AccountView: View {
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
         .themedList()
-        .task { await account.refreshCredentialState() }
+        .task {
+            await account.refreshCredentialState()
+            if backup == nil { backup = SupabaseBackup(account: cloud) }
+            await cloud.restore()
+            await backup?.refreshSummary()
+        }
         .alert("Restore backup", isPresented: .constant(pendingImport != nil)) {
             Button("Merge") { restore(mode: .merge) }
             Button("Replace everything", role: .destructive) { restore(mode: .replace) }

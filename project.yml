@@ -40,6 +40,13 @@ configFiles:
   Debug: Signing.xcconfig
   Release: Signing.xcconfig
 
+packages:
+  # Auth and the per-account backup row. Pinned by minor rather than exact so
+  # security fixes arrive without a manual bump; `xcodegen generate` resolves it.
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.0.0
+
 targets:
   SuperFit:
     type: application
@@ -57,6 +64,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.stephenh.superfit
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_EMIT_LOC_STRINGS: YES
+    dependencies:
+      - package: Supabase
+        product: Supabase
     # The entitlements file is hand-maintained and referenced by
     # CODE_SIGN_ENTITLEMENTS above. Do not add an `entitlements:` block here —
     # that makes XcodeGen *generate* the file from `properties:`, and with none

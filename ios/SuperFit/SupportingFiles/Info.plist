@@ -22,6 +22,18 @@
 	     USDAKeyStore treats as absent and falls back to the settings screen. -->
 	<key>USDAAPIKey</key>
 	<string>$(USDA_API_KEY)</string>
+	<!-- Substituted from Secrets.xcconfig at build time. Both empty means no
+	     backend is configured, which SupabaseConfig treats as "accounts off"
+	     rather than as an error. -->
+	<key>SupabaseURL</key>
+	<string>$(SUPABASE_URL)</string>
+	<key>SupabaseAnonKey</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
+	<!-- Off unless Secrets.xcconfig sets it. Apple sign-in needs a paid Apple
+	     Developer Program membership to configure on Apple's side, so the
+	     button stays hidden rather than failing when tapped. -->
+	<key>SupabaseAppleSignIn</key>
+	<string>$(SUPABASE_APPLE_SIGN_IN)</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>SuperFit reads your weight, activity, sleep, and heart data to estimate your true energy expenditure and recovery. Your health data stays on your device and your private iCloud. It is never sold or shared.</string>
 	<key>NSHealthUpdateUsageDescription</key>
