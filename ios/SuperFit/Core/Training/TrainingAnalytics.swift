@@ -60,6 +60,31 @@ struct VolumeAggregator: Sendable {
         return out
     }
 
+    /// Sets that involved a muscle without targeting it — tension below
+    /// `fullSetTension`.
+    ///
+    /// The counterpart to `weeklySetCounts`, and the reason it exists: raising
+    /// the bar to 4 left the lower back in a squat and the forearms in a
+    /// deadlift reading as a bare dash, on the same screen as a diagram that
+    /// colours them. Five sets of squats is 2.0 weighted sets of lower back —
+    /// real work, done, and worth naming rather than rounding to nothing.
+    ///
+    /// Counted separately rather than folded in: a set that assists is not a set
+    /// that targets, and adding them would put back exactly the inflation
+    /// `fullSetTension` was raised to remove.
+    func weeklySecondarySetCounts(records: [LiftRecord],
+                                  muscles: [UUID: [MuscleGroup: Int]],
+                                  week: DateInterval) -> [MuscleGroup: Int] {
+        var out: [MuscleGroup: Int] = [:]
+        for r in records where !r.isWarmup && r.date >= week.start && r.date < week.end {
+            guard let tension = muscles[r.exerciseID] else { continue }
+            for (muscle, score) in tension where score > 0 && score < Self.fullSetTension {
+                out[muscle, default: 0] += 1
+            }
+        }
+        return out
+    }
+
     /// Sets per muscle group within `week`, tension-weighted.
     func weeklySets(records: [LiftRecord],
                     muscles: [UUID: [MuscleGroup: Int]],

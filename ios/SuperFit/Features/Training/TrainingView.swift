@@ -36,23 +36,47 @@ struct TrainingView: View {
         }
     }
 
+    /// One row of the weekly table.
+    ///
+    /// Three numbers because they answer three different questions, and
+    /// collapsing them loses one. `sets` is what a person did — two sets are two
+    /// sets. `secondary` is work the muscle took without being the point of the
+    /// exercise. `weighted` knows a chin-up is worth more to the lats than to
+    /// the abs, which is the ordering worth seeing, and it separates rows that
+    /// would otherwise tie at the same whole number.
+    private struct MuscleRow: Identifiable {
+        let muscle: MuscleGroup
+        /// Sets that targeted this muscle — tension at or above `fullSetTension`.
+        let sets: Int
+        /// Sets that involved it without targeting it.
+        let secondary: Int
+        /// Tension-weighted total. Sorts and colours; never shown as a number.
+        let weighted: Double
+
+        var id: MuscleGroup { muscle }
+
+        /// Worked, but never as the target. The lower back after a week of
+        /// squats. Shown with its own count and a qualifier rather than the
+        /// dash it used to get, which contradicted the coloured diagram above.
+        var isSecondaryOnly: Bool { sets == 0 && secondary > 0 }
+
+        /// The number the row prints, whichever kind of set it is.
+        var displayedSets: Int { sets > 0 ? sets : secondary }
+    }
+
     /// Rows for the weekly table: every group, whether trained or not.
     ///
     /// Including the untrained ones is the point — "least trained first" is
     /// meaningless if a muscle you never touched simply isn't in the list, and
     /// the gap is what the table exists to show.
-    /// `sets` is what the row shows; `weighted` is what it sorts by.
-    ///
-    /// They are deliberately different. The count is what a person did — two
-    /// sets are two sets. The weighted figure knows a chin-up is worth more to
-    /// the lats than to the abs, which is the ordering worth seeing, and it
-    /// separates rows that would otherwise tie at the same whole number.
-    private var weeklyRows: [(muscle: MuscleGroup, sets: Int, weighted: Double)] {
+    private var weeklyRows: [MuscleRow] {
         let volume = thisWeekVolume
         let counts = thisWeekSetCounts
+        let secondary = thisWeekSecondaryCounts
         let term = muscleQuery.trimmingCharacters(in: .whitespaces)
         return MuscleGroup.allCases
-            .map { (muscle: $0, sets: counts[$0] ?? 0, weighted: volume[$0] ?? 0) }
+            .map { MuscleRow(muscle: $0, sets: counts[$0] ?? 0,
+                             secondary: secondary[$0] ?? 0, weighted: volume[$0] ?? 0) }
             .filter { term.isEmpty || $0.muscle.displayName.localizedCaseInsensitiveContains(term) }
             .sorted { a, b in
                 // Alphabetical tiebreak so the many zero rows keep a stable,
@@ -69,6 +93,14 @@ struct TrainingView: View {
         guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
         let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
         return VolumeAggregator().weeklySetCounts(records: allRecords, muscles: muscles, week: week)
+    }
+
+    private var thisWeekSecondaryCounts: [MuscleGroup: Int] {
+        let cal = Calendar(identifier: .iso8601)
+        guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
+        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
+        return VolumeAggregator().weeklySecondarySetCounts(records: allRecords,
+                                                           muscles: muscles, week: week)
     }
 
     private var thisWeekVolume: [MuscleGroup: Double] {
@@ -318,11 +350,20 @@ struct TrainingView: View {
                 Text("No muscle matches \"\(muscleQuery)\".")
                     .foregroundStyle(.secondary)
             }
-            ForEach(weeklyRows, id: \.muscle) { row in
+            ForEach(weeklyRows) { row in
                 HStack {
                     Text(row.muscle.displayName)
-                    Spacer()
-                    Text(setsLabel(row.sets))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    // A separate, quieter label rather than a longer string:
+                    // "Triceps lateral head" beside "3 sets (secondary)" runs
+                    // out of row on a small phone.
+                    if row.isSecondaryOnly {
+                        Text("secondary")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(setsLabel(row))
                         .monospacedDigit()
                         .foregroundStyle(row.sets == 0 ? .secondary : volumeColor(row.weighted))
                 }
@@ -346,18 +387,23 @@ struct TrainingView: View {
                                     : "Sorting most trained first. Tap to reverse.")
             }
         } footer: {
-            Text("Sets are weighted by how hard each lift works the muscle, so a "
-                 + "squat counts fully towards quads and partly towards lower back.")
+            Text("A set counts when the lift actually targets the muscle. Work "
+                 + "that only assists — the lower back in a squat, the forearms "
+                 + "in a deadlift — is marked secondary, and still counts "
+                 + "towards the colour and the ordering.")
         }
     }
 
-    /// One decimal, because these are tension-weighted and rounding 0.4 to "0"
-    /// would read as untrained when it isn't.
-    private func setsLabel(_ sets: Int) -> String {
-        switch sets {
+    /// Whole sets, of whichever kind the row has.
+    ///
+    /// A dash now means genuinely untouched, and nothing else. It used to also
+    /// mean "worked, but never hard enough to count", which put "—" beside a
+    /// muscle the diagram directly above had coloured in.
+    private func setsLabel(_ row: MuscleRow) -> String {
+        switch row.displayedSets {
         case 0:  return "—"
         case 1:  return "1 set"
-        default: return "\(sets) sets"
+        default: return "\(row.displayedSets) sets"
         }
     }
 

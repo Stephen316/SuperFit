@@ -156,6 +156,61 @@ struct DisplayedSetCountTests {
         #expect((weighted[.chest] ?? 0) > (weighted[.frontDelts] ?? 0),
                 "but chest sorts above front delts")
     }
+
+    // MARK: - Secondary sets
+
+    /// The squat case, with the catalogue's own numbers: quads at 5, lower back
+    /// at 2. Five sets target the quads and assist the lower back, and the table
+    /// has to be able to say both.
+    @Test func squatTargetsQuadsAndAssistsLowerBack() {
+        let muscles = [lift: [MuscleGroup.vastusLateralis: 5, MuscleGroup.erectorSpinae: 2]]
+        let counts = agg.weeklySetCounts(records: records(5), muscles: muscles, week: week)
+        let secondary = agg.weeklySecondarySetCounts(records: records(5),
+                                                     muscles: muscles, week: week)
+        #expect(counts[.vastusLateralis] == 5)
+        #expect(counts[.erectorSpinae] == nil, "never the target")
+        #expect(secondary[.erectorSpinae] == 5, "but worked in all five")
+        #expect(secondary[.vastusLateralis] == nil, "targeted sets are not also secondary")
+    }
+
+    /// The two counts partition the sets — no set is in both, none is dropped.
+    @Test func targetedAndSecondaryDoNotOverlap() {
+        let muscles = [lift: [MuscleGroup.lats: 4, MuscleGroup.biceps: 3]]
+        let counts = agg.weeklySetCounts(records: records(3), muscles: muscles, week: week)
+        let secondary = agg.weeklySecondarySetCounts(records: records(3),
+                                                     muscles: muscles, week: week)
+        #expect(counts[.lats] == 3)
+        #expect(secondary[.lats] == nil)
+        #expect(counts[.biceps] == nil)
+        #expect(secondary[.biceps] == 3)
+    }
+
+    /// A muscle both targeted and assisted in the same week keeps them apart, so
+    /// the row shows the targeted count and drops the qualifier.
+    @Test func aMuscleCanBeTargetedInOneLiftAndAssistInAnother() {
+        let press = UUID()
+        let fly = UUID()
+        let both = [press, fly].enumerated().map { i, id in
+            LiftRecord(date: week.start.addingTimeInterval(Double(i) * 3600),
+                       exerciseID: id, weightKg: 40, reps: 10, isWarmup: false)
+        }
+        let muscles = [press: [MuscleGroup.chest: 5], fly: [MuscleGroup.chest: 2]]
+        #expect(agg.weeklySetCounts(records: both, muscles: muscles, week: week)[.chest] == 1)
+        #expect(agg.weeklySecondarySetCounts(records: both, muscles: muscles,
+                                             week: week)[.chest] == 1)
+    }
+
+    /// Warmups and other weeks are excluded from both counts identically.
+    @Test func secondaryCountIgnoresWarmupsAndOtherWeeks() {
+        let muscles = [lift: [MuscleGroup.erectorSpinae: 2]]
+        let warmup = LiftRecord(date: week.start, exerciseID: lift,
+                                weightKg: 20, reps: 10, isWarmup: true)
+        let lastWeek = LiftRecord(date: week.start.addingTimeInterval(-86_400),
+                                  exerciseID: lift, weightKg: 60, reps: 8, isWarmup: false)
+        let counted = agg.weeklySecondarySetCounts(records: records(2) + [warmup, lastWeek],
+                                                   muscles: muscles, week: week)
+        #expect(counted[.erectorSpinae] == 2)
+    }
 }
 
 /// Band boundaries, pinned because they are a product decision rather than a
