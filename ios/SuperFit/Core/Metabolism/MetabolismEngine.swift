@@ -491,19 +491,13 @@ struct MetabolismEngine: Sendable {
         return total / Double(allDays.count)
     }
 
-    /// Raw daily weight means (multiple same-day weigh-ins averaged).
+    /// Raw daily weights — the lowest reading of each day. See `DailyWeight`.
     private func dailyWeightSeries(_ window: [DailyRecord]) -> [Point] {
-        let cal = Calendar(identifier: .gregorian)
-        var byDay: [Date: [Double]] = [:]
-        for r in window {
-            guard let w = r.weightKg else { continue }
-            byDay[cal.startOfDay(for: r.date), default: []].append(w)
-        }
+        let byDay = DailyWeight.byDay(window, date: \.date, weightKg: \.weightKg,
+                                      calendar: Calendar(identifier: .gregorian))
         guard let origin = byDay.keys.min() else { return [] }
         return byDay.keys.sorted().map { day in
-            let ws = byDay[day]!
-            return Point(day: day.timeIntervalSince(origin) / 86_400,
-                         value: ws.reduce(0, +) / Double(ws.count))
+            Point(day: day.timeIntervalSince(origin) / 86_400, value: byDay[day]!)
         }
     }
 

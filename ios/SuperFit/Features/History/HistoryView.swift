@@ -178,15 +178,22 @@ struct HistoryView: View {
 
     // MARK: - Body
 
+    /// One point per day, at the lowest reading — the same value every
+    /// calculation uses. See `DailyWeight`.
     private var weightPoints: [HistoryPoint] {
-        metrics.filter { $0.date >= start }
-            .map { HistoryPoint(date: $0.date, value: units.displayWeight($0.weightKg)) }
+        DailyWeight.byDay(metrics.filter { $0.date >= start },
+                          date: \.date, weightKg: \.weightKg, calendar: .current)
+            .map { HistoryPoint(date: $0.key, value: units.displayWeight($0.value)) }
+            .sorted { $0.date < $1.date }
     }
 
+    /// Also one per day: every row of a day now carries that day's trend, so
+    /// mapping each row would stack identical points on one date.
     private var trendPoints: [HistoryPoint] {
-        metrics.filter { $0.date >= start }
-            .compactMap { m in m.trendWeightKg.map {
-                HistoryPoint(date: m.date, value: units.displayWeight($0)) } }
+        DailyWeight.byDay(metrics.filter { $0.date >= start },
+                          date: \.date, weightKg: \.trendWeightKg, calendar: .current)
+            .map { HistoryPoint(date: $0.key, value: units.displayWeight($0.value)) }
+            .sorted { $0.date < $1.date }
     }
 
     private var weightCard: some View {

@@ -32,15 +32,14 @@ enum MetabolicRecordAssembler {
         }
         intakeByDay = intakeByDay.filter { $0.value >= minPlausibleIntake }
 
-        // Averaged, not last-one-wins. `metrics` arrives from an unsorted fetch,
-        // so overwriting per day let an arbitrary weigh-in win whenever someone
-        // logged twice — and since a pending insert can sort ahead of the rows
-        // already on disk, adding a second weigh-in could leave the estimate on
-        // the *older* number and look like nothing had recalculated at all.
-        // Averaging matches what the engine's own daily series does.
-        var weightsByDay: [Date: [Double]] = [:]
-        for m in metrics { weightsByDay[cal.startOfDay(for: m.date), default: []].append(m.weightKg) }
-        let weightByDay = weightsByDay.mapValues { $0.reduce(0, +) / Double($0.count) }
+        // Lowest per day, not last-one-wins. `metrics` arrives from an unsorted
+        // fetch, so overwriting per day let an arbitrary weigh-in win whenever
+        // someone logged twice — and since a pending insert can sort ahead of the
+        // rows already on disk, adding a second weigh-in could leave the estimate
+        // on the *older* number and look like nothing had recalculated at all.
+        // See `DailyWeight` for why the lowest rather than the mean.
+        let weightByDay = DailyWeight.byDay(metrics, date: \.date,
+                                            weightKg: \.weightKg, calendar: cal)
 
         return Set(intakeByDay.keys).union(weightByDay.keys).sorted().map {
             DailyRecord(date: $0, intakeKcal: intakeByDay[$0], weightKg: weightByDay[$0])

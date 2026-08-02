@@ -88,26 +88,39 @@ struct TrainingView: View {
             }
     }
 
+    /// Tension map per exercise.
+    ///
+    /// `uniquingKeysWith`, not `uniqueKeysWithValues`, for the same reason
+    /// `allRecords` above uses it: nothing in the schema stops two rows sharing
+    /// an id after a CloudKit merge or an archive restore, and the trapping
+    /// initialiser would take the app down rather than draw a table.
+    private var muscleTension: [UUID: [MuscleGroup: Int]] {
+        Dictionary(exercises.map { ($0.id, $0.tension) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The ISO week containing today. `Calendar(identifier: .iso8601)` already
+    /// carries Monday as its first weekday and a 4-day minimum first week, so
+    /// nothing needs setting.
+    private var currentWeek: DateInterval? {
+        Calendar(identifier: .iso8601).dateInterval(of: .weekOfYear, for: .now)
+    }
+
     private var thisWeekSetCounts: [MuscleGroup: Int] {
-        let cal = Calendar(identifier: .iso8601)
-        guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
-        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
-        return VolumeAggregator().weeklySetCounts(records: allRecords, muscles: muscles, week: week)
+        guard let week = currentWeek else { return [:] }
+        return VolumeAggregator().weeklySetCounts(records: allRecords,
+                                                  muscles: muscleTension, week: week)
     }
 
     private var thisWeekSecondaryCounts: [MuscleGroup: Int] {
-        let cal = Calendar(identifier: .iso8601)
-        guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
-        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
+        guard let week = currentWeek else { return [:] }
         return VolumeAggregator().weeklySecondarySetCounts(records: allRecords,
-                                                           muscles: muscles, week: week)
+                                                           muscles: muscleTension, week: week)
     }
 
     private var thisWeekVolume: [MuscleGroup: Double] {
-        let cal = Calendar(identifier: .iso8601)
-        guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
-        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
-        return VolumeAggregator().weeklySets(records: allRecords, muscles: muscles, week: week)
+        guard let week = currentWeek else { return [:] }
+        return VolumeAggregator().weeklySets(records: allRecords,
+                                             muscles: muscleTension, week: week)
     }
 
     /// Cardio ACWR, or nil when too few workouts carry heart rate to answer.
@@ -414,11 +427,18 @@ struct TrainingView: View {
     /// colour says how much stimulus the muscle actually took, where three sets
     /// of bench mean more to the chest than to the front delts that shared
     /// them. Banding the count instead would paint both the same.
+    ///
+    /// On the diagram's scale, not a second one. This used to band on
+    /// `weeklySetTargets` (10–20), so a muscle at 4 weighted sets was green on
+    /// the figure and grey in the table directly beneath it. One scale, one
+    /// answer.
+    ///
+    /// `.secondary` stands in below the floor: the scale's own `untrained` is a
+    /// fill colour for the body map and would be all but invisible as text.
     private func volumeColor(_ sets: Double) -> Color {
-        let range = VolumeAggregator.weeklySetTargets
-        if sets < range.lowerBound { return .secondary }
-        if sets > range.upperBound { return .orange }
-        return .green
+        sets > MuscleVolumeScale.minimumTrained
+            ? MuscleVolumeScale.colour(forWeightedSets: sets)
+            : .secondary
     }
 
     private func start(named templateName: String?) {

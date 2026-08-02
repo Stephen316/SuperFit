@@ -75,10 +75,17 @@ struct DashboardView: View {
     private var todayVitals: DailyVitals? { vitals.first { onDay($0.date) } }
     private var todayWorkouts: [WorkoutRecord] { workouts.filter { onDay($0.startedAt) } }
 
-    /// The weight to show is the last one recorded on or before the day being
-    /// viewed — stepping back a day shouldn't blank it just because nothing was
-    /// weighed that morning.
+    /// The weight to show is the one recorded on the day being viewed, falling
+    /// back to the most recent before it — stepping back a day shouldn't blank
+    /// the card just because nothing was weighed that morning.
+    ///
+    /// Several readings on the viewed day resolve to the lowest, matching what
+    /// the engines count. Taking the most recent row instead meant an evening
+    /// re-weigh showed a heavier number here than the one the calorie target was
+    /// built from.
     private var weightOnDay: BodyMetrics? {
+        let sameDay = metrics.filter { onDay($0.date) }
+        if !sameDay.isEmpty { return sameDay.min { $0.weightKg < $1.weightKg } }
         let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
         return metrics.first { $0.date < end }
     }

@@ -167,9 +167,15 @@ enum BodyDiagram {
         art.map { Region(groups: $0.groups, path: path(from: $0.d), clip: $0.clip) }
     }
 
-    /// Absolute `M`, `C` and `Z` only — everything else was resolved to cubics
-    /// when the data was generated, so this stays a scanner rather than a full
-    /// SVG path implementation.
+    /// Absolute `M`, `L`, `C` and `Z` only — everything else was resolved to
+    /// cubics and lines when the data was generated, so this stays a scanner
+    /// rather than a full SVG path implementation.
+    ///
+    /// `L` was missing and fell through to `default`, which silently discarded
+    /// it: 122 line segments across 74 of the 214 muscle paths, plus 117 in the
+    /// silhouettes. Not merely a dropped edge, either — `flush` clears the
+    /// coordinates without moving the current point, so the *following* curve
+    /// started from a stale position and the whole shape skewed.
     static func path(from d: String) -> Path {
         var path = Path()
         var numbers: [CGFloat] = []
@@ -180,6 +186,8 @@ enum BodyDiagram {
             switch command {
             case "M" where numbers.count >= 2:
                 path.move(to: CGPoint(x: numbers[0], y: numbers[1]))
+            case "L" where numbers.count >= 2:
+                path.addLine(to: CGPoint(x: numbers[0], y: numbers[1]))
             case "C" where numbers.count >= 6:
                 path.addCurve(to: CGPoint(x: numbers[4], y: numbers[5]),
                               control1: CGPoint(x: numbers[0], y: numbers[1]),

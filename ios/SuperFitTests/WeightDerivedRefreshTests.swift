@@ -69,13 +69,17 @@ struct WeightDerivedRefreshTests {
         AggregationService(context: context).refreshWeightDerived()
         let baseline = try estimate(context).basalKcal
 
-        // Log a heavy outlier, then remove it again: the estimate has to follow
-        // the weight series in both directions.
-        let outlier = BodyMetrics(date: .now, weightKg: 95)
+        // Log an outlier, then remove it again: the estimate has to follow the
+        // weight series in both directions.
+        //
+        // Light rather than heavy. The day already carries a weigh-in and the
+        // day's weight is the lowest of them, so a heavier reading would be
+        // discarded and the test would prove nothing.
+        let outlier = BodyMetrics(date: .now, weightKg: 70)
         context.insert(outlier)
         AggregationService(context: context).refreshWeightDerived()
         let withOutlier = try estimate(context).basalKcal
-        #expect(withOutlier > baseline)
+        #expect(withOutlier < baseline)
 
         context.delete(outlier)
         AggregationService(context: context).refreshWeightDerived()
@@ -99,11 +103,16 @@ struct WeightDerivedRefreshTests {
         #expect(try estimate(context).basalKcal == before)
     }
 
-    /// Two weigh-ins on one day used to be resolved by whichever the unsorted
-    /// fetch happened to yield last, so a second weigh-in could leave the
-    /// estimate sitting on the earlier number — indistinguishable, from the
-    /// dashboard, from nothing having recalculated.
-    @Test func bothWeighInsOnADayCountTowardsTheEstimate() throws {
+    /// A day's weight is its lowest reading, so a heavier second weigh-in
+    /// changes nothing and a lighter one moves everything.
+    ///
+    /// Two weigh-ins used to be averaged, which meant an evening re-weigh — the
+    /// same body, several hours of food and fluid later — dragged the estimate
+    /// up and the calorie target with it. Before that they were resolved by
+    /// whichever the unsorted fetch happened to yield last, so a second weigh-in
+    /// could leave the estimate on the earlier number, indistinguishable from
+    /// nothing having recalculated at all.
+    @Test func theLowestWeighInOfADayDecidesTheEstimate() throws {
         let context = try makeContext()
         seed(context)
         AggregationService(context: context).refreshWeightDerived()
@@ -111,15 +120,21 @@ struct WeightDerivedRefreshTests {
 
         context.insert(BodyMetrics(date: .now, weightKg: 95))
         AggregationService(context: context).refreshWeightDerived()
-        let averaged = try estimate(context).basalKcal
-        #expect(averaged > oneEntry, "the day's mean has risen, so basal must too")
+        #expect(try estimate(context).basalKcal == oneEntry,
+                "an evening re-weigh is not a gain")
+
+        context.insert(BodyMetrics(date: .now, weightKg: 70))
+        AggregationService(context: context).refreshWeightDerived()
+        let lowered = try estimate(context).basalKcal
+        #expect(lowered < oneEntry, "a lighter reading is the day's weight")
 
         // Order of insertion must not decide the answer.
         let reversed = try makeContext()
         let rows = seed(reversed)
+        reversed.insert(BodyMetrics(date: rows.last!.date, weightKg: 70))
         reversed.insert(BodyMetrics(date: rows.last!.date, weightKg: 95))
         AggregationService(context: reversed).refreshWeightDerived()
-        #expect(abs(try estimate(reversed).basalKcal - averaged) < 0.5)
+        #expect(abs(try estimate(reversed).basalKcal - lowered) < 0.5)
     }
 
     /// Recovery and the cyclical baselines are driven by sleep and HRV; a

@@ -87,9 +87,23 @@ final class SyncCoordinator {
         }
     }
 
+    /// One weight row per day, whatever the source hands over.
+    ///
+    /// `existing` is inserted into as it goes rather than being a snapshot taken
+    /// before the loop. As a snapshot it only knew about days already on disk,
+    /// so a day carrying several HealthKit readings — a smart scale that writes
+    /// on every step-on, or a manual entry beside a synced one — inserted a row
+    /// per reading. The engine averages same-day weights so the estimate
+    /// survived, but the weight list showed the day two or three times.
+    ///
+    /// Sorted by weight so the *lowest* reading of a day is the one kept, which
+    /// is the rule `DailyWeight` applies everywhere else. Storing one row per day
+    /// and storing the right one are the same job here: the engines collapse by
+    /// day anyway, so a heavier duplicate would only ever be noise in the list.
     private func upsertBodyMass(_ samples: [BodyMassSample]) {
-        let existing = fetchDays(BodyMetrics.self, dateKey: \.date)
-        for s in samples where !existing.contains(cal.startOfDay(for: s.date)) {
+        var existing = fetchDays(BodyMetrics.self, dateKey: \.date)
+        for s in samples.sorted(by: { $0.kg < $1.kg })
+        where existing.insert(cal.startOfDay(for: s.date)).inserted {
             context.insert(BodyMetrics(date: s.date, weightKg: s.kg, source: .healthKit))
         }
     }
@@ -137,7 +151,12 @@ final class SyncCoordinator {
 
     private func upsertActivity(_ days: [DailyActivity]) {
         let rows = (try? context.fetch(FetchDescriptor<DailyEnergy>())) ?? []
-        var byDay = Dictionary(uniqueKeysWithValues: rows.map { (cal.startOfDay(for: $0.date), $0) })
+        // `uniquingKeysWith`, not `uniqueKeysWithValues`: the schema carries no
+        // unique constraint on the day, so two rows can share one after a
+        // CloudKit merge between devices or an archive restore. The trapping
+        // initialiser turned that into a crash on foreground sync.
+        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
+                               uniquingKeysWith: { a, _ in a })
         for d in days {
             let key = cal.startOfDay(for: d.day)
             let row = byDay[key] ?? {
@@ -180,7 +199,9 @@ final class SyncCoordinator {
 
     private func upsertVitals(rhr: [SampleValue], hrv: [SampleValue]) {
         let rows = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
-        var byDay = Dictionary(uniqueKeysWithValues: rows.map { (cal.startOfDay(for: $0.date), $0) })
+        // See `upsertActivity` — same trap, same reason.
+        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
+                               uniquingKeysWith: { a, _ in a })
         func row(for date: Date) -> DailyVitals {
             let key = cal.startOfDay(for: date)
             if let r = byDay[key] { return r }

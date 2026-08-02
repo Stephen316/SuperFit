@@ -22,8 +22,21 @@ struct WeightView: View {
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
+    /// One point per day — the lowest reading of it, matching what every
+    /// calculation uses.
+    ///
+    /// Plotting every reading drew the same day twice, and the higher of the two
+    /// was food, fluid or clothing rather than a different weight. The list
+    /// below still shows every row, because that is where a bad entry gets
+    /// found and corrected.
     private var chartData: [BodyMetrics] {
-        metrics.sorted { $0.date < $1.date }.suffix(90)
+        var lowest: [Date: BodyMetrics] = [:]
+        for m in metrics {
+            let day = Calendar.current.startOfDay(for: m.date)
+            if let existing = lowest[day], existing.weightKg <= m.weightKg { continue }
+            lowest[day] = m
+        }
+        return lowest.values.sorted { $0.date < $1.date }.suffix(90)
     }
 
     /// Anchoring the axis to zero makes the chart useless: 5 kg on a 100 kg body

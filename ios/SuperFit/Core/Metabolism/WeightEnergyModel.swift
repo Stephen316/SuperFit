@@ -172,21 +172,15 @@ struct WeightEnergyModel: Sendable {
         return days.filter { $0.date >= start && $0.date <= asOf }
     }
 
-    /// One weight per calendar day, averaging repeats. Averaging rather than
-    /// last-wins: two weigh-ins on one day are two samples of the same quantity,
-    /// and picking one by fetch order makes the answer depend on storage.
+    /// One weight per calendar day — the lowest reading of the day, via the
+    /// shared `DailyWeight` rule. Anything but a fixed rule makes the answer
+    /// depend on fetch order; see that type for why the lowest and not the mean.
     private static func dailyWeights(_ window: [Day]) -> [WeighIn] {
-        let cal = Calendar(identifier: .gregorian)
-        var byDay: [Date: [Double]] = [:]
-        for d in window {
-            guard let kg = d.weightKg else { continue }
-            byDay[cal.startOfDay(for: d.date), default: []].append(kg)
-        }
+        let byDay = DailyWeight.byDay(window, date: \.date, weightKg: \.weightKg,
+                                      calendar: Calendar(identifier: .gregorian))
         guard let origin = byDay.keys.min() else { return [] }
         return byDay.keys.sorted().map { day in
-            let all = byDay[day]!
-            return WeighIn(day: day.timeIntervalSince(origin) / 86_400,
-                           kg: all.reduce(0, +) / Double(all.count))
+            WeighIn(day: day.timeIntervalSince(origin) / 86_400, kg: byDay[day]!)
         }
     }
 

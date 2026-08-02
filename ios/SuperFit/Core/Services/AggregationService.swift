@@ -76,11 +76,27 @@ final class AggregationService {
 
     // MARK: - Weight trend
 
+    /// Smoothed over one value per day — the lowest — rather than over every
+    /// reading. See `DailyWeight`.
+    ///
+    /// Feeding raw readings in was its own bug, separate from the choice of
+    /// rule. Two weigh-ins on one day entered the EWMA as two successive points,
+    /// and `TrendFill`'s time-aware decay floors the gap at one day, so a second
+    /// weigh-in aged the trend a full day *and* dragged it toward the heavier
+    /// number. Stepping on the scale twice moved the trend; the body hadn't.
+    ///
+    /// Every row of a day is then given that day's trend, so `basisWeightKg`
+    /// answers the same thing whichever of the day's rows a caller reaches for.
     func fillWeightTrend() {
-        let metrics = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
-            .sorted { $0.date < $1.date }
-        let smoothed = TrendFill.ewma(metrics.map(\.weightKg), dates: metrics.map(\.date))
-        for (m, t) in zip(metrics, smoothed) { m.trendWeightKg = t }
+        let metrics = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
+        let byDay = DailyWeight.byDay(metrics, date: \.date,
+                                      weightKg: \.weightKg, calendar: cal)
+        let days = byDay.keys.sorted()
+        let smoothed = TrendFill.ewma(days.compactMap { byDay[$0] }, dates: days)
+
+        var trendByDay: [Date: Double] = [:]
+        for (day, trend) in zip(days, smoothed) { trendByDay[day] = trend }
+        for m in metrics { m.trendWeightKg = trendByDay[cal.startOfDay(for: m.date)] }
     }
 
     // MARK: - Metabolic estimates
