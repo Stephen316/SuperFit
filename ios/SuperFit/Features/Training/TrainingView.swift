@@ -41,20 +41,34 @@ struct TrainingView: View {
     /// Including the untrained ones is the point — "least trained first" is
     /// meaningless if a muscle you never touched simply isn't in the list, and
     /// the gap is what the table exists to show.
-    private var weeklyRows: [(muscle: MuscleGroup, sets: Double)] {
+    /// `sets` is what the row shows; `weighted` is what it sorts by.
+    ///
+    /// They are deliberately different. The count is what a person did — two
+    /// sets are two sets. The weighted figure knows a chin-up is worth more to
+    /// the lats than to the abs, which is the ordering worth seeing, and it
+    /// separates rows that would otherwise tie at the same whole number.
+    private var weeklyRows: [(muscle: MuscleGroup, sets: Int, weighted: Double)] {
         let volume = thisWeekVolume
+        let counts = thisWeekSetCounts
         let term = muscleQuery.trimmingCharacters(in: .whitespaces)
         return MuscleGroup.allCases
-            .map { (muscle: $0, sets: volume[$0] ?? 0) }
+            .map { (muscle: $0, sets: counts[$0] ?? 0, weighted: volume[$0] ?? 0) }
             .filter { term.isEmpty || $0.muscle.displayName.localizedCaseInsensitiveContains(term) }
             .sorted { a, b in
                 // Alphabetical tiebreak so the many zero rows keep a stable,
                 // findable order instead of shuffling on every redraw.
-                if a.sets != b.sets {
-                    return leastTrainedFirst ? a.sets < b.sets : a.sets > b.sets
+                if a.weighted != b.weighted {
+                    return leastTrainedFirst ? a.weighted < b.weighted : a.weighted > b.weighted
                 }
                 return a.muscle.displayName < b.muscle.displayName
             }
+    }
+
+    private var thisWeekSetCounts: [MuscleGroup: Int] {
+        let cal = Calendar(identifier: .iso8601)
+        guard let week = cal.dateInterval(of: .weekOfYear, for: .now) else { return [:] }
+        let muscles = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0.tension) })
+        return VolumeAggregator().weeklySetCounts(records: allRecords, muscles: muscles, week: week)
     }
 
     private var thisWeekVolume: [MuscleGroup: Double] {
@@ -117,9 +131,13 @@ struct TrainingView: View {
                     // Every muscle is individually colourable; the mapping from
                     // weekly volume to a shade is deliberately not wired yet, so
                     // for now the figure shows the anatomy and nothing more.
-                    MuscleMap()
-                        .frame(height: 260)
-                        .padding(.vertical, 6)
+                    // Tall enough that width, not height, is the binding
+                    // constraint — otherwise the pair is letterboxed and the
+                    // hands stop short of the card edges.
+                    MuscleMap(figure: BodyArt.figure(for: profiles.first?.sex ?? .other))
+                        .frame(height: 340)
+                        .padding(.vertical, 4)
+                        .listRowInsets(.init(top: 6, leading: 6, bottom: 6, trailing: 6))
                 }
 
                 weeklyTable
@@ -302,7 +320,7 @@ struct TrainingView: View {
                     Spacer()
                     Text(setsLabel(row.sets))
                         .monospacedDigit()
-                        .foregroundStyle(row.sets == 0 ? .secondary : volumeColor(row.sets))
+                        .foregroundStyle(row.sets == 0 ? .secondary : volumeColor(row.weighted))
                 }
             }
         } header: {
@@ -331,10 +349,21 @@ struct TrainingView: View {
 
     /// One decimal, because these are tension-weighted and rounding 0.4 to "0"
     /// would read as untrained when it isn't.
-    private func setsLabel(_ sets: Double) -> String {
-        sets == 0 ? "—" : String(format: "%.1f sets", sets)
+    private func setsLabel(_ sets: Int) -> String {
+        switch sets {
+        case 0:  return "—"
+        case 1:  return "1 set"
+        default: return "\(sets) sets"
+        }
     }
 
+    /// Bands the weighted total, not the count beside it.
+    ///
+    /// The two answer different questions. The number says how many sets you
+    /// put in — a tally you can check against what you remember doing. The
+    /// colour says how much stimulus the muscle actually took, where three sets
+    /// of bench mean more to the chest than to the front delts that shared
+    /// them. Banding the count instead would paint both the same.
     private func volumeColor(_ sets: Double) -> Color {
         let range = VolumeAggregator.weeklySetTargets
         if sets < range.lowerBound { return .secondary }

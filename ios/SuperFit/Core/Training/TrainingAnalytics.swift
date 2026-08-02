@@ -29,6 +29,33 @@ struct VolumeAggregator: Sendable {
 
     static let weeklySetTargets: ClosedRange<Double> = 10...20
 
+    /// Tension at or above which a set counts as a whole set *for display*.
+    ///
+    /// The weighted figure is the honest one and everything downstream keeps
+    /// using it. But "0.6 sets" is not a thing anyone does in a gym: you either
+    /// worked a muscle in that set or you didn't, and at a 3 you did. Below it
+    /// the muscle was along for the ride.
+    static let fullSetTension = 3
+
+    /// Whole sets per muscle, for display.
+    ///
+    /// A count of qualifying sets, deliberately not the weighted total rounded.
+    /// Two sets at a 3 are two sets — rounding their 1.2 weighted total would
+    /// report one, and would keep reporting one however many the user did until
+    /// the fractions happened to cross a boundary.
+    func weeklySetCounts(records: [LiftRecord],
+                         muscles: [UUID: [MuscleGroup: Int]],
+                         week: DateInterval) -> [MuscleGroup: Int] {
+        var out: [MuscleGroup: Int] = [:]
+        for r in records where !r.isWarmup && r.date >= week.start && r.date < week.end {
+            guard let tension = muscles[r.exerciseID] else { continue }
+            for (muscle, score) in tension where score >= Self.fullSetTension {
+                out[muscle, default: 0] += 1
+            }
+        }
+        return out
+    }
+
     /// Sets per muscle group within `week`, tension-weighted.
     func weeklySets(records: [LiftRecord],
                     muscles: [UUID: [MuscleGroup: Int]],

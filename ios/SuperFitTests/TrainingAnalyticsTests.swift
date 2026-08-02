@@ -6,8 +6,8 @@ private let benchID = UUID()
 private let squatID = UUID()
 
 private let muscles: [UUID: [MuscleGroup: Int]] = [
-    benchID: [.chest: 5, .triceps: 3, .sideDelts: 2],
-    squatID: [.quads: 5, .glutes: 4, .abs: 2],
+    benchID: [.chest: 5, .tricepsLateral: 3, .sideDelts: 2],
+    squatID: [.vastusLateralis: 5, .gluteusMaximus: 4, .upperAbs: 2],
 ]
 
 private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
@@ -30,12 +30,12 @@ private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
         let v = VolumeAggregator().weeklySets(records: records, muscles: muscles, week: week)
         // 3 working bench sets: chest 3×5/5, triceps 3×3/5, shoulders 3×2/5
         #expect(v[.chest] == 3)
-        #expect(abs(v[.triceps]! - 1.8) < 0.001)
+        #expect(abs(v[.tricepsLateral]! - 1.8) < 0.001)
         #expect(abs(v[.sideDelts]! - 1.2) < 0.001)
         // 3 working squat sets (warmups ignored): quads 3, glutes 2.4, core 1.2
-        #expect(v[.quads] == 3)
-        #expect(abs(v[.glutes]! - 2.4) < 0.001)
-        #expect(abs(v[.abs]! - 1.2) < 0.001)
+        #expect(v[.vastusLateralis] == 3)
+        #expect(abs(v[.gluteusMaximus]! - 2.4) < 0.001)
+        #expect(abs(v[.upperAbs]! - 1.2) < 0.001)
         #expect(v[.lats] == nil)
     }
 
@@ -98,5 +98,58 @@ private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
         ]
         let p = ProgressionAnalyzer().progressions(records: records, window: window)
         #expect(abs(p[0].change) < 0.001)            // unchanged, warmup ignored
+    }
+}
+
+/// The displayed set count is a count, never the weighted total rounded.
+struct DisplayedSetCountTests {
+
+    private let agg = VolumeAggregator()
+    private let week = DateInterval(start: Date(timeIntervalSince1970: 1_700_000_000),
+                                    duration: 7 * 86_400)
+    private let lift = UUID()
+
+    private func records(_ n: Int) -> [LiftRecord] {
+        (0..<n).map { i in
+            LiftRecord(date: week.start.addingTimeInterval(Double(i) * 3600),
+                       exerciseID: lift, weightKg: 60, reps: 8, isWarmup: false)
+        }
+    }
+
+    /// The case that motivated this: two sets that each contribute a fraction
+    /// are two sets, not the 1.2 their weighted total rounds to.
+    @Test func twoPartialSetsCountAsTwo() {
+        let muscles = [lift: [MuscleGroup.chest: 3]]
+        let counts = agg.weeklySetCounts(records: records(2), muscles: muscles, week: week)
+        let weighted = agg.weeklySets(records: records(2), muscles: muscles, week: week)
+        #expect(counts[.chest] == 2)
+        #expect(abs((weighted[.chest] ?? 0) - 1.2) < 0.001, "backend stays fractional")
+    }
+
+    @Test func tensionBelowThreeIsNotACountedSet() {
+        let muscles = [lift: [MuscleGroup.chest: 5, MuscleGroup.upperAbs: 2]]
+        let counts = agg.weeklySetCounts(records: records(4), muscles: muscles, week: week)
+        #expect(counts[.chest] == 4)
+        #expect(counts[.upperAbs] == nil, "incidental involvement is not a set")
+        // It still carries weight in the honest figure.
+        let weighted = agg.weeklySets(records: records(4), muscles: muscles, week: week)
+        #expect((weighted[.upperAbs] ?? 0) > 0)
+    }
+
+    @Test func exactlyThreeCounts() {
+        let counts = agg.weeklySetCounts(records: records(1),
+                                         muscles: [lift: [MuscleGroup.lats: 3]], week: week)
+        #expect(counts[.lats] == 1)
+    }
+
+    /// Sorting has to use the weighted value or rows that show the same number
+    /// would order arbitrarily.
+    @Test func weightedValueSeparatesRowsShowingTheSameCount() {
+        let muscles = [lift: [MuscleGroup.chest: 5, MuscleGroup.frontDelts: 3]]
+        let counts = agg.weeklySetCounts(records: records(3), muscles: muscles, week: week)
+        let weighted = agg.weeklySets(records: records(3), muscles: muscles, week: week)
+        #expect(counts[.chest] == counts[.frontDelts], "both show 3 sets")
+        #expect((weighted[.chest] ?? 0) > (weighted[.frontDelts] ?? 0),
+                "but chest sorts above front delts")
     }
 }

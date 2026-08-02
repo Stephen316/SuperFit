@@ -28,7 +28,15 @@ enum SupabaseConfig {
             host.removeFirst(prefix.count)
             break
         }
+        // Host only — anything after the first slash is discarded.
+        //
+        // The dashboard shows several URLs and the Data API one carries a
+        // `/rest/v1/` suffix. Keeping it would leave the SDK building
+        // `/rest/v1/auth/v1/token`, which fails as a 404 that looks like a
+        // server problem rather than a typo. Measured, not guessed: that is
+        // exactly what was pasted the first time.
         host = host.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if let slash = host.firstIndex(of: "/") { host = String(host[host.startIndex..<slash]) }
         guard !host.isEmpty, host.contains("."), !host.contains(" ") else { return nil }
         return URL(string: "https://\(host)")
     }

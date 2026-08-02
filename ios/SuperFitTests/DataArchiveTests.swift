@@ -32,7 +32,7 @@ struct DataArchiveTests {
         context.insert(log)
 
         let exercise = Exercise(name: "My Custom Press", category: .barbell,
-                                tension: [.chest: 5, .triceps: 3], isCustom: true)
+                                tension: [.chest: 5, .tricepsLateral: 3], isCustom: true)
         context.insert(exercise)
 
         let session = TrainingSession(startedAt: Date(timeIntervalSince1970: 1_700_100_000),

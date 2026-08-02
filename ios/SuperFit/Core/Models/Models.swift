@@ -19,36 +19,93 @@ enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom, s
 /// versus lower lats, are real distinctions that almost nobody programmes around,
 /// and every extra case is another judgement call on all 130 catalogued lifts.
 enum MuscleGroup: String, Codable, CaseIterable, Sendable {
-    case upperChest, chest
+    case upperChest, chest, serratus
     case frontDelts, sideDelts, rearDelts
-    case lats, upperBack, traps, lowerBack
-    case biceps, triceps, forearms
-    case abs, obliques
-    case quads, hamstrings, glutes, adductors, abductors
-    case calves
+    case upperTraps, middleTraps, lowerTraps, rhomboids, lats, erectorSpinae
+    case biceps, tricepsLong, tricepsLateral, tricepsMedial
+    case brachioradialis, wristFlexors, wristExtensors
+    case upperAbs, lowerAbs, obliques
+    case rectusFemoris, vastusLateralis, vastusMedialis
+    case bicepsFemoris, semitendinosus
+    case gluteusMaximus, gluteusMedius
+    case adductorLongus, adductorMagnus, pectineus, sartorius
+    case gastrocnemius, soleus, tibialisAnterior, peroneals
 
     var displayName: String {
         switch self {
-        case .upperChest: return "Upper chest"
-        case .frontDelts: return "Front delts"
-        case .sideDelts:  return "Side delts"
-        case .rearDelts:  return "Rear delts"
-        case .upperBack:  return "Upper back"
-        case .lowerBack:  return "Lower back"
-        default:          return rawValue.capitalized
+        case .upperChest:      return "Upper chest"
+        case .chest:           return "Chest"
+        case .serratus:        return "Serratus"
+        case .frontDelts:      return "Front delts"
+        case .sideDelts:       return "Side delts"
+        case .rearDelts:       return "Rear delts"
+        case .upperTraps:      return "Upper traps"
+        case .middleTraps:     return "Mid traps"
+        case .lowerTraps:      return "Lower traps"
+        case .rhomboids:       return "Rhomboids"
+        case .lats:            return "Lats"
+        case .erectorSpinae:   return "Lower back"
+        case .biceps:          return "Biceps"
+        case .tricepsLong:     return "Triceps long head"
+        case .tricepsLateral:  return "Triceps lateral head"
+        case .tricepsMedial:   return "Triceps medial head"
+        case .brachioradialis: return "Brachioradialis"
+        case .wristFlexors:    return "Wrist flexors"
+        case .wristExtensors:  return "Wrist extensors"
+        case .upperAbs:        return "Upper abs"
+        case .lowerAbs:        return "Lower abs"
+        case .obliques:        return "Obliques"
+        case .rectusFemoris:   return "Rectus femoris"
+        case .vastusLateralis: return "Vastus lateralis"
+        case .vastusMedialis:  return "Vastus medialis"
+        case .bicepsFemoris:   return "Biceps femoris"
+        case .semitendinosus:  return "Medial hamstrings"
+        case .gluteusMaximus:  return "Glute max"
+        case .gluteusMedius:   return "Glute med"
+        case .adductorLongus:  return "Adductors"
+        case .adductorMagnus:  return "Adductor magnus"
+        case .pectineus:       return "Pectineus"
+        case .sartorius:       return "Sartorius"
+        case .gastrocnemius:   return "Gastrocnemius"
+        case .soleus:          return "Soleus"
+        case .tibialisAnterior: return "Tibialis anterior"
+        case .peroneals:       return "Peroneals"
         }
     }
 
-    /// Raw values written before the split, mapped to their closest new case.
+    /// The two gastrocnemius heads are deliberately one case.
     ///
-    /// Only reachable through custom exercises — built-ins are re-synced from the
-    /// catalogue. Each maps to the reading the old label most often meant:
-    /// "shoulders" was usually lateral work, "back" usually lats, "core" usually
-    /// the rectus rather than the obliques.
+    /// Every other head here earns its own entry because some exercise biases
+    /// it: overhead work favours the triceps long head, a bent knee shifts calf
+    /// work to soleus, hip extension loads adductor magnus. Nothing does that
+    /// for the medial against the lateral gastrocnemius — foot rotation is
+    /// often claimed to and the effect does not survive measurement — so
+    /// splitting them would add a row nobody could ever act on.
+
+    /// Raw values written before the heads were split, mapped to the reading the
+    /// old label most often meant.
+    ///
+    /// Only reachable through custom exercises and stored logs — built-ins are
+    /// re-synced from the catalogue on launch. A coarse label becomes the head
+    /// that dominates it rather than being dropped: "quads" was nearly always
+    /// squat or press work, which is vastus-led, and "triceps" without further
+    /// detail is most often pressing, where the lateral head leads.
     static let legacyNames: [String: MuscleGroup] = [
         "shoulders": .sideDelts,
         "back": .lats,
-        "core": .abs,
+        "core": .upperAbs,
+        "abs": .upperAbs,
+        "forearms": .wristFlexors,
+        "traps": .upperTraps,
+        "upperBack": .rhomboids,
+        "lowerBack": .erectorSpinae,
+        "quads": .vastusLateralis,
+        "hamstrings": .bicepsFemoris,
+        "glutes": .gluteusMaximus,
+        "calves": .gastrocnemius,
+        "adductors": .adductorLongus,
+        "abductors": .gluteusMedius,
+        "triceps": .tricepsLateral,
     ]
 
     /// Decodes a stored raw value, falling back to the pre-split names.
@@ -384,7 +441,7 @@ final class Exercise {
     }
 
     var primaryMuscle: MuscleGroup {
-        tension.max { $0.value < $1.value }?.key ?? .abs
+        tension.max { $0.value < $1.value }?.key ?? .upperAbs
     }
 }
 
