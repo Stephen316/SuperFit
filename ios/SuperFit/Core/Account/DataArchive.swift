@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// A portable copy of everything the user actually created.
+/// A portable copy of the logged history the targets are built from.
 ///
 /// CloudKit covers app updates, reinstalls and new devices on the same Apple ID.
 /// It does not cover the cases where it isn't there: `AppSchema` explicitly falls
@@ -9,10 +9,27 @@ import SwiftData
 /// data between two different Apple IDs. This file is the answer to both, and
 /// the only thing the user can hold themselves.
 ///
-/// **Derived records are not exported.** Metabolic estimates, recovery scores
-/// and detected cyclical patterns are all recomputed by `AggregationService`
-/// from the inputs below, so archiving them would only create a way for a
-/// restored file to disagree with the data it came from.
+/// **This is not every model in `AppSchema`, and the gap matters.** A
+/// `.replace` restore erases the whole store before re-inserting, so anything
+/// absent here is gone for good. Read the list below as the definition of what
+/// survives that, not as a summary of the schema.
+///
+/// Two kinds of omission, for opposite reasons:
+///
+/// - **Derived, so rebuilt rather than carried.** Metabolic estimates, recovery
+///   scores and detected cyclical patterns are recomputed by
+///   `AggregationService.runAll()` at the end of a restore. Archiving them would
+///   only create a way for a restored file to disagree with the data it came
+///   from.
+/// - **User data, deliberately not carried (for now).** `WorkoutRecord` — runs,
+///   rides, swims, watch imports — and `SavedMeal`/`SavedMealItem`. A product
+///   decision, not an oversight: what the calorie targets need is
+///   `DailyEnergy`, which *is* archived, so expenditure history survives while
+///   the individual sessions do not. HealthKit-sourced workouts return on the
+///   next sync within its rolling 90-day window; anything tracked in the app or
+///   entered by hand does not, and neither do meal templates. Adding
+///   `WorkoutDTO` and `SavedMealDTO` is the fix whenever that trade stops being
+///   acceptable.
 struct DataArchive: Codable {
     static let currentVersion = 1
 
