@@ -128,13 +128,17 @@ struct TrainingView: View {
                 watchSection
 
                 Section("Muscles worked this week") {
-                    // Every muscle is individually colourable; the mapping from
-                    // weekly volume to a shade is deliberately not wired yet, so
-                    // for now the figure shows the anatomy and nothing more.
                     // Tall enough that width, not height, is the binding
                     // constraint — otherwise the pair is letterboxed and the
                     // hands stop short of the card edges.
-                    MuscleMap(figure: BodyArt.figure(for: profiles.first?.sex ?? .other))
+                    // `rank` decides which muscle gives a shared region its
+                    // colour — the mid and lower traps are one shape here, and
+                    // the busier of the two should win rather than whichever
+                    // happens to be listed first.
+                    MuscleMap(figure: BodyArt.figure(for: profiles.first?.sex ?? .other),
+                              untrained: MuscleVolumeScale.untrained,
+                              rank: { thisWeekVolume[$0] ?? 0 },
+                              colour: { MuscleVolumeScale.colour(forWeightedSets: thisWeekVolume[$0] ?? 0) })
                         .frame(height: 340)
                         .padding(.vertical, 4)
                         .listRowInsets(.init(top: 6, leading: 6, bottom: 6, trailing: 6))

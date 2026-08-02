@@ -153,3 +153,34 @@ struct DisplayedSetCountTests {
                 "but chest sorts above front delts")
     }
 }
+
+/// Band boundaries, pinned because they are a product decision rather than a
+/// derived value — a later change to them should be deliberate.
+struct MuscleVolumeScaleTests {
+
+    @Test func untrainedIsDistinctFromBarelyTrained() {
+        #expect(MuscleVolumeScale.colour(forWeightedSets: 0) == MuscleVolumeScale.untrained)
+        #expect(MuscleVolumeScale.colour(forWeightedSets: 0.2) != MuscleVolumeScale.untrained,
+                "incidental work still counts as touched")
+    }
+
+    @Test func eachBandHoldsItsRange() {
+        let yellow = MuscleVolumeScale.bands[0].colour
+        let green = MuscleVolumeScale.bands[1].colour
+        let blue = MuscleVolumeScale.bands[2].colour
+        for v in [0.5, 1.0, 2.0, 2.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == yellow) }
+        for v in [3.0, 4.0, 4.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == green) }
+        for v in [5.0, 5.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == blue) }
+        for v in [6.0, 12.0, 40.0] {
+            #expect(MuscleVolumeScale.colour(forWeightedSets: v) == MuscleVolumeScale.sixPlus)
+        }
+    }
+
+    /// Boundaries are inclusive at the bottom: 3.0 is "3–4", not the band below.
+    @Test func boundariesBelongToTheHigherBand() {
+        #expect(MuscleVolumeScale.colour(forWeightedSets: 3.0)
+                == MuscleVolumeScale.bands[1].colour)
+        #expect(MuscleVolumeScale.colour(forWeightedSets: 5.0)
+                == MuscleVolumeScale.bands[2].colour)
+    }
+}
