@@ -7,17 +7,28 @@ import SwiftData
 enum MetricSource: String, Codable, Sendable { case manual, healthKit }
 enum MealSlot: String, Codable, CaseIterable, Sendable { case breakfast, lunch, dinner, snack }
 enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom, supplement }
-/// The muscles volume is tracked against.
+/// The muscles volume is tracked against — 37 of them, down to the head.
 ///
-/// Split finer than the obvious thirteen because the coarse version can't answer
-/// the questions the tracking exists for. "Shoulders" hides the single most
-/// common imbalance in a training week — pressing hammers the front delts while
-/// the rear delts get nothing — and one "back" figure can read as well-trained on
-/// pulldowns alone while the rhomboids and mid-traps go untouched.
+/// Split this finely because the coarse version can't answer the questions the
+/// tracking exists for. "Shoulders" hides the single most common imbalance in a
+/// training week — pressing hammers the front delts while the rear delts get
+/// nothing — and one "back" figure can read as well-trained on pulldowns alone
+/// while the rhomboids and mid-traps go untouched.
 ///
-/// Not split further than this on purpose. Gastrocnemius versus soleus, or upper
-/// versus lower lats, are real distinctions that almost nobody programmes around,
-/// and every extra case is another judgement call on all 130 catalogued lifts.
+/// The rule for splitting is whether an exercise can bias one head over its
+/// neighbour. Overhead work favours the triceps long head; a bent knee shifts
+/// calf work from gastrocnemius to soleus; hip extension loads adductor magnus
+/// where adduction loads longus. Each of those is a programming decision someone
+/// can act on, so each earns a case.
+///
+/// **The two gastrocnemius heads are the deliberate exception.** Nothing biases
+/// the medial against the lateral — foot rotation is often claimed to, and the
+/// effect does not survive measurement — so splitting them would add a row
+/// nobody could ever act on. They share `.gastrocnemius`.
+///
+/// The cost of every case is a judgement call on all 130 catalogued lifts, which
+/// is the reason the rule is "can it change what you do" rather than "is it
+/// anatomically distinct".
 enum MuscleGroup: String, Codable, CaseIterable, Sendable {
     case upperChest, chest, serratus
     case frontDelts, sideDelts, rearDelts
@@ -72,15 +83,6 @@ enum MuscleGroup: String, Codable, CaseIterable, Sendable {
         case .peroneals:       return "Peroneals"
         }
     }
-
-    /// The two gastrocnemius heads are deliberately one case.
-    ///
-    /// Every other head here earns its own entry because some exercise biases
-    /// it: overhead work favours the triceps long head, a bent knee shifts calf
-    /// work to soleus, hip extension loads adductor magnus. Nothing does that
-    /// for the medial against the lateral gastrocnemius — foot rotation is
-    /// often claimed to and the effect does not survive measurement — so
-    /// splitting them would add a row nobody could ever act on.
 
     /// Raw values written before the heads were split, mapped to the reading the
     /// old label most often meant.

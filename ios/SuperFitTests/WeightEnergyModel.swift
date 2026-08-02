@@ -1,4 +1,5 @@
 import Foundation
+@testable import SuperFit
 
 /// A clean-room re-derivation of the one calculation that matters most: how a
 /// change in bodyweight becomes a change in the calorie goal.
@@ -6,8 +7,14 @@ import Foundation
 /// Written from the energy balance directly rather than from `MetabolismEngine`,
 /// so that running the two against the same inputs says something. Where they
 /// disagree, one of them is wrong; where they agree, the answer is not an
-/// artefact of a single implementation. Nothing calls this yet — it exists to be
-/// compared against, and to be adopted only if the comparison earns it.
+/// artefact of a single implementation.
+///
+/// **Lives in the test target, and that is the point.** Nothing in the app calls
+/// it — it exists to be compared against by `EngineComparisonTests`, and to be
+/// promoted into the app only if the comparison ever earns it. Shipping it
+/// alongside the real engine put 245 lines of never-executed arithmetic in the
+/// binary and, worse, left two plausible-looking TDEE implementations sitting
+/// side by side in `Core/Metabolism` for the next reader to choose between.
 ///
 /// The physics is one line. Energy in minus energy out equals energy stored:
 ///
