@@ -222,7 +222,7 @@ struct MetabolismEngine: Sendable {
         return measurementStandardError(daily: dailyWeightSeries(window),
                                         intakes: window.compactMap(\.intakeKcal),
                                         windowDays: windowDays,
-                                        avgIntake: imputedAverageIntake(window))
+                                        avgIntake: imputedAverageIntake(window, asOf: asOf))
     }
 
     private func measurementStandardError(daily: [Point], intakes: [Double],
@@ -333,7 +333,7 @@ struct MetabolismEngine: Sendable {
         // Averaged over every day in the window, unlogged days imputed from the
         // intake trend — the weight slope it's differenced against covers all of
         // them, so the intake side has to as well.
-        let avgIntake = imputedAverageIntake(window)
+        let avgIntake = imputedAverageIntake(window, asOf: asOf)
 
         // Clamped before it becomes energy: see maxPlausibleWeeklyChangeFraction.
         let referenceWeight = smoothed.last?.value ?? daily.last?.value ?? 75
@@ -431,21 +431,40 @@ struct MetabolismEngine: Sendable {
     ///
     /// Theil–Sen again, for the same reason as the weight slope: a couple of
     /// outlier days (a blowout, a fast) shouldn't tilt the fitted line.
-    private func imputedAverageIntake(_ window: [DailyRecord]) -> Double {
+    ///
+    /// **The span is calendar days, not days that happen to hold a record.** It
+    /// used to average over every day carrying *any* record — which included
+    /// weigh-in days — so the number of gaps the trend was projected across was
+    /// set partly by how often the user stepped on the scale. Measured on this
+    /// engine with intake declining over a month and food logged for the first
+    /// fortnight: weighing daily gave 2590 kcal, weighing weekly 2644, a 61 kcal
+    /// difference in TDEE from identical eating. Weight logging was deciding the
+    /// food average.
+    ///
+    /// It runs from the first record to the end of the window rather than across
+    /// the nominal `windowDays`, so a user two weeks into using the app does not
+    /// have a fortnight of intake invented for them from before they arrived.
+    /// The denominator still varies with how much history exists — but on when
+    /// they started, which is real, rather than on a weighing habit, which is
+    /// not.
+    private func imputedAverageIntake(_ window: [DailyRecord], asOf: Date) -> Double {
         let cal = Calendar(identifier: .gregorian)
         var byDay: [Date: Double] = [:]
-        var allDays: Set<Date> = []
         for r in window {
-            let day = cal.startOfDay(for: r.date)
-            allDays.insert(day)
-            if let kcal = r.intakeKcal { byDay[day] = kcal }
+            if let kcal = r.intakeKcal { byDay[cal.startOfDay(for: r.date)] = kcal }
         }
         let observed = Array(byDay.values)
         guard !observed.isEmpty else { return 0 }
 
         let flatMean = observed.reduce(0, +) / Double(observed.count)
         // Under three logged days a trend is noise; fall back to the flat mean.
-        guard byDay.count >= 3, let origin = allDays.min() else { return flatMean }
+        guard byDay.count >= 3,
+              let origin = window.map({ cal.startOfDay(for: $0.date) }).min()
+        else { return flatMean }
+
+        let lastDay = cal.startOfDay(for: asOf)
+        let spanDays = Int((lastDay.timeIntervalSince(origin) / 86_400).rounded()) + 1
+        guard spanDays >= byDay.count else { return flatMean }
 
         let points = byDay
             .map { Point(day: $0.key.timeIntervalSince(origin) / 86_400, value: $0.value) }
@@ -480,15 +499,15 @@ struct MetabolismEngine: Sendable {
         let high = observed.max() ?? flatMean
 
         var total = 0.0
-        for day in allDays {
+        for offset in 0..<spanDays {
+            guard let day = cal.date(byAdding: .day, value: offset, to: origin) else { continue }
             if let logged = byDay[day] {
                 total += logged
             } else {
-                let x = day.timeIntervalSince(origin) / 86_400
-                total += (intercept + slope * x).clamped(to: low...high)
+                total += (intercept + slope * Double(offset)).clamped(to: low...high)
             }
         }
-        return total / Double(allDays.count)
+        return total / Double(spanDays)
     }
 
     /// Raw daily weights — the lowest reading of each day. See `DailyWeight`.
