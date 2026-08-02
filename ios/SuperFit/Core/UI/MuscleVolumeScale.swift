@@ -26,22 +26,31 @@ enum MuscleVolumeScale {
 
     static let sixPlus = Color(red: 0.63, green: 0.44, blue: 0.90)   // 6+  purple
 
-    /// Nothing logged. Distinct from "trained a little", which is the whole
-    /// point of the scale — an untouched muscle has to be findable at a glance.
+    /// Below this the muscle reads as untrained.
+    ///
+    /// Not zero. A weighted total this low is a muscle that was carried through
+    /// somebody else's exercise — a squat's share of lower back, a press's
+    /// share of triceps — and colouring that the same as a muscle you actually
+    /// trained makes the diagram claim work that never happened.
+    ///
+    /// Just under a full set rather than a full one, so that a single hard set
+    /// registers: one set at tension 4 is 0.8 weighted, and a muscle you gave a
+    /// real set to should not read as untouched.
+    static let minimumTrained = 0.8
+
+    /// Nothing logged, or not enough to count. An untouched muscle has to be
+    /// findable at a glance, which is the whole point of the scale.
     static let untrained = Theme.homeWell
 
     static func colour(forWeightedSets sets: Double) -> Color {
-        // Anything at all counts as trained. A muscle carried incidentally
-        // through a compound still isn't untouched, and colouring it grey would
-        // send someone to train what they already worked.
-        guard sets > 0 else { return untrained }
+        guard sets > minimumTrained else { return untrained }
         for band in bands where sets < band.upTo { return band.colour }
         return sixPlus
     }
 
     /// Legend order, for anywhere that needs to explain the scale.
     static let legend: [(label: String, colour: Color)] = [
-        ("Untrained", untrained),
+        ("Barely worked", untrained),
         ("1–2 sets", bands[0].colour),
         ("3–4", bands[1].colour),
         ("5", bands[2].colour),

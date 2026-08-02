@@ -119,33 +119,37 @@ struct DisplayedSetCountTests {
     /// The case that motivated this: two sets that each contribute a fraction
     /// are two sets, not the 1.2 their weighted total rounds to.
     @Test func twoPartialSetsCountAsTwo() {
-        let muscles = [lift: [MuscleGroup.chest: 3]]
+        let muscles = [lift: [MuscleGroup.chest: 4]]
         let counts = agg.weeklySetCounts(records: records(2), muscles: muscles, week: week)
         let weighted = agg.weeklySets(records: records(2), muscles: muscles, week: week)
         #expect(counts[.chest] == 2)
-        #expect(abs((weighted[.chest] ?? 0) - 1.2) < 0.001, "backend stays fractional")
+        #expect(abs((weighted[.chest] ?? 0) - 1.6) < 0.001, "backend stays fractional")
     }
 
-    @Test func tensionBelowThreeIsNotACountedSet() {
-        let muscles = [lift: [MuscleGroup.chest: 5, MuscleGroup.upperAbs: 2]]
+    @Test func tensionBelowFourIsNotACountedSet() {
+        let muscles = [lift: [MuscleGroup.chest: 5, MuscleGroup.upperAbs: 3]]
         let counts = agg.weeklySetCounts(records: records(4), muscles: muscles, week: week)
         #expect(counts[.chest] == 4)
-        #expect(counts[.upperAbs] == nil, "incidental involvement is not a set")
+        #expect(counts[.upperAbs] == nil,
+                "a 3 is real involvement but not why you picked the exercise")
         // It still carries weight in the honest figure.
         let weighted = agg.weeklySets(records: records(4), muscles: muscles, week: week)
         #expect((weighted[.upperAbs] ?? 0) > 0)
     }
 
-    @Test func exactlyThreeCounts() {
-        let counts = agg.weeklySetCounts(records: records(1),
-                                         muscles: [lift: [MuscleGroup.lats: 3]], week: week)
-        #expect(counts[.lats] == 1)
+    @Test func exactlyFourCountsAndThreeDoesNot() {
+        #expect(agg.weeklySetCounts(records: records(1),
+                                    muscles: [lift: [MuscleGroup.lats: 4]],
+                                    week: week)[.lats] == 1)
+        #expect(agg.weeklySetCounts(records: records(1),
+                                    muscles: [lift: [MuscleGroup.lats: 3]],
+                                    week: week)[.lats] == nil)
     }
 
     /// Sorting has to use the weighted value or rows that show the same number
     /// would order arbitrarily.
     @Test func weightedValueSeparatesRowsShowingTheSameCount() {
-        let muscles = [lift: [MuscleGroup.chest: 5, MuscleGroup.frontDelts: 3]]
+        let muscles = [lift: [MuscleGroup.chest: 5, MuscleGroup.frontDelts: 4]]
         let counts = agg.weeklySetCounts(records: records(3), muscles: muscles, week: week)
         let weighted = agg.weeklySets(records: records(3), muscles: muscles, week: week)
         #expect(counts[.chest] == counts[.frontDelts], "both show 3 sets")
@@ -158,17 +162,22 @@ struct DisplayedSetCountTests {
 /// derived value — a later change to them should be deliberate.
 struct MuscleVolumeScaleTests {
 
-    @Test func untrainedIsDistinctFromBarelyTrained() {
-        #expect(MuscleVolumeScale.colour(forWeightedSets: 0) == MuscleVolumeScale.untrained)
-        #expect(MuscleVolumeScale.colour(forWeightedSets: 0.2) != MuscleVolumeScale.untrained,
-                "incidental work still counts as touched")
+    /// Under a full set's worth reads as untrained: that is a muscle carried
+    /// through someone else's exercise, not one that was worked.
+    @Test func belowTheFloorReadsAsUntrained() {
+        for v in [0.0, 0.2, 0.6, 0.8] {
+            #expect(MuscleVolumeScale.colour(forWeightedSets: v) == MuscleVolumeScale.untrained,
+                    "\(v) weighted sets should not colour as trained")
+        }
+        // One hard set — tension 4 — is 0.8 weighted and must register.
+        #expect(MuscleVolumeScale.colour(forWeightedSets: 0.81) != MuscleVolumeScale.untrained)
     }
 
     @Test func eachBandHoldsItsRange() {
         let yellow = MuscleVolumeScale.bands[0].colour
         let green = MuscleVolumeScale.bands[1].colour
         let blue = MuscleVolumeScale.bands[2].colour
-        for v in [0.5, 1.0, 2.0, 2.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == yellow) }
+        for v in [0.81, 1.5, 2.0, 2.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == yellow) }
         for v in [3.0, 4.0, 4.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == green) }
         for v in [5.0, 5.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == blue) }
         for v in [6.0, 12.0, 40.0] {

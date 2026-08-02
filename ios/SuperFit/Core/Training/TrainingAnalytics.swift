@@ -32,10 +32,14 @@ struct VolumeAggregator: Sendable {
     /// Tension at or above which a set counts as a whole set *for display*.
     ///
     /// The weighted figure is the honest one and everything downstream keeps
-    /// using it. But "0.6 sets" is not a thing anyone does in a gym: you either
-    /// worked a muscle in that set or you didn't, and at a 3 you did. Below it
-    /// the muscle was along for the ride.
-    static let fullSetTension = 3
+    /// using it. But "0.8 sets" is not a thing anyone does in a gym: you either
+    /// worked a muscle in that set or you didn't.
+    ///
+    /// Four, not three. A 3 is real involvement but not the reason you picked
+    /// the exercise — the triceps in a bench press, the lower back in a squat.
+    /// Counting those as whole sets inflates every number on the screen and
+    /// makes it impossible to see which muscles were actually the target.
+    static let fullSetTension = 4
 
     /// Whole sets per muscle, for display.
     ///
