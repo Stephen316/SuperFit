@@ -162,11 +162,10 @@ struct WeightView: View {
                             Spacer()
                             Text(units.weightString(m.weightKg)).monospacedDigit()
                         }
-                        // Tappable as well as swipeable: a swipe is invisible
-                        // until you try it, and this is the only way to fix a
-                        // number that is quietly skewing every calorie target.
-                        .contentShape(Rectangle())
-                        .onTapGesture { options = m }
+                        // Swipe only. A tap used to open the same menu, which
+                        // made the row feel like a button that led somewhere and
+                        // put a destructive action one stray touch away while
+                        // scrolling. The footer carries the affordance instead.
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             // One button rather than separate edit and delete
                             // actions: a full-swipe delete is too easy to trigger
@@ -179,7 +178,7 @@ struct WeightView: View {
                     }
                 } footer: {
                     if !metrics.isEmpty {
-                        Text("Swipe or tap a weigh-in to correct or remove it. A wrong "
+                        Text("Swipe a weigh-in left to correct or remove it. A wrong "
                              + "number pulls the trend, and your calorie targets are "
                              + "built on that trend.")
                     }

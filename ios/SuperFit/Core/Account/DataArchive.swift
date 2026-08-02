@@ -69,6 +69,15 @@ struct DataArchive: Codable {
     struct ExerciseDTO: Codable {
         var id: UUID, name: String, category: String
         var tension: [String], bodyweightFraction: Double, isCustom: Bool
+        /// Optional so archives written before this field decode rather than
+        /// throwing. Swift's synthesised `Decodable` ignores property defaults
+        /// for missing keys but does treat an absent optional as nil, so this is
+        /// what keeps an older backup readable without bumping `version`.
+        ///
+        /// Dropped entirely until now. Built-ins recover on the next seed, so it
+        /// went unnoticed; a custom lift's aliases were gone for good, and they
+        /// are the only way that lift answers to what the user actually types.
+        var aliases: [String]?
     }
 
     struct SessionDTO: Codable {
@@ -162,7 +171,8 @@ enum DataArchiveService {
         }
         archive.exercises = fetch(context).map { (e: Exercise) in
             .init(id: e.id, name: e.name, category: e.categoryRaw, tension: e.tensionRaw,
-                  bodyweightFraction: e.bodyweightFraction, isCustom: e.isCustom)
+                  bodyweightFraction: e.bodyweightFraction, isCustom: e.isCustom,
+                  aliases: e.aliases)
         }
         archive.sessions = fetch(context).map { (s: TrainingSession) in
             .init(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt,
@@ -318,6 +328,7 @@ enum DataArchiveService {
                                isCustom: e.isCustom)
             row.id = e.id
             row.tensionRaw = e.tension
+            row.aliases = e.aliases ?? []
             context.insert(row)
             result.added += 1
         }

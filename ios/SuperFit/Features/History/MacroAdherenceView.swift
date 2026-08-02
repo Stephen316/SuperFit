@@ -252,7 +252,7 @@ struct MacroAdherenceView: View {
     }
 
     private var explanation: String {
-        let usingLean = metrics.last?.leanMassKg != nil
+        let usingLean = BodyComposition.recentLeanMassKg(metrics) != nil
         let basis = usingLean ? "lean mass" : "bodyweight"
         switch macro {
         case .protein:

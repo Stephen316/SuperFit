@@ -28,6 +28,8 @@ struct DashboardView: View {
     @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
     @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
     @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
+    @Query private var supplements: [Supplement]
+    @Query private var supplementEntries: [SupplementEntry]
 
     /// The day on screen. Every card reads from this rather than "now", so the
     /// arrows under the title move the whole page together.
@@ -58,7 +60,7 @@ struct DashboardView: View {
         let target = MetabolismEngine().calorieTarget(tdee: tdee, goal: profile.goal, bodyweightKg: w)
         let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
         return MacroCalculator().targets(kcal: target, goal: profile.goal, bodyweightKg: w,
-                                         leanMassKg: metrics.first?.leanMassKg,
+                                         leanMassKg: BodyComposition.recentLeanMassKg(metrics),
                                          proteinPerKg: override)
     }
 
@@ -69,6 +71,24 @@ struct DashboardView: View {
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
     private var todayLogs: [NutritionLog] { nutrition.filter { onDay($0.date) } }
+
+    /// Food plus supplements, which is what the day actually was.
+    ///
+    /// This card used to sum `todayLogs` alone while the diary, the macro pages,
+    /// the trends and the metabolism engine all folded supplements in. Three
+    /// shakes is ~340 kcal, so the home screen and the Diet tab quietly disagreed
+    /// about the same day — and the home screen was the one that was wrong.
+    private var dayTotals: NutrientProfile {
+        var t = todayLogs.reduce(into: NutrientProfile()) {
+            $0.kcal += $1.kcal; $0.proteinG += $1.proteinG
+            $0.carbsG += $1.carbsG; $0.fatG += $1.fatG; $0.fibreG += $1.fibreG
+        }
+        let s = SupplementIntake.total(on: day, entries: supplementEntries,
+                                       supplements: supplements)
+        t.kcal += s.kcal; t.proteinG += s.proteinG
+        t.carbsG += s.carbsG; t.fatG += s.fatG; t.fibreG += s.fibreG
+        return t
+    }
     private var todayRecovery: RecoveryScoreRecord? { recoveries.first { onDay($0.date) } }
     private var todayEnergy: DailyEnergy? { energy.first { onDay($0.date) } }
     private var lastSleep: SleepData? { sleep.first { onDay($0.date) } }
@@ -290,7 +310,7 @@ struct DashboardView: View {
             VStack(spacing: 8) {
                 cardLabel("Calories consumed")
                 VStack(spacing: 4) {
-                    Text("\(Int(todayLogs.reduce(0) { $0 + $1.kcal }))")
+                    Text("\(Int(dayTotals.kcal))")
                         .font(Theme.text(28, .bold))
                         .foregroundStyle(Theme.textPrimary)
                     Text(macros.map { "of \(Int($0.kcal)) kcal" } ?? "set a goal to see a target")
@@ -324,15 +344,13 @@ struct DashboardView: View {
                     .font(Theme.text(14, .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                let totals = dayTotals
                 HStack(spacing: 0) {
-                    macroButton(.protein, todayLogs.reduce(0) { $0 + $1.proteinG },
-                                target: macros?.proteinG)
+                    macroButton(.protein, totals.proteinG, target: macros?.proteinG)
                     Rectangle().fill(Theme.divider).frame(width: 1, height: 32)
-                    macroButton(.carbs, todayLogs.reduce(0) { $0 + $1.carbsG },
-                                target: macros?.carbG)
+                    macroButton(.carbs, totals.carbsG, target: macros?.carbG)
                     Rectangle().fill(Theme.divider).frame(width: 1, height: 32)
-                    macroButton(.fats, todayLogs.reduce(0) { $0 + $1.fatG },
-                                target: macros?.fatG)
+                    macroButton(.fats, totals.fatG, target: macros?.fatG)
                 }
             }
         }

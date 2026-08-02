@@ -57,7 +57,7 @@ struct NutritionView: View {
         let kcal = MetabolismEngine().calorieTarget(tdee: tdee, goal: profile.goal, bodyweightKg: w)
         let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
         return MacroCalculator().targets(kcal: kcal, goal: profile.goal, bodyweightKg: w,
-                                         leanMassKg: metrics.first?.leanMassKg,
+                                         leanMassKg: BodyComposition.recentLeanMassKg(metrics),
                                          proteinPerKg: override)
     }
 
@@ -260,7 +260,7 @@ struct NutritionView: View {
     /// number than bodyweight — two people at 82 kg with 15% and 30% body fat
     /// need different amounts — but it's silently different, so it's named.
     private func proteinBasisExplanation(_ goal: FitnessGoal) -> String {
-        let lean = metrics.first?.leanMassKg
+        let lean = BodyComposition.recentLeanMassKg(metrics)
         let usingLean = lean != nil
         let gPerKg = profile?.proteinPerKgOverride ?? 0 > 0
             ? profile!.proteinPerKgOverride

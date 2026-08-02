@@ -53,10 +53,10 @@ struct DiaryView: View {
             prior: .init(sex: profile.sex, ageYears: profile.ageYears,
                          heightCm: profile.heightCm, activity: profile.activity,
                          avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
-                         leanMassKg: metrics.first?.leanMassKg))
+                         leanMassKg: BodyComposition.recentLeanMassKg(metrics)))
         let kcal = MetabolismEngine().calorieTarget(tdee: est, goal: profile.goal, bodyweightKg: w)
         return MacroCalculator().targets(kcal: kcal, goal: profile.goal, bodyweightKg: w,
-                                         leanMassKg: metrics.first?.leanMassKg)
+                                         leanMassKg: BodyComposition.recentLeanMassKg(metrics))
     }
 
     var body: some View {

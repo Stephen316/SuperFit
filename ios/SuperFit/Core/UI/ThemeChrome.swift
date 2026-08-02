@@ -95,13 +95,23 @@ private struct ThemedChrome: ViewModifier {
             .background(Theme.background)
             .toolbarBackground(Theme.tabBar, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            // Toolbar buttons are the last glass left: iOS 26 wraps a bare
-            // `Button("Done")` in a glass capsule unless told otherwise, and
-            // there are 37 of them across 18 screens. Setting the subtree's
-            // default costs nothing here — every explicit style in the feature
-            // layer is already `.plain`, so this only makes the implicit case
-            // agree with the explicit one.
-            .buttonStyle(.plain)
+            // No `.buttonStyle` here, deliberately.
+            //
+            // This used to set `.plain` for the whole subtree to decline iOS 26's
+            // glass capsule on bare buttons. It never did that job — as
+            // `themedToolbarButton` below notes, toolbar content is hoisted into
+            // its own hierarchy and a screen-level button style never reaches it
+            // — and it silently broke every `swipeActions` in the app.
+            //
+            // A button style in scope stops SwiftUI decomposing a swipe action's
+            // `Button` into a contextual action, so the tray comes back empty and
+            // the row refuses to move: swipe-to-edit on a weigh-in, swipe-to-
+            // delete on a food, a supplement, a meal ingredient. All silent, all
+            // measured on device. Re-asserting a style inside `swipeActions`
+            // does not rescue it; the style has to be absent from the List's
+            // environment altogether.
+            //
+            // Buttons that need a flat label now say so themselves.
             .tint(Theme.gold)
     }
 }

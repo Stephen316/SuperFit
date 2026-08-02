@@ -91,7 +91,7 @@ struct HistoryView: View {
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
             avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
-            leanMassKg: metrics.last?.leanMassKg)
+            leanMassKg: BodyComposition.recentLeanMassKg(metrics))
         return HistorySeries.tdee(records: dailyRecords, prior: prior,
                                   from: start, to: .now)
     }
@@ -255,7 +255,7 @@ struct HistoryView: View {
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
-            leanMassKg: metrics.last?.leanMassKg)
+            leanMassKg: BodyComposition.recentLeanMassKg(metrics))
         return HistorySeries.rateOfChange(records: dailyRecords, prior: prior,
                                           from: start, to: .now)
     }
