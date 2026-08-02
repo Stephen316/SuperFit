@@ -29,8 +29,16 @@ struct CyclicalPattern: Sendable {
 
     /// How much this day is expected to sit above or below the person's own
     /// average purely because of where it falls in the cycle.
+    ///
+    /// Guards its own invariant rather than trusting the caller. `day % 0` is a
+    /// division-by-zero trap and a profile shorter than the period is an
+    /// out-of-bounds read, and both are reachable from a persisted
+    /// `CyclicalPatternRecord` — a partially-written row, or a schema that
+    /// changed under one. `AggregationService` checks the same two things before
+    /// building a pattern; this makes the type safe on its own terms so a second
+    /// caller cannot reintroduce the crash.
     func offset(forDay day: Int) -> Double {
-        guard !profile.isEmpty else { return 0 }
+        guard periodDays > 0, profile.count == periodDays else { return 0 }
         let phase = ((day % periodDays) + periodDays) % periodDays
         return profile[phase] * confidence
     }

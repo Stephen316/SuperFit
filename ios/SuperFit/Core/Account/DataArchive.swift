@@ -404,7 +404,10 @@ enum DataArchiveService {
 
         let existingEntryIDs = Set(fetch(context).map { (e: SupplementEntry) in e.id })
         for e in archive.supplementEntries where !existingEntryIDs.contains(e.id) {
-            guard let supplementID = e.supplementID else { continue }
+            // Counted, not silently dropped: an entry pointing at no supplement
+            // is unusable, but the restore summary should still account for it
+            // rather than reporting a total that doesn't add up.
+            guard let supplementID = e.supplementID else { result.skipped += 1; continue }
             let row = SupplementEntry(supplementID: supplementID,
                                       kind: SupplementEntryKind(rawValue: e.kind) ?? .once,
                                       servings: e.servings)

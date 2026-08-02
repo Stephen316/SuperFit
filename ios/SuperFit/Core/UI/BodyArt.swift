@@ -61,8 +61,19 @@ enum BodyArt {
 
     /// Male and female differ here — 1.87 against 2.15 — so a single constant
     /// would letterbox one of them.
-    static func aspect(_ figure: Figure) -> CGFloat {
-        figure == .male ? maleFrontAspect : femaleFrontAspect
+    ///
+    /// Front and back differ too, and by less: 1.8725 against 1.8799 for the
+    /// male figure. The back constants were generated from each figure's own
+    /// silhouette and then never read, so the back was drawn at the front's
+    /// ratio and squashed by 0.4%. Small, but it is measured data that was being
+    /// discarded in favour of a near-enough number.
+    static func aspect(_ figure: Figure, back: Bool = false) -> CGFloat {
+        switch (figure, back) {
+        case (.male, false):   return maleFrontAspect
+        case (.male, true):    return maleBackAspect
+        case (.female, false): return femaleFrontAspect
+        case (.female, true):  return femaleBackAspect
+        }
     }
 
     static let maleFront: [Region] = [

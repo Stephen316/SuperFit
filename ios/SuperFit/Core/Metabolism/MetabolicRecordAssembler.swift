@@ -51,7 +51,12 @@ enum MetabolicRecordAssembler {
     static func avgActiveEnergy(energy: [DailyEnergy], days: Int = 30,
                                 asOf: Date = .now) -> Double? {
         let start = asOf.addingTimeInterval(-Double(days) * 86_400)
-        let window = energy.filter { $0.date >= start && $0.activeEnergyKcal > 0 }
+        // Bounded at both ends. Only the lower bound was applied, so `asOf` chose
+        // where the window began but not where it stopped — a caller asking for
+        // an estimate as of last month still averaged in every day since.
+        let window = energy.filter {
+            $0.date >= start && $0.date <= asOf && $0.activeEnergyKcal > 0
+        }
         guard window.count >= 7 else { return nil }
         return window.reduce(0) { $0 + $1.activeEnergyKcal } / Double(window.count)
     }

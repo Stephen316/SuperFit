@@ -453,8 +453,15 @@ final class Exercise {
         }
     }
 
-    var primaryMuscle: MuscleGroup {
-        tension.max { $0.value < $1.value }?.key ?? .upperAbs
+    /// The muscle this lift is for, or nil when it has no tension map.
+    ///
+    /// Optional rather than defaulting. It used to fall back to `.upperAbs`,
+    /// which is not a safe default but a wrong answer: a lift with no scores
+    /// would report itself as an ab exercise, and nothing downstream could tell
+    /// that apart from one that genuinely is. Nothing calls this today, so the
+    /// wrongness was latent — which is exactly when it is cheapest to fix.
+    var primaryMuscle: MuscleGroup? {
+        tension.max { $0.value < $1.value }?.key
     }
 }
 

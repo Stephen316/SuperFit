@@ -42,7 +42,13 @@ struct AccountView: View {
             await cloud.restore()
             await backup?.refreshSummary()
         }
-        .alert("Restore backup", isPresented: .constant(pendingImport != nil)) {
+        // A real binding, not `.constant`: SwiftUI dismisses an alert by writing
+        // `false` back, and a constant swallows that. It worked only because
+        // every button here happens to clear the state itself — remove or add
+        // one that doesn't and the alert becomes unclosable.
+        .alert("Restore backup", isPresented: Binding(
+            get: { pendingImport != nil },
+            set: { if !$0 { pendingImport = nil } })) {
             Button("Merge") { restore(mode: .merge) }
             Button("Replace everything", role: .destructive) { restore(mode: .replace) }
             Button("Cancel", role: .cancel) { pendingImport = nil }
@@ -58,7 +64,9 @@ struct AccountView: View {
         } message: {
             Text("Deletes every log, workout and measurement on this device, and from iCloud if syncing is on. This cannot be undone — export a backup first.")
         }
-        .alert("Done", isPresented: .constant(message != nil)) {
+        .alert("Done", isPresented: Binding(
+            get: { message != nil },
+            set: { if !$0 { message = nil } })) {
             Button("OK") { message = nil }
         } message: {
             Text(message ?? "")

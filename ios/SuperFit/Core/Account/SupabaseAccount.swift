@@ -88,7 +88,10 @@ enum SupabaseConfig {
     /// Set `SUPABASE_APPLE_SIGN_IN = YES` in Secrets.xcconfig to turn it on.
     static var appleSignInEnabled: Bool {
         guard let raw = value(for: "SupabaseAppleSignIn") else { return false }
-        return ["YES", "yes", "true", "1"].contains(raw)
+        // Case-folded: an xcconfig is hand-edited, `Yes` and `TRUE` are what
+        // people type, and matching only the exact spellings meant the flag
+        // silently stayed off with no way to tell it apart from not setting it.
+        return ["yes", "true", "1"].contains(raw.lowercased())
     }
 
     /// Unsubstituted placeholders come through literally when the xcconfig has
@@ -217,11 +220,19 @@ final class SupabaseAccount {
 
     // MARK: - Out
 
+    /// Signs out, then re-derives state if the request failed.
+    ///
+    /// `run` only assigns state on success, which for every other call is right —
+    /// a failed sign-in should leave you signed out. For sign-out it inverts the
+    /// error: the request throws, `state` keeps saying `.signedIn`, and the UI
+    /// offers to back up to an account the user has just left. Asking the SDK
+    /// what the session actually is beats guessing in either direction.
     func signOut() async {
         await run { client in
             try await client.auth.signOut()
             return .signedOut
         }
+        if lastError != nil { await restore() }
     }
 
     // MARK: - Plumbing

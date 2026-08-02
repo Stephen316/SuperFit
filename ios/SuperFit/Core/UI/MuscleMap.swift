@@ -71,7 +71,7 @@ struct MuscleMap: View {
             // x was normalised by the source width and y by its height, so the
             // two axes need different scales — scaling both by the same factor
             // squashes the figure to half height.
-            let ratio = BodyDiagram.aspect(figure)
+            let ratio = BodyDiagram.aspect(side, figure)
             let width = min(size.width, size.height / ratio)
             let height = width * ratio
             let t = CGAffineTransform(translationX: (size.width - width) / 2,
@@ -87,9 +87,15 @@ struct MuscleMap: View {
                 // trained just because it stands for two muscles. Colours can't
                 // be ordered, so the caller supplies the ranking when it has
                 // the volume to hand; otherwise the first-listed muscle wins.
-                let group = region.groups.max { a, b in
+                //
+                // A region naming no muscle is skipped rather than subscripted.
+                // The generated data always names at least one — there is a test
+                // — but `Region.init` accepts an empty array, and `groups[0]`
+                // turned that into a crash in the renderer rather than a blank
+                // shape.
+                guard let group = region.groups.max(by: { a, b in
                     (rank?(a) ?? 0) < (rank?(b) ?? 0)
-                } ?? region.groups[0]
+                }) else { continue }
                 let fill = colour(group)
                 guard let clip = region.clip else {
                     context.fill(path, with: .color(fill))
@@ -104,7 +110,7 @@ struct MuscleMap: View {
                 }
             }
         }
-        .aspectRatio(1 / BodyDiagram.aspect(figure), contentMode: .fit)
+        .aspectRatio(1 / BodyDiagram.aspect(side, figure), contentMode: .fit)
         .accessibilityHidden(true)
     }
 }
@@ -113,11 +119,14 @@ struct MuscleMap: View {
 enum BodyDiagram {
     enum Side { case front, back }
 
-    /// The source figures are 724 wide by 1448 tall.
     /// Measured from each figure's own silhouette rather than assumed. The old
     /// constant belonged to different artwork, and applying it here letterboxed
     /// the figures inside their box instead of letting the arm span fill it.
-    static func aspect(_ figure: BodyArt.Figure) -> CGFloat { BodyArt.aspect(figure) }
+    ///
+    /// Per side as well as per sex — the back view is very slightly taller.
+    static func aspect(_ side: Side, _ figure: BodyArt.Figure) -> CGFloat {
+        BodyArt.aspect(figure, back: side == .back)
+    }
 
     /// A parsed region: which muscle, the shape, and the window of it that
     /// belongs to that muscle when two share a path.
