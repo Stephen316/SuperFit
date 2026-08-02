@@ -19,12 +19,28 @@ struct StaleWeighInCorrectionTests {
 
     private let intake = 2600.0
 
-    /// Weekly weigh-ins at a genuinely stable weight, with intake logged every
-    /// day so the estimate is measurement-driven rather than the prior.
-    /// Returns the weigh-in from seven days ago — the one that gets mistyped.
+    /// Three weigh-ins across four weeks at a genuinely stable weight, with
+    /// intake logged every day so the estimate is measurement-driven rather than
+    /// the prior. Returns the earliest weigh-in — the one that gets mistyped.
+    ///
+    /// **Deliberately sparse.** Theil–Sen takes the median of every pairwise
+    /// slope, so a weekly series of six weigh-ins absorbs one bad number
+    /// entirely: measured on this engine, the slope stays at exactly 0.00000 and
+    /// TDEE moves only by rounding. A single mistyped entry has leverage only
+    /// when there are few enough weigh-ins for it to reach the median — which is
+    /// the case for someone who steps on the scale every couple of weeks, and
+    /// the case this was reported from. Typed low and followed by normal
+    /// readings, it reads as a gain across the window.
+    ///
+    /// Age is pinned rather than left to `UserProfile`'s default. It is a term
+    /// in Mifflin-St Jeor, so it decides whether the prior sits above or below
+    /// logged intake — and a test whose direction depends on that is a test that
+    /// silently changes meaning when the default does.
     private func seed(_ context: ModelContext) -> BodyMetrics {
         let cal = Calendar.current
-        context.insert(UserProfile())
+        let profile = UserProfile()
+        profile.birthDate = cal.date(byAdding: .year, value: -30, to: .now)!
+        context.insert(profile)
 
         for d in 1...35 {
             let day = cal.date(byAdding: .day, value: -d, to: .now)!
@@ -33,14 +49,14 @@ struct StaleWeighInCorrectionTests {
             context.insert(log)
         }
 
-        var weekAgo: BodyMetrics!
-        for d in stride(from: 35, through: 0, by: -7) {
+        var earliest: BodyMetrics!
+        for d in [28, 14, 0] {
             let day = cal.date(byAdding: .day, value: -d, to: .now)!
             let m = BodyMetrics(date: day, weightKg: 80)
             context.insert(m)
-            if d == 7 { weekAgo = m }
+            if d == 28 { earliest = m }
         }
-        return weekAgo
+        return earliest
     }
 
     private func tdee(_ context: ModelContext) throws -> Double {
@@ -50,45 +66,51 @@ struct StaleWeighInCorrectionTests {
 
     @Test func correctingAMistypedWeighInRestoresTheTarget() throws {
         let context = try makeContext()
-        let weekAgo = seed(context)
+        let earliest = seed(context)
         let service = AggregationService(context: context)
 
         service.refreshWeightDerived()
         let honest = try tdee(context)
 
-        // The slip: 79 typed where 80 was meant, a week ago.
-        weekAgo.weightKg = 79
+        // The slip: 79 typed where 80 was meant, four weeks ago.
+        earliest.weightKg = 79
         service.refreshWeightDerived()
         let corrupted = try tdee(context)
-        #expect(corrupted < honest,
-                "a phantom gain has to read as a smaller energy requirement")
+        // A margin, not just `<`. The point is that the estimate moves by an
+        // amount a person would notice — measured at ~210 kcal — rather than by
+        // the kilocalorie or two that rounding can produce on its own.
+        #expect(corrupted < honest - 100,
+                "a phantom gain has to read as a smaller energy requirement: \(corrupted) against \(honest)")
 
         // The correction, exactly as the edit sheet applies it.
-        weekAgo.weightKg = 80
+        earliest.weightKg = 80
         service.refreshWeightDerived()
         let restored = try tdee(context)
 
         // Correcting the entry must return TDEE to where it was, not leave it
-        // part-way.
+        // part-way. This is the reported bug: the estimate is stored, so an edit
+        // that doesn't trigger a recompute leaves the old number on the
+        // dashboard indefinitely.
         #expect(abs(restored - honest) < 1, "\(restored) against \(honest)")
     }
 
     /// Deleting the bad entry outright is the other route the dialog offers.
     @Test func deletingAMistypedWeighInRestoresTheTarget() throws {
         let context = try makeContext()
-        let weekAgo = seed(context)
+        let earliest = seed(context)
         let service = AggregationService(context: context)
 
         service.refreshWeightDerived()
         let honest = try tdee(context)
 
-        weekAgo.weightKg = 79
+        earliest.weightKg = 79
         service.refreshWeightDerived()
-        #expect(try tdee(context) < honest)
+        #expect(try tdee(context) < honest - 100)
 
-        context.delete(weekAgo)
+        context.delete(earliest)
         service.refreshWeightDerived()
-        // One weigh-in fewer, so not identical — but the phantom gain is gone.
-        #expect(try tdee(context) > honest - 200)
+        // One weigh-in fewer over a shorter span, so confidence drops and the
+        // number doesn't land exactly back — but the phantom gain is gone.
+        #expect(try tdee(context) > honest - 100)
     }
 }

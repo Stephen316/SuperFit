@@ -120,7 +120,20 @@ enum ExerciseCategory: String, Codable, Sendable { case barbell, dumbbell, machi
 @Model
 final class UserProfile {
     var id: UUID = UUID()
-    var birthDate: Date = Date(timeIntervalSince1970: 0)
+    /// 1 January 2000, until the user says otherwise.
+    ///
+    /// The epoch was the old default, which made every untouched profile 56
+    /// years old. That is not a neutral placeholder: age is a term in
+    /// Mifflin-St Jeor (−5 kcal per year) and in the Tanaka max-heart-rate
+    /// estimate, so it was quietly costing a new user ~130 kcal on their basal
+    /// estimate and shifting their cardio load bands, before they had entered
+    /// anything at all.
+    ///
+    /// Anchored at **noon UTC**, not midnight. Stored as an instant but shown as
+    /// a date, so a midnight anchor reads as 31 December 1999 anywhere west of
+    /// Greenwich — the default would look wrong in the picker for every user in
+    /// the Americas. Noon holds the date from UTC−12 to UTC+11.
+    var birthDate: Date = Date(timeIntervalSince1970: 946_728_000)
     var sexRaw: String = BiologicalSex.other.rawValue
     var heightCm: Double = 175
     var goalRaw: String = FitnessGoal.recomposition.rawValue
