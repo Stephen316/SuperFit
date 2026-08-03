@@ -123,6 +123,51 @@ struct TrainingView: View {
                                              muscles: muscleTension, week: week)
     }
 
+    /// Gym sessions started today.
+    private var todaySessions: [TrainingSession] {
+        sessions.filter { Calendar.current.isDateInToday($0.startedAt) }
+    }
+
+    /// The seven days before today, newest first, grouped by day.
+    ///
+    /// Today is excluded because it has its own section — carrying it in both
+    /// would make one workout look like two, and the point of splitting them is
+    /// to answer "have I trained today" without reading a list.
+    ///
+    /// Only days that actually hold a session appear. An empty day would be a
+    /// row saying nothing, and seven of them would bury the days that matter.
+    private var recentSessionDays: [(day: Date, sessions: [TrainingSession])] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        guard let from = cal.date(byAdding: .day, value: -7, to: today) else { return [] }
+        let window = sessions.filter { $0.startedAt >= from && $0.startedAt < today }
+        return Dictionary(grouping: window) { cal.startOfDay(for: $0.startedAt) }
+            .map { (day: $0.key, sessions: $0.value.sorted { $0.startedAt > $1.startedAt }) }
+            .sorted { $0.day > $1.day }
+    }
+
+    /// One session row, swipe-deletable.
+    ///
+    /// `swipeActions` rather than `onDelete`: the rows are nested inside a
+    /// per-day `ForEach` now, where `onDelete`'s offsets are relative to the
+    /// inner collection and easy to apply to the wrong array. This deletes the
+    /// session it is attached to and cannot drift.
+    @ViewBuilder
+    private func sessionRow(_ session: TrainingSession) -> some View {
+        Button { activeSession = session } label: {
+            SessionRow(session: session, exercises: exercises, showsDate: false)
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                context.delete(session)
+                try? context.save()
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
     /// Cardio ACWR, or nil when too few workouts carry heart rate to answer.
     private var cardioLoad: CardioLoadAnalyzer.Result? {
         guard let profile = profiles.first,
@@ -171,6 +216,31 @@ struct TrainingView: View {
                 }
 
                 watchSection
+
+                Section("Today") {
+                    if todaySessions.isEmpty {
+                        Text("Nothing logged yet today.").foregroundStyle(.secondary)
+                    }
+                    ForEach(todaySessions) { session in
+                        sessionRow(session)
+                    }
+                }
+
+                Section("Last 7 days") {
+                    if recentSessionDays.isEmpty {
+                        Text("No gym workouts in the last week.").foregroundStyle(.secondary)
+                    }
+                    ForEach(recentSessionDays, id: \.day) { group in
+                        Text(group.day, format: .dateTime.weekday(.wide).day().month())
+                            .font(Theme.text(13, .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(.init(top: 10, leading: 20, bottom: 2, trailing: 20))
+                        ForEach(group.sessions) { session in
+                            sessionRow(session)
+                        }
+                    }
+                }
 
                 Section("Muscles worked this week") {
                     // Tall enough that width, not height, is the binding
@@ -239,22 +309,6 @@ struct TrainingView: View {
                             for i in offsets { context.delete(shown[i]) }
                             try? context.save()
                         }
-                    }
-                }
-
-                Section("Gym history") {
-                    if sessions.isEmpty {
-                        Text("No gym workouts yet.").foregroundStyle(.secondary)
-                    }
-                    ForEach(sessions.prefix(30)) { session in
-                        Button { activeSession = session } label: {
-                            SessionRow(session: session, exercises: exercises)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .onDelete { offsets in
-                        for i in offsets { context.delete(sessions[i]) }
-                        try? context.save()
                     }
                 }
             }
@@ -492,6 +546,10 @@ struct WorkoutRow: View {
 struct SessionRow: View {
     let session: TrainingSession
     let exercises: [Exercise]
+    /// Off where a date header already covers the row, in which case the row
+    /// shows the *time* instead — which is the part still worth knowing when
+    /// a day holds two sessions.
+    var showsDate = true
 
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
@@ -503,7 +561,9 @@ struct SessionRow: View {
             HStack {
                 Text(session.templateName ?? "Workout").font(.subheadline.weight(.medium))
                 Spacer()
-                Text(session.startedAt, format: .dateTime.month().day())
+                Text(session.startedAt, format: showsDate
+                     ? .dateTime.month().day()
+                     : .dateTime.hour().minute())
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text(summary)
