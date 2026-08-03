@@ -48,6 +48,37 @@ struct RecentLeanMassTests {
         #expect(BodyComposition.recentLeanMassKg(mixed) == 65)
     }
 
+    /// The boundary itself. Lean mass equal to bodyweight is 0% body fat — not a
+    /// person, and reachable only through a hand-edited archive, since every
+    /// writer in the app clamps body fat to 3–70%. All three guards on this
+    /// invariant are strict; they used to disagree.
+    @Test func leanMassEqualToBodyweightIsRejected() {
+        #expect(BodyComposition.recentLeanMassKg([row(daysAgo: 0, weight: 80, lean: 80)]) == nil)
+        #expect(BodyComposition.recentLeanMassKg([row(daysAgo: 0, weight: 80, lean: 79.9)]) == 79.9)
+    }
+
+    /// And the basal estimate declines it too, rather than taking a figure
+    /// `BodyComposition` would have refused to hand it.
+    @Test func katchMcArdleDeclinesAZeroBodyFatReading() {
+        let engine = MetabolismEngine()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func basal(lean: Double?) -> Double {
+            let records = (0..<20).map { d in
+                DailyRecord(date: cal.date(byAdding: .day, value: d, to: start)!,
+                            intakeKcal: 2500, weightKg: 80)
+            }
+            return engine.estimate(
+                records: records, windowDays: 30,
+                prior: .init(sex: .male, ageYears: 30, heightCm: 180,
+                             activity: .moderate, leanMassKg: lean),
+                asOf: cal.date(byAdding: .day, value: 20, to: start)!).basalKcal
+        }
+        // 0% body fat falls back to Mifflin, which is what a refusal looks like.
+        #expect(basal(lean: 80) == basal(lean: nil))
+        // A real reading still switches to Katch-McArdle.
+        #expect(basal(lean: 65) != basal(lean: nil))
+    }
+
     @Test func noCompositionAtAllIsNil() {
         #expect(BodyComposition.recentLeanMassKg([row(daysAgo: 0, weight: 80, lean: nil)]) == nil)
         #expect(BodyComposition.recentLeanMassKg([]) == nil)

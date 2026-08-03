@@ -563,7 +563,11 @@ struct MetabolismEngine: Sendable {
     /// the calorie floor enough to block legitimate deficits. Unbiased noise beats
     /// biased noise.
     private func bmr(_ p: Prior, weightKg: Double) -> Double {
-        if let lean = p.leanMassKg, lean > 0, lean <= weightKg {
+        // Strict on both bounds, matching `BodyComposition` and
+        // `SyncCoordinator.upsertComposition`. A lean mass equal to bodyweight
+        // is 0% body fat, and taking it would inflate this by ~318 kcal at
+        // 80 kg — straight into the calorie floor below.
+        if let lean = p.leanMassKg, lean > 0, lean < weightKg {
             return 370 + 21.6 * lean
         }
         let base = 10 * weightKg + 6.25 * p.heightCm - 5 * p.ageYears

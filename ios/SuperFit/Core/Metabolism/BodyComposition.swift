@@ -37,11 +37,18 @@ enum BodyComposition {
         let cutoff = asOf.addingTimeInterval(-maxAgeDays * 86_400)
         return metrics
             .filter { $0.date >= cutoff }
-            // Zero and negative are not measurements. A lean mass above
-            // bodyweight is a bad entry rather than a person, and it would push
-            // the Katch-McArdle basal above anything real.
+            // Zero and negative are not measurements. Neither is a lean mass at
+            // or above bodyweight: equal means 0% body fat, which would put the
+            // Katch-McArdle basal ~318 kcal above Mifflin for an 80 kg person
+            // and raise the calorie floor enough to block a real deficit.
+            //
+            // Strict, matching `SyncCoordinator.upsertComposition`. Every writer
+            // in the app already clamps body fat to 3–70%, so this is only
+            // reachable through a hand-edited archive — but three guards on one
+            // invariant should not disagree about its boundary, or the next
+            // reader assumes the difference is deliberate.
             .compactMap { row -> (Date, Double)? in
-                guard let lean = row.leanMassKg, lean > 0, lean <= row.weightKg else { return nil }
+                guard let lean = row.leanMassKg, lean > 0, lean < row.weightKg else { return nil }
                 return (row.date, lean)
             }
             .max { $0.0 < $1.0 }?.1
