@@ -22,12 +22,12 @@ struct LiftRecord: Sendable {
     }
 }
 
-/// Weekly working-set volume per muscle group, weighted by tension score:
-/// a set contributes score/5 sets to each muscle (5 = full set, 2 = 0.4 sets).
-/// Finer-grained than the classic primary=1/secondary=0.5 accounting.
+/// Weekly volume per muscle group.
+///
+/// Direct work and assisting work are counted separately and combined with very
+/// different weights, because they are not interchangeable stimulus. See
+/// `EffectiveVolume` and `assistingCeiling` for the reasoning.
 struct VolumeAggregator: Sendable {
-
-    static let weeklySetTargets: ClosedRange<Double> = 10...20
 
     /// Tension at or above which a set counts as a whole set *for display*.
     ///
@@ -85,21 +85,124 @@ struct VolumeAggregator: Sendable {
         return out
     }
 
-    /// Sets per muscle group within `week`, tension-weighted.
-    func weeklySets(records: [LiftRecord],
-                    muscles: [UUID: [MuscleGroup: Int]],
-                    week: DateInterval) -> [MuscleGroup: Double] {
-        var out: [MuscleGroup: Double] = [:]
+    /// What a week of training actually did to one muscle.
+    ///
+    /// Direct and assisting work are kept apart because they are not
+    /// interchangeable, which is the flaw in counting `tension/5` sets and adding
+    /// them up. Under that model ten sets of rows gave the biceps six sets —
+    /// the same as six sets of curls — and a hard pull day alone could paint a
+    /// muscle as maximally trained. It is not the same stimulus: in a row the
+    /// biceps is not the limiting factor and is nowhere near failure when the
+    /// set ends.
+    struct EffectiveVolume: Sendable, Equatable {
+        /// Sets where this muscle was the point of the exercise.
+        let direct: Int
+        /// Sets where it assisted.
+        let secondary: Int
+        /// Direct sets plus a discounted, capped credit for the assisting work.
+        let effective: Double
+
+        var hasDirect: Bool { direct > 0 }
+        /// Worked, but never as the target — the biceps after a pull day.
+        var isSecondaryOnly: Bool { direct == 0 && secondary > 0 }
+    }
+
+    /// What one *direct* set is worth.
+    ///
+    /// A 5 is the prime mover taken near failure; a 4 is a muscle genuinely
+    /// targeted but sharing the work or the range. Both count as a whole set to
+    /// the person doing them, which is why both show in the count — but they are
+    /// not identical stimulus, and flattening them to 1.0 apiece would leave the
+    /// table unable to order the chest above the front delts on a bench press.
+    static func directCredit(tension: Int) -> Double {
+        tension >= 5 ? 1.0 : 0.85
+    }
+
+    /// What one assisting set is worth, as a fraction of a direct set.
+    ///
+    /// Not `score/5`. A 3 is a muscle doing real work under moderate tension at
+    /// a length and effort the exercise never pushes to failure; calling that
+    /// 0.6 of a hard set overstates it roughly twofold. These are deliberately
+    /// steep — assisting work is worth having and is not worth much.
+    static func assistingCredit(tension: Int) -> Double {
+        switch tension {
+        case 3:  return 0.50
+        case 2:  return 0.22
+        case 1:  return 0.08
+        default: return 0
+        }
+    }
+
+    /// Assisting work with diminishing returns, approaching `ceiling`.
+    ///
+    ///     credit = ceiling × (1 − e^(−raw / ceiling))
+    ///
+    /// A hard cap was the first attempt and it was too blunt: it made the fifth
+    /// assisting set worth full value and the sixth worth nothing. This is
+    /// smooth — early assisting sets count for nearly their face value, later
+    /// ones taper — which matches how the stimulus actually behaves, and means
+    /// the answer never depends on where exactly a cliff was placed.
+    ///
+    /// It never reaches `ceiling`, so assistance alone can carry a muscle to a
+    /// productive week and never past one.
+    static func saturated(_ raw: Double, ceiling: Double) -> Double {
+        guard ceiling > 0, raw > 0 else { return 0 }
+        return ceiling * (1 - exp(-raw / ceiling))
+    }
+
+    /// Assisting work is capped per muscle — see `WeeklySetTargets.assistingCeiling`.
+    ///
+    /// The cap is the part that fixes the original complaint. Assistance
+    /// saturates: the twentieth set of rows does almost nothing further for the
+    /// biceps that the first five did not, because the stimulus is limited by
+    /// how hard that muscle is being driven, not by how many times. Without a
+    /// ceiling the model just re-derives "enough indirect work equals any amount
+    /// of direct work", which is the thing that was wrong.
+
+    /// Per-muscle volume within `week`.
+    func weeklyVolume(records: [LiftRecord],
+                      muscles: [UUID: [MuscleGroup: Int]],
+                      week: DateInterval) -> [MuscleGroup: EffectiveVolume] {
+        var direct: [MuscleGroup: Int] = [:]
+        var secondary: [MuscleGroup: Int] = [:]
+        var directCredit: [MuscleGroup: Double] = [:]
+        var assistCredit: [MuscleGroup: Double] = [:]
+
         // Half-open, not `week.contains`: DateInterval.contains includes `end`,
         // and a week's end is the next week's start, so a set logged at midnight
         // on a Monday counted towards both weeks.
         for r in records where !r.isWarmup && r.date >= week.start && r.date < week.end {
             guard let tension = muscles[r.exerciseID] else { continue }
-            for (muscle, score) in tension {
-                out[muscle, default: 0] += Double(score) / 5
+            for (muscle, score) in tension where score > 0 {
+                if score >= Self.fullSetTension {
+                    direct[muscle, default: 0] += 1
+                    directCredit[muscle, default: 0] += Self.directCredit(tension: score)
+                } else {
+                    secondary[muscle, default: 0] += 1
+                    assistCredit[muscle, default: 0] += Self.assistingCredit(tension: score)
+                }
             }
         }
+
+        var out: [MuscleGroup: EffectiveVolume] = [:]
+        for muscle in Set(direct.keys).union(secondary.keys) {
+            let d = direct[muscle] ?? 0
+            let s = secondary[muscle] ?? 0
+            let earned = directCredit[muscle] ?? 0
+            let assisted = Self.saturated(assistCredit[muscle] ?? 0,
+                                          ceiling: muscle.weeklyTargets.assistingCeiling)
+            out[muscle] = EffectiveVolume(direct: d, secondary: s,
+                                          effective: earned + assisted)
+        }
         return out
+    }
+
+    /// Effective sets per muscle, for callers that only need the number.
+    func weeklySets(records: [LiftRecord],
+                    muscles: [UUID: [MuscleGroup: Int]],
+                    week: DateInterval) -> [MuscleGroup: Double] {
+        weeklyVolume(records: records, muscles: muscles, week: week)
+            .mapValues(\.effective)
     }
 
     /// Total tonnage (kg lifted) in an interval — the training-load input for

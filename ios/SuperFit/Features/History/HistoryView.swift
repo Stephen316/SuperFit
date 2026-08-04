@@ -464,8 +464,10 @@ struct HistoryView: View {
                     RectangleMark(
                         xStart: .value("Start", start),
                         xEnd: .value("End", Date.now),
-                        yStart: .value("Low", VolumeAggregator.weeklySetTargets.lowerBound),
-                        yEnd: .value("High", VolumeAggregator.weeklySetTargets.upperBound))
+                        // The recommended band for *this* muscle — a shared one
+                        // would be wrong for two thirds of the body.
+                        yStart: .value("Low", selectedMuscle.weeklyTargets.productiveFrom),
+                        yEnd: .value("High", selectedMuscle.weeklyTargets.highFrom))
                         .foregroundStyle(Theme.gold.opacity(0.10))
                     ForEach(points) { p in
                         BarMark(x: .value("Week", p.date, unit: .weekOfYear),

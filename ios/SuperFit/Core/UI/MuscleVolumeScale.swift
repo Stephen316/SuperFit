@@ -1,68 +1,70 @@
 import SwiftUI
 
-/// Weekly volume to a colour on the body diagram.
+/// A week of training on one muscle, as a colour.
 ///
-/// Read off the *weighted* set total, not the whole-set count beside it in the
-/// table: three sets of bench are three sets for both chest and front delts, and
-/// painting them the same shade would throw away the only thing the diagram is
-/// there to show.
+/// Purely the mapping. The numbers behind it — what counts as a direct set,
+/// what assisting work is worth, and where the bands sit — belong to
+/// `VolumeAggregator`, because they are a claim about training rather than
+/// about presentation.
 ///
-/// The bounds are the ones asked for. They are lower than the hypertrophy
-/// literature's productive range — the usual figure is nearer 10–20 hard sets
-/// per muscle per week, with 4–6 closer to a maintenance dose — so a muscle
-/// showing purple here has had a solid week rather than a maximal one. That is a
-/// deliberate choice about what the scale is *for*: flagging neglect at a glance
-/// beats grading effort, and a scale topping out at 20 leaves nearly every
-/// muscle grey for nearly everyone. Raising the bounds later is a change to this
-/// one table.
+/// **What each colour means**
+///
+/// | Colour | Meaning |
+/// |---|---|
+/// | Grey | Not trained |
+/// | Yellow | Trained, but only as a secondary muscle, or not enough sets |
+/// | Green | Regular and recommended — enough to maintain or build slowly |
+/// | Blue | A high weekly volume for an average gym-goer |
+/// | Purple | Very high; challenging for most people to recover from |
+///
+/// A body that is green everywhere is the target: every muscle trained enough
+/// to hold or slowly improve. Green is therefore *good*, not middling, and
+/// purple is a warning as much as an achievement.
+///
+/// **Yellow carries two different meanings on purpose.** "Only ever assisted"
+/// and "directly trained but not enough" are both answered by the same action —
+/// give this muscle more direct sets — so they share a colour. The table beside
+/// the diagram is what distinguishes them: it labels the first case *secondary*.
 enum MuscleVolumeScale {
 
-    /// Upper bound of each band, in weighted sets. Half-open — a value equal to
-    /// the bound belongs to the band above. Open-ended past the last.
-    static let bands: [(upTo: Double, colour: Color)] = [
-        (3,  Color(red: 0.95, green: 0.77, blue: 0.20)),   // 0.8–3  yellow
-        (5,  Color(red: 0.35, green: 0.78, blue: 0.42)),   // 3–5    green
-        (6,  Color(red: 0.30, green: 0.62, blue: 0.93)),   // 5–6    blue
-    ]
-
-    static let sixPlus = Color(red: 0.63, green: 0.44, blue: 0.90)   // 6+  purple
-
-    /// At or below this the muscle reads as untrained.
-    ///
-    /// Not zero. A weighted total this low is a muscle that was carried through
-    /// somebody else's exercise — a squat's share of lower back, a press's
-    /// share of triceps — and colouring that the same as a muscle you actually
-    /// trained makes the diagram claim work that never happened.
-    ///
-    /// It sits at exactly one hard set's worth: a single set at tension 4 is
-    /// 0.8 weighted. The comparison in `colour` is strict, so that one set does
-    /// *not* clear the bar — one set is barely worked, which is what the band
-    /// says. Clearing it takes a second set, or a first one plus some assisting
-    /// work elsewhere.
-    static let minimumTrained = 0.8
-
-    /// Nothing logged, or not enough to count. An untouched muscle has to be
-    /// findable at a glance, which is the whole point of the scale.
     static let untrained = Theme.homeWell
+    static let insufficient = Color(red: 0.95, green: 0.77, blue: 0.20)   // yellow
+    static let productive = Color(red: 0.35, green: 0.78, blue: 0.42)     // green
+    static let high = Color(red: 0.30, green: 0.62, blue: 0.93)           // blue
+    static let veryHigh = Color(red: 0.63, green: 0.44, blue: 0.90)       // purple
 
-    static func colour(forWeightedSets sets: Double) -> Color {
-        guard sets > minimumTrained else { return untrained }
-        for band in bands where sets < band.upTo { return band.colour }
-        return sixPlus
+    /// The colour for a week's work on one muscle.
+    ///
+    /// **Assisting work alone can reach green, and never blue.** The colour is a
+    /// comparison — how hard you trained this muscle against how hard most
+    /// people do — so twenty sets of rows should not leave the biceps reading as
+    /// neglected. They have been worked, genuinely. What they have not had is
+    /// the kind of week that builds them fastest, which is why the saturation in
+    /// `WeeklySetTargets.assistingCeiling` keeps assistance short of blue
+    /// however much of it there is.
+    static func colour(for volume: VolumeAggregator.EffectiveVolume?,
+                       muscle: MuscleGroup) -> Color {
+        guard let volume, volume.effective > 0 else { return untrained }
+        let t = muscle.weeklyTargets
+        switch volume.effective {
+        case ..<t.productiveFrom: return insufficient
+        case ..<t.highFrom:       return productive
+        case ..<t.veryHighFrom:   return high
+        default:                  return veryHigh
+        }
     }
 
-    /// Legend order, for anywhere that needs to explain the scale.
-    ///
-    /// Labelled from the band bounds above rather than from whole sets. They
-    /// used to read "1–2", "3–4", "5" — which described the bands before the
-    /// floor moved to 0.8, and which in any case counted whole sets where the
-    /// scale bands the weighted total. A muscle at 2.4 weighted sets is in the
-    /// first coloured band whatever its whole-set count says.
-    static let legend: [(label: String, colour: Color)] = [
-        ("Barely worked", untrained),
-        ("Under 3 sets", bands[0].colour),
-        ("3 to 5 sets", bands[1].colour),
-        ("5 to 6 sets", bands[2].colour),
-        ("6+ sets", sixPlus),
-    ]
+    /// Legend for one muscle size — the numbers differ between them, so a
+    /// single legend would be wrong for two thirds of the body.
+    static func legend(for size: MuscleSize) -> [(label: String, detail: String, colour: Color)] {
+        let t = size.targets
+        func n(_ v: Double) -> String { String(Int(v)) }
+        return [
+            ("Not trained", "nothing logged", untrained),
+            ("Needs work", "secondary only, or under \(n(t.productiveFrom))", insufficient),
+            ("On track", "\(n(t.productiveFrom)) to \(n(t.highFrom))", productive),
+            ("High", "\(n(t.highFrom)) to \(n(t.veryHighFrom))", high),
+            ("Very high", "\(n(t.veryHighFrom))+, competitive volume", veryHigh),
+        ]
+    }
 }

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftUI
 @testable import SuperFit
 
 private let benchID = UUID()
@@ -28,14 +29,22 @@ private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
             lift(2, squatID, 140, 5), lift(2, squatID, 140, 5), lift(2, squatID, 140, 4),
         ]
         let v = VolumeAggregator().weeklySets(records: records, muscles: muscles, week: week)
-        // 3 working bench sets: chest 3×5/5, triceps 3×3/5, shoulders 3×2/5
+        // 3 working bench sets. Chest is the prime mover, so 3 whole sets.
+        // Triceps (3) and side delts (2) assist and are discounted steeply —
+        // under the old score/5 model they scored 1.8 and 1.2, which credited
+        // a bench press with more triceps work than it does.
         #expect(v[.chest] == 3)
-        #expect(abs(v[.tricepsLateral]! - 1.8) < 0.001)
-        #expect(abs(v[.sideDelts]! - 1.2) < 0.001)
-        // 3 working squat sets (warmups ignored): quads 3, glutes 2.4, core 1.2
+        // 3 assisting sets at tension 3, saturating towards the top of green.
+        #expect(abs(v[.tricepsLateral]! - 1.3502) < 0.001)
+        #expect(abs(v[.sideDelts]! - 0.6335) < 0.001)
+        // The claim that matters: a bench press is not most of a triceps
+        // session. Under the old score/5 model this ratio was 0.6.
+        #expect(v[.tricepsLateral]! / v[.chest]! < 0.5)
+        // 3 working squat sets, warmups ignored. Glutes score 4, which is direct
+        // work rather than assistance, so they earn 0.85 a set.
         #expect(v[.vastusLateralis] == 3)
-        #expect(abs(v[.gluteusMaximus]! - 2.4) < 0.001)
-        #expect(abs(v[.upperAbs]! - 1.2) < 0.001)
+        #expect(abs(v[.gluteusMaximus]! - 2.55) < 0.001)
+        #expect(abs(v[.upperAbs]! - 0.6298) < 0.001)
         #expect(v[.lats] == nil)
     }
 
@@ -101,7 +110,7 @@ private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
     }
 }
 
-/// The displayed set count is a count, never the weighted total rounded.
+/// The displayed set count is a count, never the effective total rounded.
 struct DisplayedSetCountTests {
 
     private let agg = VolumeAggregator()
@@ -123,7 +132,7 @@ struct DisplayedSetCountTests {
         let counts = agg.weeklySetCounts(records: records(2), muscles: muscles, week: week)
         let weighted = agg.weeklySets(records: records(2), muscles: muscles, week: week)
         #expect(counts[.chest] == 2)
-        #expect(abs((weighted[.chest] ?? 0) - 1.6) < 0.001, "backend stays fractional")
+        #expect(abs((weighted[.chest] ?? 0) - 1.7) < 0.001, "backend stays fractional")
     }
 
     @Test func tensionBelowFourIsNotACountedSet() {
@@ -153,6 +162,8 @@ struct DisplayedSetCountTests {
         let counts = agg.weeklySetCounts(records: records(3), muscles: muscles, week: week)
         let weighted = agg.weeklySets(records: records(3), muscles: muscles, week: week)
         #expect(counts[.chest] == counts[.frontDelts], "both show 3 sets")
+        // Both are direct work, so both are whole sets to the person doing them —
+        // but a 5 outranks a 4, which is what keeps the ordering meaningful.
         #expect((weighted[.chest] ?? 0) > (weighted[.frontDelts] ?? 0),
                 "but chest sorts above front delts")
     }
@@ -213,38 +224,144 @@ struct DisplayedSetCountTests {
     }
 }
 
-/// Band boundaries, pinned because they are a product decision rather than a
-/// derived value — a later change to them should be deliberate.
+/// The band boundaries and the assisting model. Pinned because they are claims
+/// about training, not derived values — changing one should be deliberate.
 struct MuscleVolumeScaleTests {
 
-    /// Under a full set's worth reads as untrained: that is a muscle carried
-    /// through someone else's exercise, not one that was worked.
-    @Test func belowTheFloorReadsAsUntrained() {
-        for v in [0.0, 0.2, 0.6, 0.8] {
-            #expect(MuscleVolumeScale.colour(forWeightedSets: v) == MuscleVolumeScale.untrained,
-                    "\(v) weighted sets should not colour as trained")
-        }
-        // One hard set — tension 4 — is 0.8 weighted and must register.
-        #expect(MuscleVolumeScale.colour(forWeightedSets: 0.81) != MuscleVolumeScale.untrained)
-    }
+    private let agg = VolumeAggregator()
+    private let week = DateInterval(start: Date(timeIntervalSince1970: 1_700_000_000),
+                                    duration: 7 * 86_400)
+    private let curl = UUID()
+    private let row = UUID()
 
-    @Test func eachBandHoldsItsRange() {
-        let yellow = MuscleVolumeScale.bands[0].colour
-        let green = MuscleVolumeScale.bands[1].colour
-        let blue = MuscleVolumeScale.bands[2].colour
-        for v in [0.81, 1.5, 2.0, 2.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == yellow) }
-        for v in [3.0, 4.0, 4.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == green) }
-        for v in [5.0, 5.99] { #expect(MuscleVolumeScale.colour(forWeightedSets: v) == blue) }
-        for v in [6.0, 12.0, 40.0] {
-            #expect(MuscleVolumeScale.colour(forWeightedSets: v) == MuscleVolumeScale.sixPlus)
+    private func sets(_ n: Int, _ id: UUID) -> [LiftRecord] {
+        (0..<n).map { i in
+            LiftRecord(date: week.start.addingTimeInterval(Double(i) * 3600),
+                       exerciseID: id, weightKg: 30, reps: 10, isWarmup: false)
         }
     }
 
-    /// Boundaries are inclusive at the bottom: 3.0 is "3–4", not the band below.
+    private func biceps(curls: Int, rows: Int) -> VolumeAggregator.EffectiveVolume? {
+        agg.weeklyVolume(records: sets(curls, curl) + sets(rows, row),
+                         muscles: [curl: [.biceps: 5], row: [.lats: 5, .biceps: 3]],
+                         week: week)[.biceps]
+    }
+
+    private func bicepsColour(curls: Int, rows: Int) -> Color {
+        MuscleVolumeScale.colour(for: biceps(curls: curls, rows: rows), muscle: .biceps)
+    }
+
+    @Test func nothingLoggedIsUntrained() {
+        #expect(MuscleVolumeScale.colour(for: nil, muscle: .biceps) == MuscleVolumeScale.untrained)
+        #expect(bicepsColour(curls: 0, rows: 0) == MuscleVolumeScale.untrained)
+    }
+
+    /// The complaint that prompted the redesign: a full pull day and no curls
+    /// used to paint the biceps purple. Assisting work alone can now reach green
+    /// — twenty sets of rows really have worked them harder than most people
+    /// work theirs — but never blue, however much of it there is.
+    @Test func assistingWorkAloneReachesGreenButNeverBlue() {
+        #expect(bicepsColour(curls: 0, rows: 6) == MuscleVolumeScale.insufficient,
+                "a few assisting sets is not a trained muscle")
+        #expect(bicepsColour(curls: 0, rows: 12) == MuscleVolumeScale.productive,
+                "a dozen assisting sets is a real week's work")
+        for rows in [20, 40, 80, 200] {
+            #expect(bicepsColour(curls: 0, rows: rows) == MuscleVolumeScale.productive,
+                    "\(rows) assisting sets should stay green, never blue")
+        }
+    }
+
+    /// Diminishing returns rather than a cliff: the fifth assisting set is worth
+    /// most of its face value, the fiftieth almost nothing.
+    @Test func assistingCreditSaturatesSmoothly() {
+        let ceiling = MuscleGroup.biceps.weeklyTargets.assistingCeiling
+        let e = { (rows: Int) in self.biceps(curls: 0, rows: rows)?.effective ?? 0 }
+        #expect(e(200) < ceiling, "never actually reaches the ceiling")
+        let firstFive = e(5)
+        let secondFive = e(10) - e(5)
+        let tenthFive = e(50) - e(45)
+        #expect(secondFive < firstFive, "returns diminish")
+        #expect(tenthFive < secondFive)
+        #expect(tenthFive < 0.2, "and eventually flatten")
+    }
+
+    /// Direct work is what moves a muscle through the bands.
+    @Test func directSetsDriveTheBands() {
+        #expect(bicepsColour(curls: 3, rows: 0) == MuscleVolumeScale.insufficient)
+        #expect(bicepsColour(curls: 5, rows: 0) == MuscleVolumeScale.productive)
+        #expect(bicepsColour(curls: 8, rows: 0) == MuscleVolumeScale.high)
+        #expect(bicepsColour(curls: 11, rows: 0) == MuscleVolumeScale.veryHigh)
+    }
+
+    /// Purple starts at the bottom of the reported competitive range for that
+    /// muscle size — 16 large, 12 medium, 10 small.
+    @Test func purpleBeginsAtCompetitiveVolume() {
+        #expect(MuscleGroup.lats.weeklyTargets.veryHighFrom == 16)      // large
+        #expect(MuscleGroup.chest.weeklyTargets.veryHighFrom == 12)     // medium
+        #expect(MuscleGroup.biceps.weeklyTargets.veryHighFrom == 10)    // small
+    }
+
+    /// A big muscle is judged against bigger numbers than a small one, so the
+    /// same set count reads differently on quads and biceps.
+    @Test func sizeChangesWhatTheSameVolumeMeans() {
+        func colour(_ muscle: MuscleGroup, _ effective: Double) -> Color {
+            MuscleVolumeScale.colour(for: .init(direct: 1, secondary: 0, effective: effective),
+                                     muscle: muscle)
+        }
+        #expect(colour(.biceps, 8) == MuscleVolumeScale.high)
+        #expect(colour(.vastusLateralis, 8) == MuscleVolumeScale.productive)
+        #expect(colour(.chest, 8) == MuscleVolumeScale.high)
+    }
+
+    /// Boundaries belong to the band above.
     @Test func boundariesBelongToTheHigherBand() {
-        #expect(MuscleVolumeScale.colour(forWeightedSets: 3.0)
-                == MuscleVolumeScale.bands[1].colour)
-        #expect(MuscleVolumeScale.colour(forWeightedSets: 5.0)
-                == MuscleVolumeScale.bands[2].colour)
+        let t = MuscleGroup.biceps.weeklyTargets
+        func colour(_ effective: Double) -> Color {
+            MuscleVolumeScale.colour(for: .init(direct: 1, secondary: 0, effective: effective),
+                                     muscle: .biceps)
+        }
+        #expect(colour(t.productiveFrom) == MuscleVolumeScale.productive)
+        #expect(colour(t.productiveFrom - 0.01) == MuscleVolumeScale.insufficient)
+        #expect(colour(t.highFrom) == MuscleVolumeScale.high)
+        #expect(colour(t.veryHighFrom) == MuscleVolumeScale.veryHigh)
+    }
+
+    /// Assistance still counts for something — it tops a muscle up towards the
+    /// next band, it just cannot carry one there on its own.
+    @Test func assistingWorkStillTopsUpDirectWork() {
+        let alone = biceps(curls: 3, rows: 0)?.effective ?? 0
+        let topped = biceps(curls: 3, rows: 8)?.effective ?? 0
+        #expect(topped > alone)
+        #expect(bicepsColour(curls: 3, rows: 8) == MuscleVolumeScale.productive,
+                "three curls plus a back day is a productive week for the biceps")
+    }
+
+    /// Every muscle is classified, and each class is ordered sensibly.
+    @Test func everyMuscleHasCoherentTargets() {
+        for muscle in MuscleGroup.allCases {
+            let t = muscle.weeklyTargets
+            #expect(t.productiveFrom < t.highFrom)
+            #expect(t.highFrom < t.veryHighFrom)
+            // Assistance asymptotes at the top of green, so it can deliver a
+            // productive week and can never deliver a high one.
+            #expect(t.assistingCeiling == t.highFrom)
+        }
+    }
+
+    /// The muscles almost nobody trains directly are judged on a lower bar, so
+    /// they report something other than "needs work" every week of your life.
+    @Test func tinyMusclesAreReachableByAssistanceAlone() {
+        let press = UUID()
+        let records = (0..<14).map { i in
+            LiftRecord(date: week.start.addingTimeInterval(Double(i) * 3600),
+                       exerciseID: press, weightKg: 60, reps: 8, isWarmup: false)
+        }
+        let v = agg.weeklyVolume(records: records,
+                                 muscles: [press: [.chest: 5, .serratus: 2]],
+                                 week: week)
+        #expect(MuscleGroup.serratus.size == .tiny)
+        #expect(MuscleVolumeScale.colour(for: v[.serratus], muscle: .serratus)
+                == MuscleVolumeScale.productive,
+                "fourteen sets of pressing is a worked serratus")
     }
 }

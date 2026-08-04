@@ -38,27 +38,22 @@ struct TrainingView: View {
 
     /// One row of the weekly table.
     ///
-    /// Three numbers because they answer three different questions, and
-    /// collapsing them loses one. `sets` is what a person did — two sets are two
-    /// sets. `secondary` is work the muscle took without being the point of the
-    /// exercise. `weighted` knows a chin-up is worth more to the lats than to
-    /// the abs, which is the ordering worth seeing, and it separates rows that
-    /// would otherwise tie at the same whole number.
+    /// Carries the whole `EffectiveVolume` rather than a flattened number,
+    /// because the row shows the direct count, sorts on the effective total, and
+    /// colours on both — and those are three different questions.
     private struct MuscleRow: Identifiable {
         let muscle: MuscleGroup
-        /// Sets that targeted this muscle — tension at or above `fullSetTension`.
-        let sets: Int
-        /// Sets that involved it without targeting it.
-        let secondary: Int
-        /// Tension-weighted total. Sorts and colours; never shown as a number.
-        let weighted: Double
+        let volume: VolumeAggregator.EffectiveVolume?
 
         var id: MuscleGroup { muscle }
 
-        /// Worked, but never as the target. The lower back after a week of
-        /// squats. Shown with its own count and a qualifier rather than the
-        /// dash it used to get, which contradicted the coloured diagram above.
-        var isSecondaryOnly: Bool { sets == 0 && secondary > 0 }
+        var sets: Int { volume?.direct ?? 0 }
+        var secondary: Int { volume?.secondary ?? 0 }
+        /// Sorts. Direct sets plus the capped assisting credit.
+        var effective: Double { volume?.effective ?? 0 }
+
+        /// Worked, but never as the target — the biceps after a pull day.
+        var isSecondaryOnly: Bool { volume?.isSecondaryOnly ?? false }
 
         /// The number the row prints, whichever kind of set it is.
         var displayedSets: Int { sets > 0 ? sets : secondary }
@@ -71,18 +66,15 @@ struct TrainingView: View {
     /// the gap is what the table exists to show.
     private var weeklyRows: [MuscleRow] {
         let volume = thisWeekVolume
-        let counts = thisWeekSetCounts
-        let secondary = thisWeekSecondaryCounts
         let term = muscleQuery.trimmingCharacters(in: .whitespaces)
         return MuscleGroup.allCases
-            .map { MuscleRow(muscle: $0, sets: counts[$0] ?? 0,
-                             secondary: secondary[$0] ?? 0, weighted: volume[$0] ?? 0) }
+            .map { MuscleRow(muscle: $0, volume: volume[$0]) }
             .filter { term.isEmpty || $0.muscle.displayName.localizedCaseInsensitiveContains(term) }
             .sorted { a, b in
                 // Alphabetical tiebreak so the many zero rows keep a stable,
                 // findable order instead of shuffling on every redraw.
-                if a.weighted != b.weighted {
-                    return leastTrainedFirst ? a.weighted < b.weighted : a.weighted > b.weighted
+                if a.effective != b.effective {
+                    return leastTrainedFirst ? a.effective < b.effective : a.effective > b.effective
                 }
                 return a.muscle.displayName < b.muscle.displayName
             }
@@ -105,22 +97,12 @@ struct TrainingView: View {
         Calendar(identifier: .iso8601).dateInterval(of: .weekOfYear, for: .now)
     }
 
-    private var thisWeekSetCounts: [MuscleGroup: Int] {
+    /// One pass over the week, since the table, the ordering and the diagram all
+    /// read the same figures.
+    private var thisWeekVolume: [MuscleGroup: VolumeAggregator.EffectiveVolume] {
         guard let week = currentWeek else { return [:] }
-        return VolumeAggregator().weeklySetCounts(records: allRecords,
-                                                  muscles: muscleTension, week: week)
-    }
-
-    private var thisWeekSecondaryCounts: [MuscleGroup: Int] {
-        guard let week = currentWeek else { return [:] }
-        return VolumeAggregator().weeklySecondarySetCounts(records: allRecords,
-                                                           muscles: muscleTension, week: week)
-    }
-
-    private var thisWeekVolume: [MuscleGroup: Double] {
-        guard let week = currentWeek else { return [:] }
-        return VolumeAggregator().weeklySets(records: allRecords,
-                                             muscles: muscleTension, week: week)
+        return VolumeAggregator().weeklyVolume(records: allRecords,
+                                               muscles: muscleTension, week: week)
     }
 
     /// Gym sessions started today.
@@ -252,8 +234,8 @@ struct TrainingView: View {
                     // happens to be listed first.
                     MuscleMap(figure: BodyArt.figure(for: profiles.first?.sex ?? .other),
                               untrained: MuscleVolumeScale.untrained,
-                              rank: { thisWeekVolume[$0] ?? 0 },
-                              colour: { MuscleVolumeScale.colour(forWeightedSets: thisWeekVolume[$0] ?? 0) })
+                              rank: { thisWeekVolume[$0]?.effective ?? 0 },
+                              colour: { MuscleVolumeScale.colour(for: thisWeekVolume[$0], muscle: $0) })
                         .frame(height: 340)
                         .padding(.vertical, 4)
                         .listRowInsets(.init(top: 6, leading: 6, bottom: 6, trailing: 6))
@@ -432,7 +414,7 @@ struct TrainingView: View {
                     }
                     Text(setsLabel(row))
                         .monospacedDigit()
-                        .foregroundStyle(row.sets == 0 ? .secondary : volumeColor(row.weighted))
+                        .foregroundStyle(rowColour(row))
                 }
             }
         } header: {
@@ -474,25 +456,17 @@ struct TrainingView: View {
         }
     }
 
-    /// Bands the weighted total, not the count beside it.
+    /// The row's text colour, on exactly the diagram's scale.
     ///
-    /// The two answer different questions. The number says how many sets you
-    /// put in — a tally you can check against what you remember doing. The
-    /// colour says how much stimulus the muscle actually took, where three sets
-    /// of bench mean more to the chest than to the front delts that shared
-    /// them. Banding the count instead would paint both the same.
+    /// One function, one answer: the number in the table and the shade on the
+    /// figure above it now come from the same call, so they cannot disagree.
     ///
-    /// On the diagram's scale, not a second one. This used to band on
-    /// `weeklySetTargets` (10–20), so a muscle at 4 weighted sets was green on
-    /// the figure and grey in the table directly beneath it. One scale, one
-    /// answer.
-    ///
-    /// `.secondary` stands in below the floor: the scale's own `untrained` is a
-    /// fill colour for the body map and would be all but invisible as text.
-    private func volumeColor(_ sets: Double) -> Color {
-        sets > MuscleVolumeScale.minimumTrained
-            ? MuscleVolumeScale.colour(forWeightedSets: sets)
-            : .secondary
+    /// `.secondary` stands in for an untrained muscle — the scale's own grey is
+    /// a fill colour for the body map and would be all but invisible as text.
+    private func rowColour(_ row: MuscleRow) -> Color {
+        guard row.volume != nil else { return .secondary }
+        let colour = MuscleVolumeScale.colour(for: row.volume, muscle: row.muscle)
+        return colour == MuscleVolumeScale.untrained ? .secondary : colour
     }
 
     private func start(named templateName: String?) {
