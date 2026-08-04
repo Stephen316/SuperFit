@@ -40,6 +40,18 @@ struct SettingsView: View {
                     }
                 }
 
+                // Moved here when the dashboard's Trends button became the
+                // streak flame. That button was the only route to this screen,
+                // so dropping it would have made every chart in the app
+                // unreachable without deleting a line of them.
+                Section("Trends") {
+                    NavigationLink {
+                        HistoryView()
+                    } label: {
+                        Label("Charts and history", systemImage: "chart.xyaxis.line")
+                    }
+                }
+
                 Section("Appearance") {
                     Picker("Appearance", selection: $appearanceRaw) {
                         ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in

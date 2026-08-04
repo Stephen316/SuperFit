@@ -36,7 +36,6 @@ struct DashboardView: View {
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var addingTo: MealSlot?
     @State private var syncing = false
-    @State private var showingHistory = false
     @State private var showingMacro: TrackedMacro?
     @State private var showingConsumed = false
     @State private var showingSteps = false
@@ -152,7 +151,6 @@ struct DashboardView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showingHistory) { HistoryView() }
             .sheet(item: $showingMacro) { MacroAdherenceView(macro: $0) }
             .sheet(isPresented: $showingConsumed) { ConsumedFoodsView(day: day) }
             .sheet(isPresented: $showingSteps) { StepsHistoryView() }
@@ -175,9 +173,8 @@ struct DashboardView: View {
 
     /// header-row: 64 tall, 24 horizontal padding, title left and controls right.
     ///
-    /// The frame shows one control. Trends would have nowhere to live, and losing
-    /// it would cost a whole screen, so it sits beside the gear in the same 40pt
-    /// treatment rather than being dropped.
+    /// The streak sits where Trends used to. Trends moved into Settings rather
+    /// than being deleted — that button was the only route to it.
     private var headerRow: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
@@ -187,11 +184,78 @@ struct DashboardView: View {
                 dayStepper
             }
             Spacer(minLength: 0)
-            circleButton("chart.xyaxis.line", label: "Trends") { showingHistory = true }
+            streakBadge
             circleButton("gearshape", label: "Settings") { showingSettings = true }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    /// Consecutive days ending today on which anything was logged.
+    ///
+    /// Food or a weigh-in both count. The streak is there to reward keeping the
+    /// model fed, and either one does that — demanding both would break a streak
+    /// on a day someone ate carefully but didn't stand on the scale, which
+    /// punishes the wrong thing.
+    ///
+    /// **Today not being logged does not break it.** The count runs from
+    /// yesterday in that case, because the day isn't over — a streak that resets
+    /// at midnight and only returns after breakfast would spend every morning
+    /// lying about the last three weeks.
+    ///
+    /// Capped at a year of history so this stays bounded on a long-lived store;
+    /// nobody is served differently by a 400-day streak than a 365-day one.
+    private var loggingStreak: Int {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let earliest = cal.date(byAdding: .day, value: -365, to: today) ?? today
+
+        var logged = Set<Date>()
+        for l in nutrition where l.date >= earliest { logged.insert(cal.startOfDay(for: l.date)) }
+        for m in metrics where m.date >= earliest { logged.insert(cal.startOfDay(for: m.date)) }
+        guard !logged.isEmpty else { return 0 }
+
+        var cursor = today
+        if !logged.contains(cursor) {
+            guard let yesterday = cal.date(byAdding: .day, value: -1, to: cursor) else { return 0 }
+            cursor = yesterday
+        }
+        var days = 0
+        while logged.contains(cursor) {
+            days += 1
+            guard let previous = cal.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+        return days
+    }
+
+    /// The streak, lit from two consecutive days.
+    ///
+    /// Two, not one. A single logged day is not a streak, and a flame that lit
+    /// on day one would be lit almost permanently — which would make it mean
+    /// nothing. The unlit state still shows the count, so day one reads as
+    /// progress towards something rather than as a failure.
+    private var streakBadge: some View {
+        let streak = loggingStreak
+        let lit = streak >= 2
+        return HStack(spacing: 5) {
+            Image(systemName: lit ? "flame.fill" : "flame")
+                .font(.system(size: 16))
+                .foregroundStyle(lit ? Theme.gold : Theme.textSecondary.opacity(0.55))
+            Text("\(streak)")
+                .font(Theme.text(15, .semibold))
+                .monospacedDigit()
+                .foregroundStyle(lit ? Theme.textPrimary : Theme.textSecondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+        .background(Capsule().fill(Theme.wash))
+        .overlay(Capsule().strokeBorder(lit ? Theme.gold.opacity(0.45) : Theme.hairline,
+                                        lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(lit
+                            ? "Logging streak, \(streak) days"
+                            : "No logging streak yet, \(streak) of 2 days")
     }
 
     private static let dayFormatter: DateFormatter = {
