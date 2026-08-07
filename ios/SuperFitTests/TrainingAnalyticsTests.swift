@@ -365,3 +365,59 @@ struct MuscleVolumeScaleTests {
                 "fourteen sets of pressing is a worked serratus")
     }
 }
+
+/// The whole-body summary shown under the diagram.
+struct OverallBandTests {
+
+    private let agg = VolumeAggregator()
+    private let week = DateInterval(start: Date(timeIntervalSince1970: 1_700_000_000),
+                                    duration: 7 * 86_400)
+
+    private func volumes(_ tension: [MuscleGroup: Int], sets n: Int)
+        -> [MuscleGroup: VolumeAggregator.EffectiveVolume] {
+        let id = UUID()
+        let records = (0..<n).map { i in
+            LiftRecord(date: week.start.addingTimeInterval(Double(i) * 3600),
+                       exerciseID: id, weightKg: 40, reps: 10, isWarmup: false)
+        }
+        return agg.weeklyVolume(records: records, muscles: [id: tension], week: week)
+    }
+
+    @Test func anEmptyWeekIsNotTrained() {
+        #expect(MuscleVolumeScale.overall([:]) == .untrained)
+    }
+
+    /// Muscles you never touched still count. Training one muscle hard does not
+    /// make the body's week a good one.
+    @Test func oneHardMuscleDoesNotCarryTheWholeBody() {
+        let v = volumes([.biceps: 5], sets: 20)
+        #expect(MuscleVolumeScale.band(for: v[.biceps], muscle: .biceps) == .veryHigh)
+        #expect(MuscleVolumeScale.overall(v) == .untrained,
+                "one muscle out of 37 cannot lift the average off the floor")
+    }
+
+    /// Everything on track reads as on track.
+    @Test func aBalancedWeekReadsOnTrack() {
+        var v: [MuscleGroup: VolumeAggregator.EffectiveVolume] = [:]
+        for muscle in MuscleGroup.allCases {
+            let target = muscle.weeklyTargets
+            let mid = (target.productiveFrom + target.highFrom) / 2
+            v[muscle] = .init(direct: Int(mid), secondary: 0, effective: mid)
+        }
+        #expect(MuscleVolumeScale.overall(v) == .onTrack)
+    }
+
+    /// And the summary tracks the bands rather than the raw numbers, so a body
+    /// of large muscles at 8 sets is judged differently from small ones at 8.
+    @Test func theSummaryUsesEachMusclesOwnTargets() {
+        var v: [MuscleGroup: VolumeAggregator.EffectiveVolume] = [:]
+        for muscle in MuscleGroup.allCases {
+            v[muscle] = .init(direct: 8, secondary: 0, effective: 8)
+        }
+        // 8 sets is "on track" for a large muscle and "high" for a small one,
+        // so the body average lands between the two.
+        #expect(MuscleVolumeScale.band(for: v[.lats], muscle: .lats) == .onTrack)
+        #expect(MuscleVolumeScale.band(for: v[.biceps], muscle: .biceps) == .high)
+        #expect(MuscleVolumeScale.overall(v) >= .onTrack)
+    }
+}

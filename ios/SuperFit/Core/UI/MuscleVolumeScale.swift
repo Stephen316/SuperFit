@@ -33,7 +33,37 @@ enum MuscleVolumeScale {
     static let high = Color(red: 0.30, green: 0.62, blue: 0.93)           // blue
     static let veryHigh = Color(red: 0.63, green: 0.44, blue: 0.90)       // purple
 
-    /// The colour for a week's work on one muscle.
+    /// Where a week's work on one muscle lands.
+    ///
+    /// An ordered type rather than a bare colour, because the bands need to be
+    /// averaged across the body for the summary — and colours cannot be.
+    enum Band: Int, CaseIterable, Comparable {
+        case untrained = 0, needsWork, onTrack, high, veryHigh
+
+        var colour: Color {
+            switch self {
+            case .untrained: return MuscleVolumeScale.untrained
+            case .needsWork: return MuscleVolumeScale.insufficient
+            case .onTrack:   return MuscleVolumeScale.productive
+            case .high:      return MuscleVolumeScale.high
+            case .veryHigh:  return MuscleVolumeScale.veryHigh
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .untrained: return "Not trained"
+            case .needsWork: return "Needs work"
+            case .onTrack:   return "On track"
+            case .high:      return "High"
+            case .veryHigh:  return "Very high"
+            }
+        }
+
+        static func < (a: Band, b: Band) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    /// The band a week's work on one muscle falls in.
     ///
     /// **Assisting work alone can reach green, and never blue.** The colour is a
     /// comparison — how hard you trained this muscle against how hard most
@@ -42,29 +72,39 @@ enum MuscleVolumeScale {
     /// the kind of week that builds them fastest, which is why the saturation in
     /// `WeeklySetTargets.assistingCeiling` keeps assistance short of blue
     /// however much of it there is.
-    static func colour(for volume: VolumeAggregator.EffectiveVolume?,
-                       muscle: MuscleGroup) -> Color {
-        guard let volume, volume.effective > 0 else { return untrained }
+    static func band(for volume: VolumeAggregator.EffectiveVolume?,
+                     muscle: MuscleGroup) -> Band {
+        guard let volume, volume.effective > 0 else { return .untrained }
         let t = muscle.weeklyTargets
         switch volume.effective {
-        case ..<t.productiveFrom: return insufficient
-        case ..<t.highFrom:       return productive
-        case ..<t.veryHighFrom:   return high
-        default:                  return veryHigh
+        case ..<t.productiveFrom: return .needsWork
+        case ..<t.highFrom:       return .onTrack
+        case ..<t.veryHighFrom:   return .high
+        default:                  return .veryHigh
         }
     }
 
-    /// Legend for one muscle size — the numbers differ between them, so a
-    /// single legend would be wrong for two thirds of the body.
-    static func legend(for size: MuscleSize) -> [(label: String, detail: String, colour: Color)] {
-        let t = size.targets
-        func n(_ v: Double) -> String { String(Int(v)) }
-        return [
-            ("Not trained", "nothing logged", untrained),
-            ("Needs work", "secondary only, or under \(n(t.productiveFrom))", insufficient),
-            ("On track", "\(n(t.productiveFrom)) to \(n(t.highFrom))", productive),
-            ("High", "\(n(t.highFrom)) to \(n(t.veryHighFrom))", high),
-            ("Very high", "\(n(t.veryHighFrom))+, competitive volume", veryHigh),
-        ]
+    static func colour(for volume: VolumeAggregator.EffectiveVolume?,
+                       muscle: MuscleGroup) -> Color {
+        band(for: volume, muscle: muscle).colour
+    }
+
+    /// The whole body's week, as one band.
+    ///
+    /// The mean band across every muscle group, rounded to the nearest. Averaged
+    /// on the *band* rather than on sets, because raw sets are not comparable
+    /// between a quad and a wrist flexor — each muscle is already judged against
+    /// its own targets by the time it has a band, so the bands are the only
+    /// figures on a common scale.
+    ///
+    /// Every group counts, including ones never touched. A summary that quietly
+    /// ignored the muscles you skipped would say you were on track in the exact
+    /// case where you are not.
+    static func overall(_ volumes: [MuscleGroup: VolumeAggregator.EffectiveVolume]) -> Band {
+        let all = MuscleGroup.allCases
+        guard !all.isEmpty else { return .untrained }
+        let total = all.reduce(0) { $0 + band(for: volumes[$1], muscle: $1).rawValue }
+        let mean = Double(total) / Double(all.count)
+        return Band(rawValue: Int(mean.rounded())) ?? .untrained
     }
 }

@@ -224,7 +224,7 @@ struct TrainingView: View {
                     }
                 }
 
-                Section("Muscles worked this week") {
+                Section {
                     // Tall enough that width, not height, is the binding
                     // constraint — otherwise the pair is letterboxed and the
                     // hands stop short of the card edges.
@@ -239,6 +239,10 @@ struct TrainingView: View {
                         .frame(height: 340)
                         .padding(.vertical, 4)
                         .listRowInsets(.init(top: 6, leading: 6, bottom: 6, trailing: 6))
+
+                    overallBand
+                } header: {
+                    Text("Muscles worked this week")
                 }
 
                 weeklyTable
@@ -376,6 +380,30 @@ struct TrainingView: View {
         case .elevated: return .orange
         case .spike: return .red
         }
+    }
+
+    /// The whole body's week in one box.
+    ///
+    /// The diagram shows where the work went; this says whether there was
+    /// enough of it. Deliberately just a colour and a word — the thresholds
+    /// behind it differ per muscle, and spelling that out here would be a
+    /// paragraph nobody reads under a picture that already made the point.
+    private var overallBand: some View {
+        let band = MuscleVolumeScale.overall(thisWeekVolume)
+        return Text(band.title)
+            .font(Theme.text(15, .semibold))
+            .foregroundStyle(band.colour)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                    .fill(band.colour.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                    .strokeBorder(band.colour.opacity(0.45), lineWidth: 1)
+            )
+            .listRowInsets(.init(top: 2, leading: 12, bottom: 10, trailing: 12))
     }
 
     /// Every muscle group and what it got this week, sortable and searchable.
