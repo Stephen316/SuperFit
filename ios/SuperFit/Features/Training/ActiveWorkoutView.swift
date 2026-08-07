@@ -146,8 +146,8 @@ struct ActiveWorkoutView: View {
         let previous = sets.filter { $0.exerciseID == exercise.id }.max { $0.order < $1.order }
         let entry = SetEntry(order: (sets.map(\.order).max() ?? 0) + 1,
                              exerciseID: exercise.id,
-                             weightKg: previous?.weightKg ?? 0,
-                             reps: previous?.reps ?? 8)
+                             weightKg: previous?.weightKg,
+                             reps: previous?.reps ?? SetRow.defaultReps)
         entry.session = session
         context.insert(entry)
         try? context.save()
@@ -190,8 +190,8 @@ private struct ExerciseSection: View {
             Button {
                 let entry = SetEntry(order: ((session.sets ?? []).map(\.order).max() ?? 0) + 1,
                                      exerciseID: exercise.id,
-                                     weightKg: sets.last?.weightKg ?? 0,
-                                     reps: sets.last?.reps ?? 8)
+                                     weightKg: sets.last?.weightKg,
+                                     reps: sets.last?.reps ?? SetRow.defaultReps)
                 entry.session = session
                 context.insert(entry)
                 try? context.save()
@@ -209,15 +209,26 @@ private struct SetRow: View {
     @Environment(\.modelContext) private var context
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
+    @State private var editing: Field?
+
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
+
+    /// Which cell the entry sheet is editing. `Identifiable` so it drives a
+    /// `.sheet(item:)` — one sheet, whichever cell was tapped.
+    private enum Field: Identifiable {
+        case weight, reps
+        var id: Int { self == .weight ? 0 : 1 }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            field(units.weightUnit,
-                  value: Binding(get: { units.displayWeight(set.weightKg) },
-                                 set: { set.weightKg = units.storeWeight($0).clamped(to: 0...500) }))
-            field("reps", value: Binding(get: { Double(set.reps) },
-                                         set: { set.reps = Int($0.clamped(to: 0...100)) }))
+            // Tap targets, not inline text fields. The old fields dropped the
+            // caret at the *left* of the digits, so correcting one meant tapping
+            // precisely to the right before backspacing. These open a sheet with
+            // an empty box instead, so a value is always typed fresh.
+            cell(weightText, unit: units.weightUnit) { editing = .weight }
+            cell("\(set.reps)", unit: "reps") { editing = .reps }
+
             Picker("RIR", selection: Binding(get: { set.rir ?? -1 },
                                              set: { set.rir = $0 < 0 ? nil : $0 })) {
                 Text("RIR").tag(-1)
@@ -238,6 +249,38 @@ private struct SetRow: View {
             }
             .buttonStyle(.plain)
         }
+        .sheet(item: $editing) { field in
+            switch field {
+            case .weight:
+                NumberEntrySheet(title: "Weight", unit: units.weightUnit, allowsDecimal: true) { value in
+                    // Blank sets it back to "—"; a typed 0 is kept. Both are the
+                    // user's choice, which is the whole point of the "—" default.
+                    set.weightKg = value.map { units.storeWeight($0).clamped(to: 0...500) }
+                    try? context.save()
+                }
+            case .reps:
+                NumberEntrySheet(title: "Reps", unit: "reps", allowsDecimal: false) { value in
+                    // Blank restores the default rather than leaving reps empty.
+                    set.reps = value.map { Int($0.clamped(to: 0...100)) } ?? Self.defaultReps
+                    try? context.save()
+                }
+            }
+        }
+    }
+
+    /// Reps a fresh set starts at, and what a blank entry restores.
+    static let defaultReps = 8
+
+    /// Placeholder shown until a weight is entered.
+    static let unset = "--"
+
+    /// The weight cell's text: the number, or "--" until one is entered.
+    private var weightText: String {
+        guard let kg = set.weightKg else { return Self.unset }
+        let shown = units.displayWeight(kg)
+        return shown == shown.rounded()
+            ? String(Int(shown))
+            : String(format: "%.1f", shown)
     }
 
     /// Heavier, lower-rep sets earn longer rest. (`return` is required: the
@@ -247,15 +290,90 @@ private struct SetRow: View {
         return set.reps <= 6 ? 180 : 120
     }
 
-    private func field(_ unit: String, value: Binding<Double>) -> some View {
-        HStack(spacing: 2) {
-            TextField("0", value: value, format: .number.precision(.fractionLength(0...1)))
-                .keyboardType(.decimalPad)
-                .frame(width: 48)
-                .multilineTextAlignment(.trailing)
-                .textFieldStyle(.roundedBorder)
-            Text(unit).font(.caption2).foregroundStyle(.secondary)
+    /// A tappable value cell that reads like an editable field.
+    private func cell(_ text: String, unit: String, tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            HStack(spacing: 2) {
+                Text(text)
+                    .monospacedDigit()
+                    .foregroundStyle(text == Self.unset ? .secondary : .primary)
+                    .frame(minWidth: 34, alignment: .trailing)
+                Text(unit).font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.wash))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1))
         }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A single-number entry, opened by tapping a set cell.
+///
+/// Always opens **empty** with the keyboard already up, so the number is typed
+/// fresh — no fighting a caret to delete the old one. The number pad carries a
+/// decimal key for weights (12.5 kg) and none for reps.
+private struct NumberEntrySheet: View {
+    let title: String
+    let unit: String
+    let allowsDecimal: Bool
+    /// nil means the box was left blank — the caller decides what that restores.
+    let onCommit: (Double?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text(title)
+                .font(Theme.text(15, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                TextField("0", text: $text)
+                    .keyboardType(allowsDecimal ? .decimalPad : .numberPad)
+                    .focused($focused)
+                    .font(.system(size: 40, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textPrimary)
+                    .onSubmit(commit)
+                Text(unit)
+                    .font(Theme.text(16))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            HStack(spacing: 12) {
+                Button("Cancel") { dismiss() }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: Theme.controlRadius)
+                        .fill(Theme.wash))
+                    .foregroundStyle(Theme.textSecondary)
+                Button("Set", action: commit)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: Theme.controlRadius)
+                        .fill(Theme.gold))
+                    .foregroundStyle(.black)
+            }
+            .buttonStyle(.plain)
+            .font(Theme.text(15, .semibold))
+        }
+        .padding(20)
+        .presentationDetents([.height(200)])
+        .presentationDragIndicator(.visible)
+        .onAppear { focused = true }
+    }
+
+    private func commit() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        onCommit(trimmed.isEmpty ? nil : Double(trimmed))
+        dismiss()
     }
 }
 

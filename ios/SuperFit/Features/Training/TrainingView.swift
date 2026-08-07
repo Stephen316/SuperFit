@@ -29,7 +29,7 @@ struct TrainingView: View {
             (s.sets ?? []).compactMap { set -> LiftRecord? in
                 guard let id = set.exerciseID else { return nil }
                 return LiftRecord(date: s.startedAt, exerciseID: id,
-                                  weightKg: set.weightKg, reps: set.reps,
+                                  weightKg: set.weightKg ?? 0, reps: set.reps,
                                   isWarmup: set.isWarmup,
                                   bodyweightFraction: fractions[id] ?? 0)
             }

@@ -436,7 +436,7 @@ struct HistoryView: View {
         return sessions.flatMap { s in
             (s.sets ?? []).compactMap { set in
                 set.exerciseID.map {
-                    LiftRecord(date: s.startedAt, exerciseID: $0, weightKg: set.weightKg,
+                    LiftRecord(date: s.startedAt, exerciseID: $0, weightKg: set.weightKg ?? 0,
                                reps: set.reps, isWarmup: set.isWarmup,
                                bodyweightFraction: fractions[$0] ?? 0)
                 }

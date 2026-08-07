@@ -596,7 +596,10 @@ final class TrainingSession {
 final class SetEntry {
     var order: Int = 0
     var exerciseID: UUID?
-    var weightKg: Double = 0
+    /// nil until the user enters a number. 0 is a value they typed, never the
+    /// default — the row shows "—" while this is nil, so an untouched set can't
+    /// masquerade as a real 0 kg lift.
+    var weightKg: Double?
     var reps: Int = 0
     var rir: Int?
     var restSeconds: Int?
@@ -604,14 +607,16 @@ final class SetEntry {
     var isWarmup: Bool = false
     var session: TrainingSession?
 
-    init(order: Int, exerciseID: UUID, weightKg: Double, reps: Int) {
+    init(order: Int, exerciseID: UUID, weightKg: Double? = nil, reps: Int) {
         self.order = order
         self.exerciseID = exerciseID
         self.weightKg = weightKg
         self.reps = reps
     }
 
-    var volumeKg: Double { isWarmup ? 0 : weightKg * Double(reps) }
+    /// Zero when the weight hasn't been entered — an unlogged set contributes no
+    /// tonnage rather than being undefined.
+    var volumeKg: Double { isWarmup ? 0 : (weightKg ?? 0) * Double(reps) }
 }
 
 @Model

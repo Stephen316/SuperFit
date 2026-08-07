@@ -195,7 +195,7 @@ enum DataArchiveService {
             .init(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt,
                   templateName: s.templateName,
                   sets: (s.sets ?? []).sorted { $0.order < $1.order }.map {
-                      .init(order: $0.order, exerciseID: $0.exerciseID, weightKg: $0.weightKg,
+                      .init(order: $0.order, exerciseID: $0.exerciseID, weightKg: $0.weightKg ?? 0,
                             reps: $0.reps, rir: $0.rir, isWarmup: $0.isWarmup,
                             completedAt: $0.completedAt)
                   })
