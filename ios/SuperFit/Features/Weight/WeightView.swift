@@ -7,7 +7,7 @@ struct WeightView: View {
     @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
-    @State private var entry = ""
+    @State private var loggingWeight = false
     /// The row being corrected. A mistyped weigh-in skews the trend and the TDEE
     /// estimate built on it, so fixing one has to be possible without deleting
     /// and re-adding at today's date — which would move it to the wrong day.
@@ -146,13 +146,15 @@ struct WeightView: View {
                 }
 
                 Section("Log weight") {
-                    HStack {
-                        TextField("Weight in \(units.weightUnit)", text: $entry)
-                            .keyboardType(.decimalPad)
-                        Text(units.weightUnit).foregroundStyle(.secondary)
-                        Button("Add", action: addEntry)
-                            .disabled(Double(entry) == nil)
+                    Button { loggingWeight = true } label: {
+                        HStack {
+                            Text("Add a weigh-in")
+                            Spacer()
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Theme.gold)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
 
                 Section {
@@ -252,6 +254,10 @@ struct WeightView: View {
             } message: {
                 Text(rejected ?? "")
             }
+            .sheet(isPresented: $loggingWeight) {
+                NumberEntrySheet(title: "Weigh-in", unit: units.weightUnit,
+                                 allowsDecimal: true, onCommit: addWeight)
+            }
         }
     }
 
@@ -265,19 +271,18 @@ struct WeightView: View {
     /// or pounds typed while set to kilograms.
     private static let acceptedKg = 30.0...300.0
 
-    private func addEntry() {
-        guard let value = Double(entry) else { return }
-        let kg = units.storeWeight(value)
+    /// Records a weigh-in from the entry sheet. Blank is a no-op — the sheet was
+    /// opened and dismissed without a number.
+    private func addWeight(_ display: Double?) {
+        guard let display else { return }
+        let kg = units.storeWeight(display)
         guard Self.acceptedKg.contains(kg) else {
-            // Was a silent no-op: the button appeared to do nothing and the entry
-            // stayed in the field with no reason given.
             rejected = outOfRangeMessage
             return
         }
         context.insert(BodyMetrics(date: .now, weightKg: kg, source: .manual))
         recomputeTrend()
         try? context.save()
-        entry = ""
     }
 
     private var outOfRangeMessage: String {

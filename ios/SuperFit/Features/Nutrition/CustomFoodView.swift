@@ -42,12 +42,7 @@ struct CustomFoodView: View {
                     .pickerStyle(.segmented)
                     if basis == .perServing {
                         LabeledContent("Serving size") {
-                            HStack(spacing: 4) {
-                                TextField("0", value: $servingGrams, format: .number)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                Text("g").foregroundStyle(.secondary)
-                            }
+                            NumberField(title: "Serving size", unit: "g", value: $servingGrams)
                         }
                     }
                 } header: {
@@ -120,9 +115,7 @@ struct CustomFoodView: View {
 
     private func field(_ label: String, _ value: Binding<Double?>) -> some View {
         LabeledContent(label) {
-            TextField("0", value: value, format: .number)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
+            NumberField(title: label, value: value)
         }
     }
 
