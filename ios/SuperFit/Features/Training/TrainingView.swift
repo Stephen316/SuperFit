@@ -25,15 +25,7 @@ struct TrainingView: View {
     private var allRecords: [LiftRecord] {
         let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
                                    uniquingKeysWith: { a, _ in a })
-        return sessions.flatMap { s in
-            (s.sets ?? []).compactMap { set -> LiftRecord? in
-                guard let id = set.exerciseID else { return nil }
-                return LiftRecord(date: s.startedAt, exerciseID: id,
-                                  weightKg: set.weightKg ?? 0, reps: set.reps,
-                                  isWarmup: set.isWarmup,
-                                  bodyweightFraction: fractions[id] ?? 0)
-            }
-        }
+        return TrainingRecords.completed(sessions, fractions: fractions)
     }
 
     /// One row of the weekly table.
@@ -105,9 +97,18 @@ struct TrainingView: View {
                                                muscles: muscleTension, week: week)
     }
 
-    /// Gym sessions started today.
+    /// Whether a session logged real work — at least one completed, non-warmup
+    /// set. A session that was started and abandoned without ticking anything is
+    /// a plan, not a workout, so it stays out of the history lists.
+    static func hasCompletedWork(_ session: TrainingSession) -> Bool {
+        (session.sets ?? []).contains { $0.completedAt != nil && !$0.isWarmup }
+    }
+
+    /// Gym sessions started today that actually logged a set.
     private var todaySessions: [TrainingSession] {
-        sessions.filter { Calendar.current.isDateInToday($0.startedAt) }
+        sessions.filter {
+            Calendar.current.isDateInToday($0.startedAt) && Self.hasCompletedWork($0)
+        }
     }
 
     /// The seven days before today, newest first, grouped by day.
@@ -122,7 +123,9 @@ struct TrainingView: View {
         let cal = Calendar.current
         let today = cal.startOfDay(for: .now)
         guard let from = cal.date(byAdding: .day, value: -7, to: today) else { return [] }
-        let window = sessions.filter { $0.startedAt >= from && $0.startedAt < today }
+        let window = sessions.filter {
+            $0.startedAt >= from && $0.startedAt < today && Self.hasCompletedWork($0)
+        }
         return Dictionary(grouping: window) { cal.startOfDay(for: $0.startedAt) }
             .map { (day: $0.key, sessions: $0.value.sorted { $0.startedAt > $1.startedAt }) }
             .sorted { $0.day > $1.day }
@@ -556,7 +559,11 @@ struct SessionRow: View {
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
-    private var workingSets: [SetEntry] { (session.sets ?? []).filter { !$0.isWarmup } }
+    /// Completed working sets — what the row's count and tonnage reflect, so a
+    /// planned-but-unticked set doesn't inflate the summary.
+    private var workingSets: [SetEntry] {
+        (session.sets ?? []).filter { !$0.isWarmup && $0.completedAt != nil }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {

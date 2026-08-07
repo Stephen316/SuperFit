@@ -14,6 +14,7 @@ struct ActiveWorkoutView: View {
     @State private var savingTemplate = false
     @State private var templateName = ""
     @State private var confirmingOverwrite = false
+    @State private var confirmingDiscard = false
 
     private var plannedExercises: [Exercise] {
         guard let name = session.templateName,
@@ -88,6 +89,18 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Replace the existing workout with this one, or cancel to pick a different name.")
             }
+            .alert("No sets completed", isPresented: $confirmingDiscard) {
+                // A fresh session with exercises is worth keeping as a plan even
+                // when nothing was done — that is what "saved workouts" are for.
+                if session.templateName == nil, !performedExerciseIDs.isEmpty {
+                    Button("Save as workout") { templateName = ""; savingTemplate = true }
+                }
+                Button("Discard workout", role: .destructive) { discard() }
+                Button("Keep going", role: .cancel) {}
+            } message: {
+                Text("Tick a set as you finish it to log it. Nothing here counts as "
+                     + "trained yet, so this workout won't be saved.")
+            }
         }
     }
 
@@ -112,6 +125,11 @@ struct ActiveWorkoutView: View {
         savedTemplates.first { $0.name.caseInsensitiveCompare(trimmedTemplateName) == .orderedSame }
     }
 
+    /// Completed, non-warmup sets. Nothing here means nothing was trained.
+    private var completedSetCount: Int {
+        (session.sets ?? []).filter { $0.completedAt != nil && !$0.isWarmup }.count
+    }
+
     private func saveTemplate() {
         guard !trimmedTemplateName.isEmpty else { dismiss(); return }
         if existingTemplate != nil {
@@ -121,6 +139,7 @@ struct ActiveWorkoutView: View {
         let template = WorkoutTemplate(name: trimmedTemplateName)
         context.insert(template)
         setItems(on: template)
+        discardIfEmpty()
         try? context.save()
         dismiss()
     }
@@ -129,6 +148,20 @@ struct ActiveWorkoutView: View {
         guard let existing = existingTemplate else { dismiss(); return }
         for item in existing.items ?? [] { context.delete(item) }
         setItems(on: existing)
+        discardIfEmpty()
+        try? context.save()
+        dismiss()
+    }
+
+    /// After saving the plan, bin the session itself if nothing was completed —
+    /// the exercise list lives on as the template, but an empty session must not
+    /// linger in the store.
+    private func discardIfEmpty() {
+        if completedSetCount == 0 { context.delete(session) }
+    }
+
+    private func discard() {
+        context.delete(session)
         try? context.save()
         dismiss()
     }
@@ -154,6 +187,12 @@ struct ActiveWorkoutView: View {
     }
 
     private func finish() {
+        // Nothing ticked means nothing was done. Confirm before it's binned
+        // rather than leave an empty session in history.
+        guard completedSetCount > 0 else {
+            confirmingDiscard = true
+            return
+        }
         let firstFinish = session.endedAt == nil
         if firstFinish { session.endedAt = .now }
         try? context.save()

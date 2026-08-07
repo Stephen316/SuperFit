@@ -433,15 +433,7 @@ struct HistoryView: View {
     private var liftRecords: [LiftRecord] {
         let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
                                    uniquingKeysWith: { a, _ in a })
-        return sessions.flatMap { s in
-            (s.sets ?? []).compactMap { set in
-                set.exerciseID.map {
-                    LiftRecord(date: s.startedAt, exerciseID: $0, weightKg: set.weightKg ?? 0,
-                               reps: set.reps, isWarmup: set.isWarmup,
-                               bodyweightFraction: fractions[$0] ?? 0)
-                }
-            }
-        }
+        return TrainingRecords.completed(sessions, fractions: fractions)
     }
 
     private var volumeCard: some View {

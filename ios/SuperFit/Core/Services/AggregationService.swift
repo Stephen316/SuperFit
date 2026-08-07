@@ -301,14 +301,7 @@ final class AggregationService {
             ((try? context.fetch(FetchDescriptor<Exercise>())) ?? [])
                 .map { ($0.id, $0.bodyweightFraction) },
             uniquingKeysWith: { a, _ in a })
-        let records = sessions.flatMap { s in
-            (s.sets ?? []).compactMap { set -> LiftRecord? in
-                guard let id = set.exerciseID else { return nil }
-                return LiftRecord(date: s.startedAt, exerciseID: id,
-                                  weightKg: set.weightKg ?? 0, reps: set.reps, isWarmup: set.isWarmup,
-                                  bodyweightFraction: fractions[id] ?? 0)
-            }
-        }
+        let records = TrainingRecords.completed(sessions, fractions: fractions)
         // Bodyweight makes unweighted work count toward load. Trend weight, not
         // the latest reading, so a water-weight spike can't move training load.
         let bodyweight = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
