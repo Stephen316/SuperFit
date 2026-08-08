@@ -174,9 +174,11 @@ struct ThemeSegmentedControl<Value: Hashable>: View {
                                          ? Theme.textPrimary : Theme.textSecondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
+                        .frame(minHeight: 44)
                         .background(selection == option.value ? Theme.homeWell : .clear)
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == option.value ? .isSelected : [])
             }
         }
         .background(Capsule().fill(Theme.wash))

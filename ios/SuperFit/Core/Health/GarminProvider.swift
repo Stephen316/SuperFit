@@ -17,6 +17,11 @@ actor GarminProvider: RecoveryProvider {
         var baseURL: URL
         /// Populated after the user links their account; stored in the Keychain.
         var sessionToken: String?
+
+        func settingBackend(_ newBaseURL: URL) -> Config {
+            Config(baseURL: newBaseURL,
+                   sessionToken: baseURL == newBaseURL ? sessionToken : nil)
+        }
     }
 
     private let session: URLSession
@@ -35,13 +40,17 @@ actor GarminProvider: RecoveryProvider {
     /// OAuth handshake with Garmin and redirects back to `superfit://garmin`.
     func authorizationURL() -> URL? {
         guard let base = config?.baseURL else { return nil }
+        GarminConfigStore.beginLinking()
         return base.appendingPathComponent("garmin/authorize")
     }
 
     /// Step 2: the redirect carries a session token minted by the backend.
     func completeLinking(sessionToken: String) {
-        guard var c = config else { return }
-        c.sessionToken = sessionToken
+        let token = sessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty,
+              GarminConfigStore.consumePendingLink(),
+              var c = GarminConfigStore.load() ?? config else { return }
+        c.sessionToken = token
         config = c
         GarminConfigStore.save(c)
     }
@@ -54,9 +63,12 @@ actor GarminProvider: RecoveryProvider {
     }
 
     func setBackend(_ url: URL) {
-        let c = Config(baseURL: url, sessionToken: config?.sessionToken)
+        let backendChanged = config?.baseURL != url
+        let c = config?.settingBackend(url)
+            ?? Config(baseURL: url, sessionToken: nil)
         config = c
         GarminConfigStore.save(c)
+        if backendChanged { GarminConfigStore.cancelPendingLink() }
     }
 
     /// GET {base}/garmin/recovery?start=…&end=… → [RecoveryDTO]
@@ -270,6 +282,9 @@ private extension DateFormatter {
 enum GarminConfigStore {
     private static let urlKey = "garminBackendURL"
     private static let account = "garmin.session"
+    private static let pendingLinkKey = "garmin.pendingLinkStartedAt"
+    private static let pendingLinkLock = NSLock()
+    static let maxPendingLinkAge: TimeInterval = 10 * 60
 
     static func load() -> GarminProvider.Config? {
         guard let raw = UserDefaults.standard.string(forKey: urlKey),
@@ -284,6 +299,34 @@ enum GarminConfigStore {
         } else {
             Keychain.delete(account)
         }
+    }
+
+    static func beginLinking(at now: Date = .now,
+                             defaults: UserDefaults = .standard) {
+        pendingLinkLock.lock()
+        defer { pendingLinkLock.unlock() }
+        defaults.set(now.timeIntervalSince1970, forKey: pendingLinkKey)
+    }
+
+    /// Removes the marker before returning so two handlers cannot accept the
+    /// same callback, even when they receive the URL concurrently.
+    static func consumePendingLink(at now: Date = .now,
+                                   defaults: UserDefaults = .standard) -> Bool {
+        pendingLinkLock.lock()
+        defer { pendingLinkLock.unlock() }
+
+        guard let stored = defaults.object(forKey: pendingLinkKey) as? NSNumber else {
+            return false
+        }
+        defaults.removeObject(forKey: pendingLinkKey)
+        let age = now.timeIntervalSince1970 - stored.doubleValue
+        return age >= 0 && age <= maxPendingLinkAge
+    }
+
+    static func cancelPendingLink(defaults: UserDefaults = .standard) {
+        pendingLinkLock.lock()
+        defer { pendingLinkLock.unlock() }
+        defaults.removeObject(forKey: pendingLinkKey)
     }
 }
 

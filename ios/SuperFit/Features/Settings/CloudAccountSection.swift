@@ -3,9 +3,8 @@ import SwiftData
 
 /// Sign-in and cloud backup, for `AccountView`.
 ///
-/// Kept out of `AccountView` because that file already carries the Apple
-/// credential, the file export and the erase flow, and adding a third identity
-/// with its own form pushed it past what the type checker would solve.
+/// Kept out of `AccountView` so authentication and remote-backup states stay
+/// separate from file export, restore and on-device data controls.
 struct CloudAccountSection: View {
     @Environment(\.modelContext) private var context
     @Bindable var account: SupabaseAccount
@@ -17,6 +16,8 @@ struct CloudAccountSection: View {
     @State private var email = ""
     @State private var password = ""
     @State private var mode = Mode.signIn
+    @State private var confirmingBackup = false
+    @State private var confirmingDeleteBackup = false
 
     private enum Mode: String, CaseIterable {
         case signIn = "Sign in"
@@ -24,10 +25,33 @@ struct CloudAccountSection: View {
     }
 
     var body: some View {
-        switch account.state {
-        case .unconfigured: unconfigured
-        case .signedOut:    signedOut
-        case .signedIn:     signedIn
+        Group {
+            switch account.state {
+            case .unconfigured: unconfigured
+            case .signedOut:    signedOut
+            case .signedIn:     signedIn
+            }
+        }
+        .task(id: account.userID) {
+            backup.resetForAccountChange()
+            guard account.isSignedIn else { return }
+            await backup.refreshSummary()
+        }
+        .alert("Back up this device?", isPresented: $confirmingBackup) {
+            Button("Back up now", role: .destructive) {
+                Task { await backup.push(context: context) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This uploads a new snapshot and replaces any backup already stored for this account. Make sure this device has the data you want to keep.")
+        }
+        .alert("Delete cloud backup?", isPresented: $confirmingDeleteBackup) {
+            Button("Delete cloud backup", role: .destructive) {
+                Task { await backup.deleteRemote() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes only the backup stored for this account. Data on this device and the account itself are kept.")
         }
     }
 
@@ -37,18 +61,12 @@ struct CloudAccountSection: View {
     /// form that cannot work.
     private var unconfigured: some View {
         Section {
-            Label(SupabaseConfig.problem == nil ? "Not set up" : "Check configuration",
-                  systemImage: "icloud.slash")
-                .foregroundStyle(SupabaseConfig.problem == nil ? Theme.textSecondary : .orange)
-            if let problem = SupabaseConfig.problem {
-                Text(problem)
-                    .font(Theme.text(13))
-                    .foregroundStyle(.orange)
-            }
+            Label("Unavailable in this build", systemImage: "icloud.slash")
+                .foregroundStyle(Theme.textSecondary)
         } header: {
-            Text("Account")
+            Text("Cloud backup")
         } footer: {
-            Text("Add a Supabase URL and anon key to Secrets.xcconfig to enable accounts and cloud backup. Everything works without one — your data just stays on this device.")
+            Text("You can still save normally on this device and create portable backup files below.")
         }
     }
 
@@ -56,22 +74,33 @@ struct CloudAccountSection: View {
 
     private var signedOut: some View {
         Section {
-            Picker("", selection: $mode) {
-                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            ThemeSegmentedControl(
+                options: Mode.allCases.map { ($0, $0.rawValue) },
+                selection: $mode)
+                .accessibilityLabel("Cloud backup account")
+
+            LabeledContent("Email") {
+                TextField("name@example.com", text: $email)
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .multilineTextAlignment(.trailing)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
 
-            TextField("Email", text: $email)
-                .textContentType(.emailAddress)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            LabeledContent("Password") {
+                SecureField("At least 6 characters", text: $password)
+                    .textContentType(mode == .signUp ? .newPassword : .password)
+                    .multilineTextAlignment(.trailing)
+            }
 
-            SecureField("Password", text: $password)
-                .textContentType(mode == .signUp ? .newPassword : .password)
+            if !password.isEmpty && password.count < 6 {
+                Label("Use at least 6 characters", systemImage: "info.circle")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textSecondary)
+            }
 
-            Button(mode.rawValue) {
+            Button(emailActionTitle) {
                 Task {
                     if mode == .signUp {
                         await account.signUp(email: email, password: password)
@@ -82,13 +111,6 @@ struct CloudAccountSection: View {
                 }
             }
             .disabled(!credentialsLookUsable || account.busy)
-
-            if mode == .signIn {
-                Button("Forgot password") {
-                    Task { await account.sendPasswordReset(email: email) }
-                }
-                .disabled(email.isEmpty || account.busy)
-            }
 
             Button("Continue with Google") {
                 Task { await account.signIn(with: .google) }
@@ -103,17 +125,23 @@ struct CloudAccountSection: View {
             }
 
             if let error = account.lastError {
-                Text(error)
-                    .font(Theme.text(13))
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.font(13))
                     .foregroundStyle(.orange)
             }
+
+            if account.busy {
+                ProgressView("Working…")
+            }
         } header: {
-            Text("Account")
+            Text("Cloud backup")
         } footer: {
-            // Names only the providers actually on screen. With Apple gated off
-            // the old wording promised a button that isn't there.
-            Text("An account keeps a copy of your data off this device, so you can move to a new phone or recover after a reinstall. \(SupabaseConfig.appleSignInEnabled ? "Apple and Google open" : "Google opens") a browser to sign in — no password is ever handled by this app.")
+            Text("Optional. A cloud account stores a manual backup of supported history. It is not live sync, and saved meals and standalone cardio workouts are not included.")
         }
+    }
+
+    private var emailActionTitle: String {
+        mode == .signUp ? "Create cloud account" : "Sign in to cloud backup"
     }
 
     /// Deliberately not validating the address shape beyond this. The server is
@@ -126,48 +154,85 @@ struct CloudAccountSection: View {
     // MARK: - Signed in
 
     private var signedIn: some View {
-        Section {
-            LabeledContent("Signed in") {
-                Label(emailLabel, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
-
-            LabeledContent("Last backup") {
-                if let remote = backup.remote {
-                    Text(remote.updated_at, format: .relative(presentation: .named))
-                        .foregroundStyle(Theme.textSecondary)
-                } else {
-                    Text("Never").foregroundStyle(Theme.textSecondary)
+        Group {
+            Section {
+                LabeledContent("Cloud account") {
+                    Label(emailLabel, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
                 }
+
+                LabeledContent("Latest backup") {
+                    switch backup.summaryStatus {
+                    case .idle, .loading:
+                        ProgressView()
+                    case .ready:
+                        if let remote = backup.remote {
+                            Text(remote.updated_at, format: .relative(presentation: .named))
+                                .foregroundStyle(Theme.textSecondary)
+                        } else {
+                            Text("None yet").foregroundStyle(Theme.textSecondary)
+                        }
+                    case .failed:
+                        Label("Couldn't check", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                if backup.summaryStatus == .failed {
+                    Button("Check for a backup again") {
+                        Task { await backup.refreshSummary() }
+                    }
+                    .disabled(isWorking)
+                }
+
+                Button("Back up this device now", action: requestBackup)
+                .disabled(isWorking || !backupSummaryReady)
+
+                Button("Restore cloud backup") {
+                    Task { if let archive = await backup.fetchArchive() { onRestore(archive) } }
+                }
+                .disabled(isWorking || !backupSummaryReady || backup.remote == nil)
+
+                backupStatus
+            } header: {
+                Text("Cloud backup")
+            } footer: {
+                Text("This is a manual snapshot, not live sync. It includes the same supported history as a backup file; saved meals and standalone cardio workouts are not included.")
             }
 
-            Button("Back up now") {
-                Task { await backup.push(context: context) }
-            }
-            .disabled(isWorking)
-
-            Button("Restore from backup") {
-                Task { if let archive = await backup.fetchArchive() { onRestore(archive) } }
-            }
-            .disabled(isWorking || backup.remote == nil)
-
-            Button("Sign out") { Task { await account.signOut() } }
+            Section {
+                Button("Sign out of cloud backup") {
+                    Task { await account.signOut() }
+                }
                 .disabled(isWorking)
 
-            Button("Delete cloud backup", role: .destructive) {
-                Task { await backup.deleteRemote() }
+                Button("Delete cloud backup", role: .destructive) {
+                    confirmingDeleteBackup = true
+                }
+                .disabled(isWorking || !backupSummaryReady || backup.remote == nil)
+            } header: {
+                Text("Cloud account controls")
+            } footer: {
+                Text("Signing out keeps the backup. Deleting the backup keeps both this device's data and your account.")
             }
-            .disabled(isWorking || backup.remote == nil)
+        }
+    }
 
-            if case let .failed(message) = backup.status {
-                Text(message)
-                    .font(Theme.text(13))
-                    .foregroundStyle(.orange)
-            }
-        } header: {
-            Text("Account")
-        } footer: {
-            Text("Backing up replaces the copy stored for your account. This is a snapshot, not live sync — if you use two devices, back up from the one you last used before restoring on the other.")
+    @ViewBuilder
+    private var backupStatus: some View {
+        switch backup.status {
+        case .idle:
+            EmptyView()
+        case .working:
+            ProgressView("Working…")
+        case .done:
+            Label("Backup complete", systemImage: "checkmark.circle.fill")
+                .font(Theme.font(13))
+                .foregroundStyle(.green)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(Theme.font(13))
+                .foregroundStyle(.orange)
         }
     }
 
@@ -178,5 +243,13 @@ struct CloudAccountSection: View {
 
     private var isWorking: Bool {
         account.busy || backup.status == .working
+    }
+
+    private var backupSummaryReady: Bool {
+        backup.summaryStatus == .ready
+    }
+
+    private func requestBackup() {
+        confirmingBackup = true
     }
 }

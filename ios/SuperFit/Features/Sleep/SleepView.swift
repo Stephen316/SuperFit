@@ -177,10 +177,11 @@ struct SleepView: View {
 
     private var emptySection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("No sleep data yet").font(.headline)
                 Text("Sleep syncs from Apple Health. Wear your watch overnight, or track sleep with your iPhone, and nights will appear here.")
                     .font(.subheadline).foregroundStyle(.secondary)
+                WatchHelpLink()
             }
             .padding(.vertical, 6)
         }

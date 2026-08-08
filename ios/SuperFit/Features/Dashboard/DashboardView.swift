@@ -41,6 +41,7 @@ struct DashboardView: View {
     @State private var showingSteps = false
     @State private var showingRestingHR = false
     @State private var showingSettings = false
+    @State private var showingWatchHelp = false
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -112,6 +113,16 @@ struct DashboardView: View {
         return workouts.filter { d.contains($0.startedAt) }
     }
 
+    /// Whether any watch-sourced reading has ever reached the store. This gates
+    /// the setup help: an empty card on a connected watch usually just means the
+    /// value hasn't synced yet — resting HR lags to the afternoon — so a set-up
+    /// user shouldn't be told to reconnect on an ordinary data gap. Only a store
+    /// with no heart or sleep data at all is treated as "no watch".
+    private var watchConnected: Bool {
+        vitals.contains { $0.restingHR != nil || $0.hrvSDNN != nil }
+            || sleep.contains { $0.asleepMinutes > 0 }
+    }
+
     /// The weight to show is the one recorded on the day being viewed, falling
     /// back to the most recent before it — stepping back a day shouldn't blank
     /// the card just because nothing was weighed that morning.
@@ -174,6 +185,7 @@ struct DashboardView: View {
             .sheet(isPresented: $showingSteps) { StepsHistoryView() }
             .sheet(isPresented: $showingRestingHR) { RestingHRHistoryView() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingWatchHelp) { WatchSetupHelpView() }
             .sheet(item: $addingTo) { slot in FoodSearchView(day: day, meal: slot) }
             .task { await refresh() }
         }
@@ -311,15 +323,18 @@ struct DashboardView: View {
         .accessibilityLabel(label)
     }
 
-    /// settings-btn: 40pt circle, white at 5%, 20pt glyph.
+    /// settings-btn: 40pt visible circle inside a 44pt touch target.
     private func circleButton(_ icon: String, label: String,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 17))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(Theme.wash))
+            ZStack {
+                Circle().fill(Theme.wash).frame(width: 40, height: 40)
+                Image(systemName: icon)
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -335,6 +350,7 @@ struct DashboardView: View {
         let recovery = todayRecovery
         let hasData = (recovery?.dataCompleteness ?? 0) > 0
         let score = recovery?.score ?? 0
+        let needsWatch = !hasData && !watchConnected
         return VStack(spacing: 12) {
             ZStack {
                 // 94pt frame with a 6pt stroke gives a 100pt outer and 88pt inner
@@ -361,6 +377,11 @@ struct DashboardView: View {
                 Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
                     .font(Theme.text(13, .medium))
                     .foregroundStyle(hasData ? Theme.gold : Theme.textSecondary)
+            }
+            if needsWatch {
+                Button { showingWatchHelp = true } label: { WatchHelpLabel() }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
             }
         }
     }
@@ -487,16 +508,26 @@ struct DashboardView: View {
     }
 
     private var restingHRCard: some View {
-        cardButton { showingRestingHR = true } content: {
+        // Any resting HR ever recorded means the history view is worth reaching,
+        // even if today's reading hasn't landed. A store that has never seen one
+        // sends the tap to the watch setup help instead.
+        let hasHistory = vitals.contains { $0.restingHR != nil }
+        return cardButton {
+            if hasHistory { showingRestingHR = true } else { showingWatchHelp = true }
+        } content: {
             VStack(spacing: 8) {
                 cardLabel("Resting HR")
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(todayVitals?.restingHR.map { "\(Int($0))" } ?? "–")
-                        .font(Theme.text(28, .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("bpm")
-                        .font(Theme.text(16))
-                        .foregroundStyle(Theme.textSecondary)
+                if hasHistory {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(todayVitals?.restingHR.map { "\(Int($0))" } ?? "–")
+                            .font(Theme.text(28, .bold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("bpm")
+                            .font(Theme.text(16))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                } else {
+                    WatchHelpLabel(text: "Connect a watch")
                 }
             }
         }

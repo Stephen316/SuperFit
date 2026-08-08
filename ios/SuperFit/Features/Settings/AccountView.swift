@@ -1,13 +1,9 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
-#if canImport(AuthenticationServices)
-import AuthenticationServices
-#endif
 
 struct AccountView: View {
     @Environment(\.modelContext) private var context
-    @State private var account = AccountManager()
     @State private var cloud = SupabaseAccount()
     @State private var backup: SupabaseBackup?
 
@@ -17,10 +13,11 @@ struct AccountView: View {
     @State private var pendingImport: DataArchive?
     @State private var confirmingErase = false
     @State private var message: String?
+    @State private var messageTitle = "Notice"
 
     var body: some View {
         Form {
-            identitySection
+            storageSection
             if let backup {
                 CloudAccountSection(account: cloud, backup: backup) { archive in
                     // Straight into the existing confirmation, so a cloud
@@ -28,54 +25,61 @@ struct AccountView: View {
                     pendingImport = archive
                 }
             }
-            syncSection
             backupSection
             dangerSection
         }
-        .navigationTitle("Account")
+        .navigationTitle("Account & data")
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
-        .themedList()
+        .themedList(bottomPadding: 24)
         .task {
-            await account.refreshCredentialState()
             if backup == nil { backup = SupabaseBackup(account: cloud) }
             await cloud.restore()
-            await backup?.refreshSummary()
         }
         // A real binding, not `.constant`: SwiftUI dismisses an alert by writing
         // `false` back, and a constant swallows that. It worked only because
         // every button here happens to clear the state itself — remove or add
         // one that doesn't and the alert becomes unclosable.
-        .alert("Restore backup", isPresented: Binding(
+        .alert("Restore this backup?", isPresented: Binding(
             get: { pendingImport != nil },
             set: { if !$0 { pendingImport = nil } })) {
-            Button("Merge") { restore(mode: .merge) }
-            Button("Replace everything", role: .destructive) { restore(mode: .replace) }
+            Button("Add missing history") { restore(mode: .merge) }
+            Button("Replace this device", role: .destructive) { restore(mode: .replace) }
             Button("Cancel", role: .cancel) { pendingImport = nil }
         } message: {
-            Text("Merge keeps what's already here and adds anything missing. Replace erases this device's data first — use it when moving from a different account.")
+            Text("Add missing history keeps this device's profile and newer records, then adds backup records that are not already here. Replace erases this device first and restores the backup profile. Saved meals and standalone cardio workouts are not included and cannot be restored.")
         }
-        .alert("Erase all data", isPresented: $confirmingErase) {
-            Button("Erase", role: .destructive) {
+        .alert("Erase all fitness data?", isPresented: $confirmingErase) {
+            Button("Erase fitness data", role: .destructive) {
                 DataArchiveService.eraseAll(context: context)
-                message = "All data erased from this device."
+                // `ProfileView` expects one profile. Recreate its empty baseline
+                // immediately instead of leaving that screen on a permanent spinner.
+                context.insert(UserProfile())
+                ExerciseLibrary.seedIfNeeded(context: context)
+                SupplementCatalog.seedIfNeeded(context: context)
+                try? context.save()
+                showMessage(title: "Data erased",
+                            text: "Your logs, workouts, measurements and profile settings were erased from this device.")
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Deletes every log, workout and measurement on this device, and from iCloud if syncing is on. This cannot be undone — export a backup first.")
+            Text("This permanently deletes every log, workout, measurement and profile setting on this device, and from iCloud when it is syncing. Your sign-in and cloud backup are kept.")
         }
-        .alert("Done", isPresented: Binding(
+        .alert(messageTitle, isPresented: Binding(
             get: { message != nil },
             set: { if !$0 { message = nil } })) {
-            Button("OK") { message = nil }
+            Button("OK", role: .cancel) { message = nil }
         } message: {
             Text(message ?? "")
         }
         .fileExporter(isPresented: $exporting,
                       document: exportDocument,
                       contentType: .json,
-                      defaultFilename: "SuperFit-\(Date.now.formatted(.iso8601.year().month().day()))") { _ in
+                      defaultFilename: "SuperFit-\(Date.now.formatted(.iso8601.year().month().day()))") { result in
             exportDocument = nil
+            if case .failure(let error) = result {
+                showMessage(title: "Couldn't export backup", text: error.localizedDescription)
+            }
         }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.json]) { result in
@@ -85,72 +89,23 @@ struct AccountView: View {
 
     // MARK: - Sections
 
-    @ViewBuilder
-    private var identitySection: some View {
-        switch account.state {
-        case .signedIn(_, let name):
-            Section {
-                LabeledContent("Signed in") {
-                    Label(name ?? "Apple ID", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                }
-                Button("Sign out") { account.signOut() }
-            } footer: {
-                Text("Signing out leaves everything on this device untouched — your data belongs to your iCloud account, not to being signed in.")
-            }
-
-        case .revoked:
-            Section {
-                Label("Sign-in was revoked", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                signInButton
-            } footer: {
-                Text("Access was removed from your Apple ID settings. Your data is untouched — sign in again whenever you like.")
-            }
-
-        case .signedOut:
-            Section {
-                signInButton
-            } footer: {
-                Text("Optional. Signing in names this account and will connect you with friends later — it isn't what saves your data.")
-            }
-        }
-    }
-
-    private var signInButton: some View {
-        #if canImport(AuthenticationServices)
-        SignInWithAppleButton(.signIn) { request in
-            request.requestedScopes = [.fullName]
-        } onCompletion: { result in
-            guard case .success(let auth) = result,
-                  let credential = auth.credential as? ASAuthorizationAppleIDCredential
-            else { return }
-            account.completeSignIn(userID: credential.user, fullName: credential.fullName)
-        }
-        .signInWithAppleButtonStyle(.white)
-        .frame(height: 46)
-        .listRowInsets(.init(top: 8, leading: 16, bottom: 8, trailing: 16))
-        #else
-        EmptyView()
-        #endif
-    }
-
-    private var syncSection: some View {
+    private var storageSection: some View {
         Section {
-            LabeledContent("iCloud sync") {
+            LabeledContent("On-device storage") {
                 if AppSchema.isEphemeral {
                     Label("Unavailable", systemImage: "xmark.icloud")
                         .foregroundStyle(.red)
                 } else {
-                    Label("On", systemImage: "checkmark.icloud").foregroundStyle(.green)
+                    Label("Saving", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
                 }
             }
         } header: {
-            Text("Storage")
+            Text("Automatic storage")
         } footer: {
             Text(AppSchema.isEphemeral
-                 ? "Storage is unavailable, so nothing is being saved this session. Export a backup before closing the app."
-                 : "Your data syncs to your private iCloud database. It survives app updates, reinstalls, and moving to a new device on the same Apple ID. Nobody else can read it, including us.")
+                 ? "Storage is unavailable, so changes made during this session will be lost. Export a backup before closing SuperFit."
+                 : "Your data is saved automatically on this device. iCloud sync is not enabled in this build; use a backup below when moving to another device.")
         }
     }
 
@@ -160,37 +115,51 @@ struct AccountView: View {
                 exportDocument = ArchiveDocument(context: context)
                 exporting = exportDocument != nil
             } label: {
-                Label("Export a backup", systemImage: "square.and.arrow.up")
+                Label("Export backup file", systemImage: "square.and.arrow.up")
             }
             Button {
                 importing = true
             } label: {
-                Label("Restore from a backup", systemImage: "square.and.arrow.down")
+                Label("Restore backup file", systemImage: "square.and.arrow.down")
             }
         } header: {
-            Text("Backup")
+            Text("Backup file")
         } footer: {
-            Text("A single file holding everything you've logged. iCloud covers updates and new devices; this covers the cases it can't — iCloud being unavailable, or moving to a different Apple ID.")
+            Text("Includes your profile, measurements, food diary, strength training, sleep, vitals, supplements and energy history. Saved meals and standalone cardio workouts are not included.")
         }
     }
 
     private var dangerSection: some View {
         Section {
-            Button("Erase all data", role: .destructive) { confirmingErase = true }
+            Button(role: .destructive) { confirmingErase = true } label: {
+                Label("Erase fitness data", systemImage: "trash")
+            }
+        } header: {
+            Text("Data controls")
+        } footer: {
+            Text("This removes your logs and resets your profile. It does not sign you out or delete your cloud backup.")
         }
     }
 
     // MARK: - Actions
 
     private func handlePickedFile(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else { return }
+        guard case .success(let url) = result else {
+            if case .failure(let error) = result {
+                let nsError = error as NSError
+                if nsError.domain != NSCocoaErrorDomain || nsError.code != NSUserCancelledError {
+                    showMessage(title: "Couldn't open backup", text: error.localizedDescription)
+                }
+            }
+            return
+        }
         // Files chosen from the picker live outside the sandbox.
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             pendingImport = try DataArchiveService.decode(Data(contentsOf: url))
         } catch {
-            message = error.localizedDescription
+            showMessage(title: "Couldn't open backup", text: error.localizedDescription)
         }
     }
 
@@ -198,8 +167,15 @@ struct AccountView: View {
         guard let archive = pendingImport else { return }
         pendingImport = nil
         let result = DataArchiveService.restore(archive, mode: mode, context: context)
-        message = "Restored \(result.added) record\(result.added == 1 ? "" : "s")."
-            + (result.skipped > 0 ? " \(result.skipped) already present." : "")
+        showMessage(
+            title: "Backup restored",
+            text: "Restored \(result.added) record\(result.added == 1 ? "" : "s")."
+                + (result.skipped > 0 ? " \(result.skipped) already present." : ""))
+    }
+
+    private func showMessage(title: String, text: String) {
+        messageTitle = title
+        message = text
     }
 }
 
