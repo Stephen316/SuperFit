@@ -254,7 +254,7 @@ struct WeightView: View {
             } message: {
                 Text(rejected ?? "")
             }
-            .sheet(isPresented: $loggingWeight) {
+            .fullScreenCover(isPresented: $loggingWeight) {
                 NumberEntrySheet(title: "Weigh-in", unit: units.weightUnit,
                                  allowsDecimal: true, onCommit: addWeight)
             }

@@ -20,7 +20,8 @@ struct NutritionView: View {
     private var profile: UserProfile? { profiles.first }
 
     private var dayLogs: [NutritionLog] {
-        logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+        let d = DayBounds(day)
+        return logs.filter { d.contains($0.date) }
     }
 
     /// Averaging window smooths the day-to-day swings micronutrients naturally

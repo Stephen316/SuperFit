@@ -123,11 +123,12 @@ final class AggregationService {
             avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
             leanMassKg: BodyComposition.recentLeanMassKg(metrics))
         let today = cal.startOfDay(for: .now)
+        let bounds = DayBounds(today, calendar: cal)
         let existing = (try? context.fetch(FetchDescriptor<MetabolicEstimateRecord>())) ?? []
 
         for window in [7, 14, 30] {
             let est = MetabolismEngine().estimate(records: records, windowDays: window, prior: prior)
-            let row = existing.first { cal.isDate($0.date, inSameDayAs: today) && $0.windowDays == window }
+            let row = existing.first { bounds.contains($0.date) && $0.windowDays == window }
                 ?? {
                     let r = MetabolicEstimateRecord(date: today, window: window)
                     context.insert(r)
@@ -227,8 +228,9 @@ final class AggregationService {
         let today = cal.startOfDay(for: .now)
         let result = RecoveryEngine().evaluate(recoveryInputs(for: today))
 
+        let bounds = DayBounds(today, calendar: cal)
         let existing = (try? context.fetch(FetchDescriptor<RecoveryScoreRecord>())) ?? []
-        let row = existing.first { cal.isDate($0.date, inSameDayAs: today) }
+        let row = existing.first { bounds.contains($0.date) }
             ?? {
                 let r = RecoveryScoreRecord(date: today, score: 0, recommendation: "")
                 context.insert(r)
@@ -242,8 +244,9 @@ final class AggregationService {
     func recoveryInputs(for day: Date) -> RecoveryInputs {
         var inputs = RecoveryInputs()
 
+        let bounds = DayBounds(day, calendar: cal)
         let sleep = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
-        if let last = sleep.first(where: { cal.isDate($0.date, inSameDayAs: day) }) {
+        if let last = sleep.first(where: { bounds.contains($0.date) }) {
             inputs.asleepMinutes = last.asleepMinutes
             inputs.sleepEfficiency = last.efficiency
         }
@@ -252,7 +255,7 @@ final class AggregationService {
             .sorted { $0.date < $1.date }
         let baselineStart = day.addingTimeInterval(-60 * 86_400)
         let baseline = vitals.filter { $0.date >= baselineStart && $0.date < day }
-        let todayVitals = vitals.first { cal.isDate($0.date, inSameDayAs: day) }
+        let todayVitals = vitals.first { bounds.contains($0.date) }
 
         // Level both sides by the same rhythm before comparing. Correcting only
         // today's reading would shift it against an uncorrected baseline and

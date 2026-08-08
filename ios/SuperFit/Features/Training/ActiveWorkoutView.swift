@@ -288,7 +288,7 @@ private struct SetRow: View {
             }
             .buttonStyle(.plain)
         }
-        .sheet(item: $editing) { field in
+        .fullScreenCover(item: $editing) { field in
             switch field {
             case .weight:
                 NumberEntrySheet(title: "Weight", unit: units.weightUnit, allowsDecimal: true) { value in

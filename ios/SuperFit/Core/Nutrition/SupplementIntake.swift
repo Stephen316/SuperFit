@@ -33,10 +33,11 @@ enum SupplementIntake {
                       calendar: Calendar = .current) -> [TakenSupplement] {
         let byID = Dictionary(supplements.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let target = calendar.startOfDay(for: day)
+        let bounds = DayBounds(target, calendar: calendar)
 
         let skipped = Set(entries.compactMap { entry -> UUID? in
             guard entry.kind == .skipped, let d = entry.date,
-                  calendar.isDate(d, inSameDayAs: target) else { return nil }
+                  bounds.contains(d) else { return nil }
             return entry.supplementID
         })
 
@@ -56,7 +57,7 @@ enum SupplementIntake {
                       seenDaily.insert(supplementID).inserted
                 else { continue }
             case .once:
-                guard let d = entry.date, calendar.isDate(d, inSameDayAs: target) else { continue }
+                guard let d = entry.date, bounds.contains(d) else { continue }
             case .skipped:
                 continue
             }

@@ -63,13 +63,16 @@ struct DashboardView: View {
                                          proteinPerKg: override)
     }
 
-    private func onDay(_ date: Date) -> Bool {
-        Calendar.current.isDate(date, inSameDayAs: day)
-    }
+    /// Built once per filter, then compared against. See `DayBounds` — asking
+    /// the calendar per row is 43x the cost and every card here filters.
+    private var bounds: DayBounds { DayBounds(day) }
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
-    private var todayLogs: [NutritionLog] { nutrition.filter { onDay($0.date) } }
+    private var todayLogs: [NutritionLog] {
+        let d = bounds
+        return nutrition.filter { d.contains($0.date) }
+    }
 
     /// Food plus supplements, which is what the day actually was.
     ///
@@ -88,11 +91,26 @@ struct DashboardView: View {
         t.carbsG += s.carbsG; t.fatG += s.fatG; t.fibreG += s.fibreG
         return t
     }
-    private var todayRecovery: RecoveryScoreRecord? { recoveries.first { onDay($0.date) } }
-    private var todayEnergy: DailyEnergy? { energy.first { onDay($0.date) } }
-    private var lastSleep: SleepData? { sleep.first { onDay($0.date) } }
-    private var todayVitals: DailyVitals? { vitals.first { onDay($0.date) } }
-    private var todayWorkouts: [WorkoutRecord] { workouts.filter { onDay($0.startedAt) } }
+    private var todayRecovery: RecoveryScoreRecord? {
+        let d = bounds
+        return recoveries.first { d.contains($0.date) }
+    }
+    private var todayEnergy: DailyEnergy? {
+        let d = bounds
+        return energy.first { d.contains($0.date) }
+    }
+    private var lastSleep: SleepData? {
+        let d = bounds
+        return sleep.first { d.contains($0.date) }
+    }
+    private var todayVitals: DailyVitals? {
+        let d = bounds
+        return vitals.first { d.contains($0.date) }
+    }
+    private var todayWorkouts: [WorkoutRecord] {
+        let d = bounds
+        return workouts.filter { d.contains($0.startedAt) }
+    }
 
     /// The weight to show is the one recorded on the day being viewed, falling
     /// back to the most recent before it — stepping back a day shouldn't blank
@@ -103,10 +121,10 @@ struct DashboardView: View {
     /// re-weigh showed a heavier number here than the one the calorie target was
     /// built from.
     private var weightOnDay: BodyMetrics? {
-        let sameDay = metrics.filter { onDay($0.date) }
+        let d = bounds
+        let sameDay = metrics.filter { d.contains($0.date) }
         if !sameDay.isEmpty { return sameDay.min { $0.weightKg < $1.weightKg } }
-        let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
-        return metrics.first { $0.date < end }
+        return metrics.first { $0.date < d.end }
     }
 
     /// The meal slot closest to the time of day, so the card offers the one you

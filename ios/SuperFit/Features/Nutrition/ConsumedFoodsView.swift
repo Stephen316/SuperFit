@@ -13,7 +13,8 @@ struct ConsumedFoodsView: View {
     @Query private var logs: [NutritionLog]
 
     private var dayLogs: [NutritionLog] {
-        logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+        let d = DayBounds(day)
+        return logs.filter { d.contains($0.date) }
     }
 
     private var total: Int { Int(dayLogs.reduce(0) { $0 + $1.kcal }.rounded()) }

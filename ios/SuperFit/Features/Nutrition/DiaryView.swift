@@ -16,7 +16,8 @@ struct DiaryView: View {
     @State private var showingSupplements = false
 
     private var dayLogs: [NutritionLog] {
-        logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+        let d = DayBounds(day)
+        return logs.filter { d.contains($0.date) }
             .sorted { $0.loggedAt < $1.loggedAt }
     }
 
