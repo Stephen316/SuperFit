@@ -10,6 +10,13 @@ struct ProfileView: View {
 
     @State private var bodyFatEntry = ""
 
+    init() {
+        var latest = FetchDescriptor<BodyMetrics>(
+            sortBy: [SortDescriptor(\BodyMetrics.date, order: .reverse)])
+        latest.fetchLimit = 1
+        _metrics = Query(latest)
+    }
+
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
     private var profile: UserProfile? { profiles.first }
     private var latest: BodyMetrics? { metrics.first }
@@ -121,7 +128,9 @@ struct ProfileView: View {
         latest.bodyFatPct = pct
         latest.leanMassKg = latest.weightKg * (1 - pct / 100)
         try? context.save()
-        AggregationService(context: context).runAll()
+        // Body composition changes the metabolic prior, not the raw weight
+        // series, so rebuilding every stored trend point here is unnecessary.
+        AggregationService(context: context).runAll(refreshWeightTrend: false)
     }
 
     private func bind<V>(_ profile: UserProfile, _ key: ReferenceWritableKeyPath<UserProfile, V>) -> Binding<V> {

@@ -5,17 +5,25 @@ import SwiftData
 /// targets. The Diary tab stays the logging surface; this is the analysis.
 struct NutritionView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
-    @Query private var logs: [NutritionLog]
-    @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
-    @Query(sort: \MetabolicEstimateRecord.date, order: .reverse) private var estimates: [MetabolicEstimateRecord]
-    @Query(sort: \TrainingSession.startedAt, order: .reverse) private var sessions: [TrainingSession]
+    @Query private var sessions: [TrainingSession]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
+
+    @State private var logs: [NutritionLog] = []
+    @State private var metrics: [BodyMetrics] = []
+    @State private var estimates: [MetabolicEstimateRecord] = []
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var averaging = false
     @State private var showingProtein = false
+
+    init() {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -28, to: .now) ?? .now
+        _sessions = Query(filter: #Predicate { $0.startedAt >= cutoff },
+                          sort: \TrainingSession.startedAt, order: .reverse)
+    }
 
     private var profile: UserProfile? { profiles.first }
 
@@ -88,9 +96,9 @@ struct NutritionView: View {
     /// Supplements summed across the window. Counted the same as food: a whey
     /// shake is 25 g of protein whichever screen it was entered on.
     private var supplementTotal: NutrientProfile {
-        windowDays.reduce(into: NutrientProfile()) { sum, d in
-            let t = SupplementIntake.total(on: d, entries: supplementEntries,
-                                           supplements: supplements)
+        let totals = SupplementIntake.totals(
+            on: windowDays, entries: supplementEntries, supplements: supplements)
+        return totals.values.reduce(into: NutrientProfile()) { sum, t in
             sum.kcal += t.kcal; sum.proteinG += t.proteinG
             sum.carbsG += t.carbsG; sum.fatG += t.fatG; sum.fibreG += t.fibreG
             for (k, v) in t.micros { sum.micros[k, default: 0] += v }
@@ -168,6 +176,8 @@ struct NutritionView: View {
             }
             .themedList()
             .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
+            .task { loadNutritionData() }
+            .onChange(of: day) { _, _ in loadNutritionData() }
         }
     }
 
@@ -290,6 +300,36 @@ struct NutritionView: View {
 
     private func shift(_ days: Int) {
         day = Calendar.current.date(byAdding: .day, value: days, to: day) ?? day
+    }
+
+    private func loadNutritionData() {
+        let cal = Calendar.current
+        let selectedEnd = DayBounds(day, calendar: cal).end
+        let selectedStart = cal.date(byAdding: .day, value: -6,
+                                     to: cal.startOfDay(for: day)) ?? day
+        let logQuery = FetchDescriptor<NutritionLog>(predicate: #Predicate {
+            $0.date >= selectedStart && $0.date < selectedEnd
+        })
+        logs = (try? context.fetch(logQuery)) ?? []
+
+        let recent = cal.date(byAdding: .day, value: -30, to: .now) ?? .now
+        let metricQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= recent },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        var loadedMetrics = (try? context.fetch(metricQuery)) ?? []
+        if loadedMetrics.isEmpty {
+            var latest = FetchDescriptor<BodyMetrics>(
+                sortBy: [SortDescriptor(\.date, order: .reverse)])
+            latest.fetchLimit = 1
+            loadedMetrics = (try? context.fetch(latest)) ?? []
+        }
+        metrics = loadedMetrics
+
+        var estimateQuery = FetchDescriptor<MetabolicEstimateRecord>(
+            predicate: #Predicate { $0.windowDays == 30 },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        estimateQuery.fetchLimit = 1
+        estimates = (try? context.fetch(estimateQuery)) ?? []
     }
 }
 

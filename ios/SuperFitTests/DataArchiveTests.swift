@@ -72,6 +72,16 @@ struct DataArchiveTests {
         #expect(archive.supplementEntries.count == 1)
     }
 
+    @Test func backgroundExporterCapturesSavedData() async throws {
+        let context = try makeContext()
+        seed(context)
+
+        let archive = await DataArchiveExporter(modelContainer: context.container).export()
+        #expect(archive.profile?.heightCm == 183)
+        #expect(archive.nutritionLogs.first?.foodName == "Chicken breast")
+        #expect(archive.sessions.first?.sets.first?.weightKg == 100)
+    }
+
     @Test func encodeDecodeSurvivesDatesAndNestedValues() throws {
         let context = try makeContext()
         seed(context)

@@ -1,6 +1,20 @@
 import Foundation
 import SwiftData
 
+struct SyncChanges: Sendable, Equatable {
+    var bodyMass = false
+    var composition = false
+    var activity = false
+    var sleep = false
+    var vitals = false
+    var garmin = false
+
+    var weightTrendNeedsRefresh: Bool { bodyMass }
+    var hasChanges: Bool {
+        bodyMass || composition || activity || sleep || vitals || garmin
+    }
+}
+
 /// Pulls HealthKit data into SwiftData. Upserts are keyed by calendar day so
 /// repeated syncs are idempotent. Runs on the main actor because ModelContext
 /// is not Sendable; the heavy lifting happens inside the HealthKit actor.
@@ -20,9 +34,11 @@ final class SyncCoordinator {
     }
 
     /// Sync the last `days` of everything. Safe to call on every foreground.
-    func syncAll(days: Int = 90) async {
-        guard health.isAvailable else { return }
+    @discardableResult
+    func syncAll(days: Int = 90) async -> SyncChanges {
+        guard health.isAvailable else { return SyncChanges() }
         let range = DateInterval(start: .now.addingTimeInterval(-Double(days) * 86_400), end: .now)
+        let storedRange = DateInterval(start: cal.startOfDay(for: range.start), end: range.end)
         try? await health.requestAuthorization()
 
         async let mass = try? health.bodyMass(in: range)
@@ -33,29 +49,41 @@ final class SyncCoordinator {
         async let rhr = try? health.restingHeartRate(in: range)
         async let hrv = try? health.hrv(in: range)
 
-        upsertBodyMass(await mass ?? [])
-        upsertComposition(bodyFat: await bodyFat ?? [], leanMass: await leanMass ?? [])
-        upsertActivity(await activity ?? [])
-        upsertSleep(await sleep ?? [])
-        upsertVitals(rhr: await rhr ?? [], hrv: await hrv ?? [])
+        var changes = SyncChanges()
+        changes.bodyMass = upsertBodyMass(await mass ?? [], in: storedRange)
+        changes.composition = upsertComposition(bodyFat: await bodyFat ?? [],
+                                                leanMass: await leanMass ?? [],
+                                                in: storedRange)
+        changes.activity = upsertActivity(await activity ?? [], in: storedRange)
+        changes.sleep = upsertSleep(await sleep ?? [], in: storedRange)
+        changes.vitals = upsertVitals(rhr: await rhr ?? [], hrv: await hrv ?? [],
+                                      in: storedRange)
 
         // Garmin last so its HRV / staged sleep overwrite HealthKit's — Garmin
         // Connect doesn't export those to Apple Health, so its values are the
         // only real readings when a Garmin watch is the wearable.
         if await garmin.isLinked,
            let metrics = try? await garmin.recoveryMetrics(in: range) {
-            applyGarmin(metrics)
+            changes.garmin = applyGarmin(metrics, in: storedRange)
         }
-        try? context.save()
+        if changes.hasChanges { try? context.save() }
+        return changes
     }
 
-    private func applyGarmin(_ metrics: [RecoveryMetrics]) {
-        let vitalRows = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
+    private func applyGarmin(_ metrics: [RecoveryMetrics], in range: DateInterval) -> Bool {
+        let start = range.start
+        let end = range.end
+        let vitalQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let vitalRows = (try? context.fetch(vitalQuery)) ?? []
         var vitalsByDay = Dictionary(vitalRows.map { (cal.startOfDay(for: $0.date), $0) },
                                      uniquingKeysWith: { a, _ in a })
-        let sleepRows = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
+        let sleepQuery = FetchDescriptor<SleepData>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let sleepRows = (try? context.fetch(sleepQuery)) ?? []
         var sleepByDay = Dictionary(sleepRows.map { (cal.startOfDay(for: $0.date), $0) },
                                     uniquingKeysWith: { a, _ in a })
+        var changed = false
 
         for m in metrics {
             let day = cal.startOfDay(for: m.day)
@@ -64,27 +92,36 @@ final class SyncCoordinator {
                     let r = DailyVitals(date: day)
                     context.insert(r)
                     vitalsByDay[day] = r
+                    changed = true
                     return r
                 }()
-                if let hrv = m.hrvSDNN { row.hrvSDNN = hrv }
-                if let rhr = m.restingHR { row.restingHR = rhr }
+                if let hrv = m.hrvSDNN, row.hrvSDNN != hrv {
+                    row.hrvSDNN = hrv
+                    changed = true
+                }
+                if let rhr = m.restingHR, row.restingHR != rhr {
+                    row.restingHR = rhr
+                    changed = true
+                }
             }
             if let s = m.sleep {
                 let row = sleepByDay[day] ?? {
                     let r = SleepData(date: day)
                     context.insert(r)
                     sleepByDay[day] = r
+                    changed = true
                     return r
                 }()
-                row.inBedMinutes = s.inBedMinutes
-                row.asleepMinutes = s.asleepMinutes
-                row.deepMinutes = s.deepMinutes
-                row.remMinutes = s.remMinutes
-                row.coreMinutes = s.coreMinutes
-                if let bedtime = s.bedtime { row.bedtime = bedtime }
-                if let wakeTime = s.wakeTime { row.wakeTime = wakeTime }
+                if row.inBedMinutes != s.inBedMinutes { row.inBedMinutes = s.inBedMinutes; changed = true }
+                if row.asleepMinutes != s.asleepMinutes { row.asleepMinutes = s.asleepMinutes; changed = true }
+                if row.deepMinutes != s.deepMinutes { row.deepMinutes = s.deepMinutes; changed = true }
+                if row.remMinutes != s.remMinutes { row.remMinutes = s.remMinutes; changed = true }
+                if row.coreMinutes != s.coreMinutes { row.coreMinutes = s.coreMinutes; changed = true }
+                if let bedtime = s.bedtime, row.bedtime != bedtime { row.bedtime = bedtime; changed = true }
+                if let wakeTime = s.wakeTime, row.wakeTime != wakeTime { row.wakeTime = wakeTime; changed = true }
             }
         }
+        return changed
     }
 
     /// One weight row per day, whatever the source hands over.
@@ -100,12 +137,20 @@ final class SyncCoordinator {
     /// is the rule `DailyWeight` applies everywhere else. Storing one row per day
     /// and storing the right one are the same job here: the engines collapse by
     /// day anyway, so a heavier duplicate would only ever be noise in the list.
-    private func upsertBodyMass(_ samples: [BodyMassSample]) {
-        var existing = fetchDays(BodyMetrics.self, dateKey: \.date)
+    private func upsertBodyMass(_ samples: [BodyMassSample], in range: DateInterval) -> Bool {
+        let start = range.start
+        let end = range.end
+        let query = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let rows = (try? context.fetch(query)) ?? []
+        var existing = Set(rows.map { cal.startOfDay(for: $0.date) })
+        var changed = false
         for s in samples.sorted(by: { $0.kg < $1.kg })
         where existing.insert(cal.startOfDay(for: s.date)).inserted {
             context.insert(BodyMetrics(date: s.date, weightKg: s.kg, source: .healthKit))
+            changed = true
         }
+        return changed
     }
 
     /// Body fat and lean mass land on the same day's weight row. Smart scales
@@ -116,10 +161,16 @@ final class SyncCoordinator {
     /// Lean mass is taken directly when HealthKit has it, and derived from body
     /// fat otherwise. Both are stored: body fat is what the user recognises,
     /// lean mass is what the engines use.
-    private func upsertComposition(bodyFat: [SampleValue], leanMass: [SampleValue]) {
-        let rows = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
+    private func upsertComposition(bodyFat: [SampleValue], leanMass: [SampleValue],
+                                   in range: DateInterval) -> Bool {
+        let start = range.start
+        let end = range.end
+        let query = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let rows = (try? context.fetch(query)) ?? []
         let byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
                                uniquingKeysWith: { a, _ in a })
+        var changed = false
 
         // Several readings a day: keep the last, matching the weight behaviour.
         func lastPerDay(_ samples: [SampleValue]) -> [Date: Double] {
@@ -139,88 +190,115 @@ final class SyncCoordinator {
             if let fat = fatByDay[day] {
                 // HealthKit reports a fraction (0.18), the app stores percent.
                 let percent = fat <= 1 ? fat * 100 : fat
-                if (3...70).contains(percent) { row.bodyFatPct = percent }
+                if (3...70).contains(percent), row.bodyFatPct != percent {
+                    row.bodyFatPct = percent
+                    changed = true
+                }
             }
             if let lean = leanByDay[day], lean > 0, lean < row.weightKg {
-                row.leanMassKg = lean
+                if row.leanMassKg != lean { row.leanMassKg = lean; changed = true }
             } else if let fat = row.bodyFatPct {
-                row.leanMassKg = row.weightKg * (1 - fat / 100)
+                let derived = row.weightKg * (1 - fat / 100)
+                if row.leanMassKg != derived { row.leanMassKg = derived; changed = true }
             }
         }
+        return changed
     }
 
-    private func upsertActivity(_ days: [DailyActivity]) {
-        let rows = (try? context.fetch(FetchDescriptor<DailyEnergy>())) ?? []
+    private func upsertActivity(_ days: [DailyActivity], in range: DateInterval) -> Bool {
+        let start = range.start
+        let end = range.end
+        let query = FetchDescriptor<DailyEnergy>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let rows = (try? context.fetch(query)) ?? []
         // `uniquingKeysWith`, not `uniqueKeysWithValues`: the schema carries no
         // unique constraint on the day, so two rows can share one after a
         // CloudKit merge between devices or an archive restore. The trapping
         // initialiser turned that into a crash on foreground sync.
         var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
                                uniquingKeysWith: { a, _ in a })
+        var changed = false
         for d in days {
             let key = cal.startOfDay(for: d.day)
             let row = byDay[key] ?? {
                 let r = DailyEnergy(date: key)
                 context.insert(r)
                 byDay[key] = r
+                changed = true
                 return r
             }()
-            row.activeEnergyKcal = d.activeEnergyKcal
-            row.basalEnergyKcal = d.basalEnergyKcal
-            row.steps = d.steps
-            row.distanceKm = d.distanceKm
-            row.flightsClimbed = d.flightsClimbed
+            if row.activeEnergyKcal != d.activeEnergyKcal { row.activeEnergyKcal = d.activeEnergyKcal; changed = true }
+            if row.basalEnergyKcal != d.basalEnergyKcal { row.basalEnergyKcal = d.basalEnergyKcal; changed = true }
+            if row.steps != d.steps { row.steps = d.steps; changed = true }
+            if row.distanceKm != d.distanceKm { row.distanceKm = d.distanceKm; changed = true }
+            if row.flightsClimbed != d.flightsClimbed { row.flightsClimbed = d.flightsClimbed; changed = true }
         }
+        return changed
     }
 
     /// Overwrites rather than skipping existing days, so rows written before
     /// bedtime/wake capture backfill their clock times on the next sync.
-    private func upsertSleep(_ samples: [SleepSample]) {
-        let rows = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
+    private func upsertSleep(_ samples: [SleepSample], in range: DateInterval) -> Bool {
+        let start = range.start
+        let end = range.end
+        let query = FetchDescriptor<SleepData>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let rows = (try? context.fetch(query)) ?? []
         var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
                                uniquingKeysWith: { a, _ in a })
+        var changed = false
         for s in samples {
             let key = cal.startOfDay(for: s.day)
             let row = byDay[key] ?? {
                 let r = SleepData(date: key)
                 context.insert(r)
                 byDay[key] = r
+                changed = true
                 return r
             }()
-            row.inBedMinutes = s.inBedMinutes
-            row.asleepMinutes = s.asleepMinutes
-            row.deepMinutes = s.deepMinutes
-            row.remMinutes = s.remMinutes
-            row.coreMinutes = s.coreMinutes
-            row.bedtime = s.bedtime
-            row.wakeTime = s.wakeTime
+            if row.inBedMinutes != s.inBedMinutes { row.inBedMinutes = s.inBedMinutes; changed = true }
+            if row.asleepMinutes != s.asleepMinutes { row.asleepMinutes = s.asleepMinutes; changed = true }
+            if row.deepMinutes != s.deepMinutes { row.deepMinutes = s.deepMinutes; changed = true }
+            if row.remMinutes != s.remMinutes { row.remMinutes = s.remMinutes; changed = true }
+            if row.coreMinutes != s.coreMinutes { row.coreMinutes = s.coreMinutes; changed = true }
+            if row.bedtime != s.bedtime { row.bedtime = s.bedtime; changed = true }
+            if row.wakeTime != s.wakeTime { row.wakeTime = s.wakeTime; changed = true }
         }
+        return changed
     }
 
-    private func upsertVitals(rhr: [SampleValue], hrv: [SampleValue]) {
-        let rows = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
+    private func upsertVitals(rhr: [SampleValue], hrv: [SampleValue],
+                              in range: DateInterval) -> Bool {
+        let start = range.start
+        let end = range.end
+        let query = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= start && $0.date <= end })
+        let rows = (try? context.fetch(query)) ?? []
         // See `upsertActivity` — same trap, same reason.
         var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
                                uniquingKeysWith: { a, _ in a })
+        var changed = false
         func row(for date: Date) -> DailyVitals {
             let key = cal.startOfDay(for: date)
             if let r = byDay[key] { return r }
             let r = DailyVitals(date: key)
             context.insert(r)
             byDay[key] = r
+            changed = true
             return r
         }
-        for s in rhr { row(for: s.date).restingHR = s.value }
+        for s in rhr {
+            let target = row(for: s.date)
+            if target.restingHR != s.value { target.restingHR = s.value; changed = true }
+        }
         // Multiple HRV readings a day: keep the daily mean.
         var hrvByDay: [Date: [Double]] = [:]
         for s in hrv { hrvByDay[cal.startOfDay(for: s.date), default: []].append(s.value) }
         for (day, values) in hrvByDay {
-            row(for: day).hrvSDNN = values.reduce(0, +) / Double(values.count)
+            let mean = values.reduce(0, +) / Double(values.count)
+            let target = row(for: day)
+            if target.hrvSDNN != mean { target.hrvSDNN = mean; changed = true }
         }
-    }
-
-    private func fetchDays<T: PersistentModel>(_ type: T.Type, dateKey: KeyPath<T, Date>) -> Set<Date> {
-        let rows = (try? context.fetch(FetchDescriptor<T>())) ?? []
-        return Set(rows.map { cal.startOfDay(for: $0[keyPath: dateKey]) })
+        return changed
     }
 }

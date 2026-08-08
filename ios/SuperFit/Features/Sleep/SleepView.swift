@@ -3,10 +3,20 @@ import SwiftData
 import Charts
 
 struct SleepView: View {
-    @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
-    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+    @Query private var sleep: [SleepData]
+    @Query private var vitals: [DailyVitals]
 
     @State private var window = 30
+
+    init() {
+        // The picker cannot show more than 90 days. Asking SwiftData for that
+        // same window avoids faulting years of daily Health rows first.
+        let cutoff = Calendar.current.date(byAdding: .day, value: -90, to: .now) ?? .now
+        _sleep = Query(filter: #Predicate { $0.date >= cutoff },
+                       sort: \SleepData.date, order: .reverse)
+        _vitals = Query(filter: #Predicate { $0.date >= cutoff },
+                        sort: \DailyVitals.date, order: .reverse)
+    }
 
     private var nights: [SleepNight] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -window, to: .now) ?? .now

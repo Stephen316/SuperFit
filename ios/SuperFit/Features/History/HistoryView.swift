@@ -12,14 +12,14 @@ struct HistoryView: View {
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     @Query private var profiles: [UserProfile]
-    @Query(sort: \BodyMetrics.date) private var metrics: [BodyMetrics]
+    @Query private var metrics: [BodyMetrics]
     @Query private var logs: [NutritionLog]
     @Query private var energy: [DailyEnergy]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
-    @Query(sort: \RecoveryScoreRecord.date) private var recoveries: [RecoveryScoreRecord]
-    @Query(sort: \DailyVitals.date) private var vitals: [DailyVitals]
-    @Query(sort: \SleepData.date) private var sleep: [SleepData]
+    @Query private var recoveries: [RecoveryScoreRecord]
+    @Query private var vitals: [DailyVitals]
+    @Query private var sleep: [SleepData]
     @Query private var sessions: [TrainingSession]
     @Query private var exercises: [Exercise]
 
@@ -27,6 +27,24 @@ struct HistoryView: View {
     @State private var selectedMuscle = MuscleGroup.chest
     @State private var selectedExerciseID: UUID?
     @State private var showingRate = false
+
+    init() {
+        // The largest selectable range is one year. Metabolism needs the thirty
+        // preceding days to calculate the first visible point, hence the buffer.
+        let chartCutoff = Calendar.current.date(byAdding: .day, value: -365, to: .now) ?? .now
+        let metabolismCutoff = Calendar.current.date(byAdding: .day, value: -396, to: .now) ?? .now
+        _metrics = Query(filter: #Predicate { $0.date >= metabolismCutoff },
+                         sort: \BodyMetrics.date)
+        _logs = Query(filter: #Predicate { $0.date >= metabolismCutoff })
+        _energy = Query(filter: #Predicate { $0.date >= metabolismCutoff })
+        _recoveries = Query(filter: #Predicate { $0.date >= chartCutoff },
+                            sort: \RecoveryScoreRecord.date)
+        _vitals = Query(filter: #Predicate { $0.date >= chartCutoff },
+                        sort: \DailyVitals.date)
+        _sleep = Query(filter: #Predicate { $0.date >= chartCutoff },
+                       sort: \SleepData.date)
+        _sessions = Query(filter: #Predicate { $0.startedAt >= chartCutoff })
+    }
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
     private var start: Date { range.start }

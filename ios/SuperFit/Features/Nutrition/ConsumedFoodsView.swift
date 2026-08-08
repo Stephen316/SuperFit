@@ -12,6 +12,15 @@ struct ConsumedFoodsView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var logs: [NutritionLog]
 
+    init(day: Date) {
+        self.day = day
+        let bounds = DayBounds(day)
+        let start = bounds.start
+        let end = bounds.end
+        _logs = Query(filter: #Predicate { $0.date >= start && $0.date < end },
+                      sort: \NutritionLog.loggedAt)
+    }
+
     private var dayLogs: [NutritionLog] {
         let d = DayBounds(day)
         return logs.filter { d.contains($0.date) }

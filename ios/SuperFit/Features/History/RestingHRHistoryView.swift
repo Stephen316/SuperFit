@@ -12,9 +12,17 @@ import Charts
 /// moves it — so the daily points are drawn faintly under a trailing mean.
 struct RestingHRHistoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \DailyVitals.date) private var vitals: [DailyVitals]
+    @Query private var vitals: [DailyVitals]
 
     static let windowDays = 90
+
+    init() {
+        let cutoff = Calendar.current.date(byAdding: .day,
+                                           value: -Self.windowDays,
+                                           to: .now) ?? .now
+        _vitals = Query(filter: #Predicate { $0.date >= cutoff },
+                        sort: \DailyVitals.date)
+    }
     private var start: Date {
         Calendar.current.date(byAdding: .day, value: -Self.windowDays, to: .now) ?? .now
     }

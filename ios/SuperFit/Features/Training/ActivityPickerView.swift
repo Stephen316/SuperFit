@@ -180,7 +180,6 @@ private struct WorkoutTemplateEditorView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Exercise.name) private var exercises: [Exercise]
     @Query private var templates: [WorkoutTemplate]
-    @Query private var sessions: [TrainingSession]
 
     @State private var name: String
     @State private var exerciseIDs: [UUID]
@@ -287,6 +286,9 @@ private struct WorkoutTemplateEditorView: View {
             context.insert(item)
         }
         if oldName != trimmedName {
+            // Only pay for historical session materialisation when the user
+            // actually renames a template, not whenever the editor appears.
+            let sessions = (try? context.fetch(FetchDescriptor<TrainingSession>())) ?? []
             for session in sessions where
                 session.templateName?.caseInsensitiveCompare(oldName) == .orderedSame {
                 session.templateName = trimmedName

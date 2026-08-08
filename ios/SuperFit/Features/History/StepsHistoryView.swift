@@ -9,9 +9,15 @@ import Charts
 /// figure — hence bars per day with a trailing mean laid over them.
 struct StepsHistoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \DailyEnergy.date) private var energy: [DailyEnergy]
+    @Query private var energy: [DailyEnergy]
 
     @State private var range = HistoryRange.quarter
+
+    init() {
+        let cutoff = HistoryRange.year.start
+        _energy = Query(filter: #Predicate { $0.date >= cutoff },
+                        sort: \DailyEnergy.date)
+    }
 
     private var points: [HistoryPoint] {
         energy.filter { $0.date >= range.start && $0.steps > 0 }

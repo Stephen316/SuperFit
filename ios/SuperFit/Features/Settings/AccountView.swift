@@ -9,6 +9,7 @@ struct AccountView: View {
 
     @State private var exportDocument: ArchiveDocument?
     @State private var exporting = false
+    @State private var preparingExport = false
     @State private var importing = false
     @State private var pendingImport: DataArchive?
     @State private var confirmingErase = false
@@ -112,11 +113,15 @@ struct AccountView: View {
     private var backupSection: some View {
         Section {
             Button {
-                exportDocument = ArchiveDocument(context: context)
-                exporting = exportDocument != nil
+                Task { await prepareExport() }
             } label: {
-                Label("Export backup file", systemImage: "square.and.arrow.up")
+                if preparingExport {
+                    Label("Preparing backup…", systemImage: "hourglass")
+                } else {
+                    Label("Export backup file", systemImage: "square.and.arrow.up")
+                }
             }
+            .disabled(preparingExport)
             Button {
                 importing = true
             } label: {
@@ -153,11 +158,36 @@ struct AccountView: View {
             }
             return
         }
+        Task { await decodePickedFile(url) }
+    }
+
+    @MainActor
+    private func prepareExport() async {
+        guard !preparingExport else { return }
+        preparingExport = true
+        defer { preparingExport = false }
+        do {
+            let exporter = DataArchiveExporter(modelContainer: context.container)
+            let archive = await exporter.export()
+            let encoded = try await Task.detached(priority: .userInitiated) {
+                try DataArchiveService.encode(archive)
+            }.value
+            exportDocument = ArchiveDocument(data: encoded)
+            exporting = true
+        } catch {
+            showMessage(title: "Couldn't export backup", text: error.localizedDescription)
+        }
+    }
+
+    @MainActor
+    private func decodePickedFile(_ url: URL) async {
         // Files chosen from the picker live outside the sandbox.
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            pendingImport = try DataArchiveService.decode(Data(contentsOf: url))
+            pendingImport = try await Task.detached(priority: .userInitiated) {
+                try DataArchiveService.decode(Data(contentsOf: url))
+            }.value
         } catch {
             showMessage(title: "Couldn't open backup", text: error.localizedDescription)
         }
@@ -185,12 +215,7 @@ struct ArchiveDocument: FileDocument {
 
     private let data: Data
 
-    @MainActor
-    init?(context: ModelContext) {
-        guard let encoded = try? DataArchiveService.encode(
-            DataArchiveService.export(context: context)) else { return nil }
-        data = encoded
-    }
+    init(data: Data) { self.data = data }
 
     init(configuration: ReadConfiguration) throws {
         data = configuration.file.regularFileContents ?? Data()

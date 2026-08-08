@@ -105,11 +105,34 @@ actor HealthKitManager: HealthProvider {
             }
             store.execute(q)
         }
-        var out: [WorkoutSample] = []
-        for workout in workouts {
-            out.append(await sample(from: workout))
+        // Each workout needs a separate server-side heart-rate statistics
+        // query. Running those strictly one after another made a 90-day import
+        // pay the HealthKit round-trip once per workout. Keep four in flight —
+        // enough to hide query latency without flooding HKHealthStore — and
+        // restore the source order before returning.
+        return await withTaskGroup(of: (Int, WorkoutSample).self) { group in
+            let limit = min(4, workouts.count)
+            var next = 0
+            for _ in 0..<limit {
+                let index = next
+                let workout = workouts[index]
+                group.addTask { (index, await self.sample(from: workout)) }
+                next += 1
+            }
+
+            var results: [(Int, WorkoutSample)] = []
+            results.reserveCapacity(workouts.count)
+            while let result = await group.next() {
+                results.append(result)
+                if next < workouts.count {
+                    let index = next
+                    let workout = workouts[index]
+                    group.addTask { (index, await self.sample(from: workout)) }
+                    next += 1
+                }
+            }
+            return results.sorted { $0.0 < $1.0 }.map(\.1)
         }
-        return out
     }
 
     /// Assembles everything HealthKit knows about one workout.

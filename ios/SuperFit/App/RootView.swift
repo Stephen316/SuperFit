@@ -66,14 +66,6 @@ struct RootView: View {
             // are searchable from the food diary, so they must exist even if
             // that screen is never opened.
             SupplementCatalog.seedIfNeeded(context: context)
-            // Bring the stored estimates back in line with the stored weights.
-            //
-            // The dashboard also aggregates, but only after awaiting a Health
-            // sync — so a sync that stalls or is refused leaves a stale TDEE in
-            // place indefinitely. This runs off nothing but the local store, so
-            // a target left wrong by an earlier bug corrects itself on the next
-            // launch instead of waiting to be edited a second time.
-            AggregationService(context: context).refreshWeightDerived()
         }
     }
 

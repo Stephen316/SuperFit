@@ -30,7 +30,7 @@ import SwiftData
 ///   entered by hand does not, and neither do meal templates. Adding
 ///   `WorkoutDTO` and `SavedMealDTO` is the fix whenever that trade stops being
 ///   acceptable.
-struct DataArchive: Codable {
+struct DataArchive: Codable, Sendable {
     static let currentVersion = 1
 
     var version = DataArchive.currentVersion
@@ -55,18 +55,18 @@ struct DataArchive: Codable {
     // storage detail that changes with the schema, while an archive has to stay
     // readable by a future build. `version` is what lets that be checked.
 
-    struct ProfileDTO: Codable {
+    struct ProfileDTO: Codable, Sendable {
         var birthDate: Date, heightCm: Double
         var sex: String, goal: String, activity: String
         var proteinPerKgOverride: Double
     }
 
-    struct BodyMetricDTO: Codable {
+    struct BodyMetricDTO: Codable, Sendable {
         var date: Date, weightKg: Double
         var bodyFatPct: Double?, leanMassKg: Double?, source: String
     }
 
-    struct FoodDTO: Codable {
+    struct FoodDTO: Codable, Sendable {
         var id: UUID, source: String, remoteID: String?
         var name: String, brand: String?
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
@@ -75,7 +75,7 @@ struct DataArchive: Codable {
         var isFavorite: Bool
     }
 
-    struct NutritionLogDTO: Codable {
+    struct NutritionLogDTO: Codable, Sendable {
         var date: Date, loggedAt: Date, foodID: UUID?, foodName: String?
         var servingGrams: Double
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
@@ -83,7 +83,7 @@ struct DataArchive: Codable {
         var meal: String
     }
 
-    struct ExerciseDTO: Codable {
+    struct ExerciseDTO: Codable, Sendable {
         var id: UUID, name: String, category: String
         var tension: [String], bodyweightFraction: Double, isCustom: Bool
         /// Optional so archives written before this field decode rather than
@@ -97,49 +97,48 @@ struct DataArchive: Codable {
         var aliases: [String]?
     }
 
-    struct SessionDTO: Codable {
+    struct SessionDTO: Codable, Sendable {
         var id: UUID, startedAt: Date, endedAt: Date?, templateName: String?
         var sets: [SetDTO]
 
-        struct SetDTO: Codable {
+        struct SetDTO: Codable, Sendable {
             var order: Int, exerciseID: UUID?
             var weightKg: Double, reps: Int, rir: Int?
             var isWarmup: Bool, completedAt: Date?
         }
     }
 
-    struct TemplateDTO: Codable {
+    struct TemplateDTO: Codable, Sendable {
         var id: UUID, name: String, createdAt: Date, exerciseIDs: [UUID]
     }
 
-    struct SupplementDTO: Codable {
+    struct SupplementDTO: Codable, Sendable {
         var id: UUID, name: String, category: String
         var servingLabel: String, servingGrams: Double?
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
         var micros: [String], isCustom: Bool
     }
 
-    struct SupplementEntryDTO: Codable {
+    struct SupplementEntryDTO: Codable, Sendable {
         var id: UUID, supplementID: UUID?, kind: String, servings: Double
         var date: Date?, startedOn: Date?, stoppedOn: Date?
     }
 
-    struct SleepDTO: Codable {
+    struct SleepDTO: Codable, Sendable {
         var date: Date, inBed: Int, asleep: Int, deep: Int, rem: Int, core: Int
         var bedtime: Date?, wakeTime: Date?
     }
 
-    struct VitalsDTO: Codable {
+    struct VitalsDTO: Codable, Sendable {
         var date: Date, restingHR: Double?, hrvSDNN: Double?
     }
 
-    struct EnergyDTO: Codable {
+    struct EnergyDTO: Codable, Sendable {
         var date: Date, active: Double, basal: Double
         var steps: Int, distanceKm: Double, flights: Int
     }
 }
 
-@MainActor
 enum DataArchiveService {
 
     enum ImportMode {
@@ -261,6 +260,7 @@ enum DataArchiveService {
     // MARK: - Import
 
     @discardableResult
+    @MainActor
     static func restore(_ archive: DataArchive, mode: ImportMode,
                         context: ModelContext) -> ImportResult {
         var result = ImportResult()
@@ -508,6 +508,7 @@ enum DataArchiveService {
 
     /// Wipes every user record. Only reachable from an explicitly confirmed
     /// action — never as a side effect of signing out.
+    @MainActor
     static func eraseAll(context: ModelContext) {
         for model in AppSchema.models {
             try? context.delete(model: model)
@@ -517,5 +518,15 @@ enum DataArchiveService {
 
     private static func fetch<T: PersistentModel>(_ context: ModelContext) -> [T] {
         (try? context.fetch(FetchDescriptor<T>())) ?? []
+    }
+}
+
+/// Reads a snapshot through its own SwiftData context. Exporting every model can
+/// take noticeable time on a years-deep diary; a ModelActor keeps that work off
+/// the UI actor while retaining SwiftData's context confinement.
+@ModelActor
+actor DataArchiveExporter {
+    func export() -> DataArchive {
+        DataArchiveService.export(context: modelContext)
     }
 }

@@ -116,9 +116,12 @@ final class SupabaseBackup {
         guard let client = account.client, let userID = account.userID else { return }
         status = .working
         do {
-            let archive = DataArchiveService.export(context: context)
-            if let size = try? DataArchiveService.encode(archive).count,
-               size > Self.maxArchiveBytes {
+            let exporter = DataArchiveExporter(modelContainer: context.container)
+            let archive = await exporter.export()
+            let size = try await Task.detached(priority: .userInitiated) {
+                try DataArchiveService.encode(archive).count
+            }.value
+            if size > Self.maxArchiveBytes {
                 let mb = Double(size) / 1_048_576
                 status = .failed(String(format:
                     "This backup is %.0f MB, which is too large to store. Export it to a file instead.", mb))
@@ -129,7 +132,10 @@ final class SupabaseBackup {
                                 updated_at: Date(),
                                 app_version: appVersion)
             // Upsert on the primary key: one row per user, always replaced.
-            try await client.from(Self.table).upsert(row, onConflict: "user_id").execute()
+            try await Task.detached(priority: .userInitiated) {
+                _ = try await client.from(Self.table)
+                    .upsert(row, onConflict: "user_id").execute()
+            }.value
             guard account.userID == userID else { return }
             status = .done(row.updated_at)
             await refreshSummary()
