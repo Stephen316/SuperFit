@@ -150,6 +150,68 @@ struct DataArchiveTests {
         #expect(names.contains("Chicken breast"))
     }
 
+    /// A stale merge previously overwrote all 6 archived profile fields; the
+    /// current profile must survive merge, while replace must restore all 6.
+    @Test func mergePreservesCurrentProfileAndReplaceRestoresArchivedProfile() throws {
+        var archive = DataArchive()
+        archive.profile = .init(
+            birthDate: Date(timeIntervalSince1970: 315_532_800),
+            heightCm: 164,
+            sex: BiologicalSex.female.rawValue,
+            goal: FitnessGoal.fatLoss.rawValue,
+            activity: ActivityBaseline.light.rawValue,
+            proteinPerKgOverride: 1.8)
+
+        let context = try makeContext()
+        let current = UserProfile()
+        current.birthDate = Date(timeIntervalSince1970: 631_152_000)
+        current.heightCm = 191
+        current.sex = .male
+        current.goal = .muscleGain
+        current.activity = .athlete
+        current.proteinPerKgOverride = 2.2
+        context.insert(current)
+        try context.save()
+
+        DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        var profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.birthDate == current.birthDate)
+        #expect(profiles.first?.heightCm == 191)
+        #expect(profiles.first?.sex == .male)
+        #expect(profiles.first?.goal == .muscleGain)
+        #expect(profiles.first?.activity == .athlete)
+        #expect(profiles.first?.proteinPerKgOverride == 2.2)
+
+        DataArchiveService.restore(archive, mode: .replace, context: context)
+
+        profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.birthDate == archive.profile?.birthDate)
+        #expect(profiles.first?.heightCm == 164)
+        #expect(profiles.first?.sex == .female)
+        #expect(profiles.first?.goal == .fatLoss)
+        #expect(profiles.first?.activity == .light)
+        #expect(profiles.first?.proteinPerKgOverride == 1.8)
+    }
+
+    /// Replace accepts version-1 archives whose optional profile is absent;
+    /// it must still leave the app with an operable empty profile screen.
+    @Test func replaceWithoutAnArchivedProfileCreatesAnEmptyProfile() throws {
+        let context = try makeContext()
+        let current = UserProfile()
+        current.heightCm = 190
+        context.insert(current)
+        try context.save()
+
+        DataArchiveService.restore(DataArchive(), mode: .replace, context: context)
+
+        let profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.heightCm == 175)
+    }
+
     @Test func replaceClearsExistingDataFirst() throws {
         let context = try makeContext()
         seed(context)
@@ -181,6 +243,111 @@ struct DataArchiveTests {
         DataArchiveService.restore(archive, mode: .merge, context: fresh)
 
         #expect(try fresh.fetch(FetchDescriptor<Exercise>()).count == seededCount)
+    }
+
+    /// Seeding changes 1 exercise UUID between installs; both dependent IDs in
+    /// an archived session and template must point at the local seeded row.
+    @Test func nameDedupedExerciseReferencesUseTheSeededID() throws {
+        let context = try makeContext()
+        ExerciseLibrary.seedIfNeeded(context: context)
+        let exercises = try context.fetch(FetchDescriptor<Exercise>())
+        let local = try #require(exercises.first { $0.name == "Barbell Bench Press" })
+        let archivedID = UUID()
+
+        var archive = DataArchive()
+        archive.exercises = [.init(
+            id: archivedID,
+            name: local.name,
+            category: local.categoryRaw,
+            tension: local.tensionRaw,
+            bodyweightFraction: local.bodyweightFraction,
+            isCustom: false,
+            aliases: local.aliases)]
+        archive.sessions = [.init(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            endedAt: nil,
+            templateName: "Archived push",
+            sets: [.init(order: 0, exerciseID: archivedID, weightKg: 80,
+                         reps: 8, rir: 2, isWarmup: false, completedAt: nil)])]
+        archive.templates = [.init(
+            id: UUID(),
+            name: "Archived push",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            exerciseIDs: [archivedID])]
+
+        DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        let sessions = try context.fetch(FetchDescriptor<TrainingSession>())
+        let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+        let session = try #require(sessions.first)
+        let template = try #require(templates.first)
+        #expect(session.sets?.first?.exerciseID == local.id)
+        #expect(template.orderedExerciseIDs == [local.id])
+        #expect(!(try context.fetch(FetchDescriptor<Exercise>())).contains { $0.id == archivedID })
+    }
+
+    /// Seeding changes 1 supplement UUID between installs; its archived daily
+    /// entry must follow the name-deduped local row rather than become orphaned.
+    @Test func nameDedupedSupplementEntryUsesTheSeededID() throws {
+        let context = try makeContext()
+        SupplementCatalog.seedIfNeeded(context: context)
+        let supplements = try context.fetch(FetchDescriptor<Supplement>())
+        let local = try #require(supplements.first { $0.name == "Whey Protein Isolate" })
+        let archivedID = UUID()
+
+        var archive = DataArchive()
+        archive.supplements = [.init(
+            id: archivedID,
+            name: local.name,
+            category: local.categoryRaw,
+            servingLabel: local.servingLabel,
+            servingGrams: local.servingGrams,
+            kcal: local.kcal,
+            protein: local.proteinG,
+            carbs: local.carbsG,
+            fat: local.fatG,
+            fibre: local.fibreG,
+            micros: local.microsRaw,
+            isCustom: false)]
+        archive.supplementEntries = [.init(
+            id: UUID(),
+            supplementID: archivedID,
+            kind: SupplementEntryKind.daily.rawValue,
+            servings: 1,
+            date: nil,
+            startedOn: Date(timeIntervalSince1970: 1_700_000_000),
+            stoppedOn: nil)]
+
+        DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        let entries = try context.fetch(FetchDescriptor<SupplementEntry>())
+        let entry = try #require(entries.first)
+        #expect(entry.supplementID == local.id)
+        #expect(!(try context.fetch(FetchDescriptor<Supplement>())).contains { $0.id == archivedID })
+    }
+
+    /// Two weights inside 1 archive can share a day; the mutable day index must
+    /// keep the first and report exactly 1 added row plus 1 skipped duplicate.
+    @Test func duplicateWeightDaysInsideOneArchiveRestoreOnce() throws {
+        let day = Calendar.current.startOfDay(
+            for: Date(timeIntervalSince1970: 1_700_000_000)).addingTimeInterval(3_600)
+        var archive = DataArchive()
+        archive.bodyMetrics = [
+            .init(date: day, weightKg: 80, bodyFatPct: nil,
+                  leanMassKg: nil, source: MetricSource.manual.rawValue),
+            .init(date: day.addingTimeInterval(3_600), weightKg: 81,
+                  bodyFatPct: nil, leanMassKg: nil, source: MetricSource.manual.rawValue),
+        ]
+        let context = try makeContext()
+
+        let result = DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        let weights = try context.fetch(FetchDescriptor<BodyMetrics>())
+        #expect(weights.count == 1)
+        #expect(weights.first?.weightKg == 80)
+        #expect(result.added == 1)
+        #expect(result.skipped == 1)
     }
 
     // MARK: Guards
