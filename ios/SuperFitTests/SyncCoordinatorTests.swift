@@ -96,9 +96,13 @@ struct SyncCoordinatorTests {
         let health = StubHealth(mass: [BodyMassSample(date: .now.addingTimeInterval(-3600),
                                                       kg: 80)])
         let sync = SyncCoordinator(health: health, garmin: StubRecovery(), context: context)
-        await sync.syncAll()
-        await sync.syncAll()
+        let first = await sync.syncAll()
+        let second = await sync.syncAll()
         #expect((rows(context) as [BodyMetrics]).count == 1)
+        #expect(first.weightTrendNeedsRefresh)
+        #expect(first.hasChanges)
+        #expect(!second.weightTrendNeedsRefresh)
+        #expect(!second.hasChanges)
     }
 
     /// Two rows already sharing a day used to trap `Dictionary(uniqueKeysWithValues:)`

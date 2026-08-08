@@ -30,7 +30,7 @@ import SwiftData
 ///   entered by hand does not, and neither do meal templates. Adding
 ///   `WorkoutDTO` and `SavedMealDTO` is the fix whenever that trade stops being
 ///   acceptable.
-struct DataArchive: Codable {
+struct DataArchive: Codable, Sendable {
     static let currentVersion = 1
 
     var version = DataArchive.currentVersion
@@ -55,18 +55,18 @@ struct DataArchive: Codable {
     // storage detail that changes with the schema, while an archive has to stay
     // readable by a future build. `version` is what lets that be checked.
 
-    struct ProfileDTO: Codable {
+    struct ProfileDTO: Codable, Sendable {
         var birthDate: Date, heightCm: Double
         var sex: String, goal: String, activity: String
         var proteinPerKgOverride: Double
     }
 
-    struct BodyMetricDTO: Codable {
+    struct BodyMetricDTO: Codable, Sendable {
         var date: Date, weightKg: Double
         var bodyFatPct: Double?, leanMassKg: Double?, source: String
     }
 
-    struct FoodDTO: Codable {
+    struct FoodDTO: Codable, Sendable {
         var id: UUID, source: String, remoteID: String?
         var name: String, brand: String?
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
@@ -75,7 +75,7 @@ struct DataArchive: Codable {
         var isFavorite: Bool
     }
 
-    struct NutritionLogDTO: Codable {
+    struct NutritionLogDTO: Codable, Sendable {
         var date: Date, loggedAt: Date, foodID: UUID?, foodName: String?
         var servingGrams: Double
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
@@ -83,7 +83,7 @@ struct DataArchive: Codable {
         var meal: String
     }
 
-    struct ExerciseDTO: Codable {
+    struct ExerciseDTO: Codable, Sendable {
         var id: UUID, name: String, category: String
         var tension: [String], bodyweightFraction: Double, isCustom: Bool
         /// Optional so archives written before this field decode rather than
@@ -97,54 +97,54 @@ struct DataArchive: Codable {
         var aliases: [String]?
     }
 
-    struct SessionDTO: Codable {
+    struct SessionDTO: Codable, Sendable {
         var id: UUID, startedAt: Date, endedAt: Date?, templateName: String?
         var sets: [SetDTO]
 
-        struct SetDTO: Codable {
+        struct SetDTO: Codable, Sendable {
             var order: Int, exerciseID: UUID?
             var weightKg: Double, reps: Int, rir: Int?
             var isWarmup: Bool, completedAt: Date?
         }
     }
 
-    struct TemplateDTO: Codable {
+    struct TemplateDTO: Codable, Sendable {
         var id: UUID, name: String, createdAt: Date, exerciseIDs: [UUID]
     }
 
-    struct SupplementDTO: Codable {
+    struct SupplementDTO: Codable, Sendable {
         var id: UUID, name: String, category: String
         var servingLabel: String, servingGrams: Double?
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
         var micros: [String], isCustom: Bool
     }
 
-    struct SupplementEntryDTO: Codable {
+    struct SupplementEntryDTO: Codable, Sendable {
         var id: UUID, supplementID: UUID?, kind: String, servings: Double
         var date: Date?, startedOn: Date?, stoppedOn: Date?
     }
 
-    struct SleepDTO: Codable {
+    struct SleepDTO: Codable, Sendable {
         var date: Date, inBed: Int, asleep: Int, deep: Int, rem: Int, core: Int
         var bedtime: Date?, wakeTime: Date?
     }
 
-    struct VitalsDTO: Codable {
+    struct VitalsDTO: Codable, Sendable {
         var date: Date, restingHR: Double?, hrvSDNN: Double?
     }
 
-    struct EnergyDTO: Codable {
+    struct EnergyDTO: Codable, Sendable {
         var date: Date, active: Double, basal: Double
         var steps: Int, distanceKm: Double, flights: Int
     }
 }
 
-@MainActor
 enum DataArchiveService {
 
     enum ImportMode {
-        /// Add what isn't already there, keyed by natural identity. The safe
-        /// default: restoring a stale backup can't destroy newer data.
+        /// Add missing history while keeping the profile already on this
+        /// device. The safe default: a stale backup cannot replace newer data
+        /// or silently change the user's current goals.
         case merge
         /// Erase everything first. For moving to a different Apple ID, where
         /// merging two histories would produce a nonsense timeline.
@@ -260,6 +260,7 @@ enum DataArchiveService {
     // MARK: - Import
 
     @discardableResult
+    @MainActor
     static func restore(_ archive: DataArchive, mode: ImportMode,
                         context: ModelContext) -> ImportResult {
         var result = ImportResult()
@@ -268,21 +269,29 @@ enum DataArchiveService {
         if mode == .replace { eraseAll(context: context) }
 
         if let p = archive.profile {
-            let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first
-                ?? { let n = UserProfile(); context.insert(n); return n }()
-            profile.birthDate = p.birthDate
-            profile.heightCm = p.heightCm
-            profile.sexRaw = p.sex
-            profile.goalRaw = p.goal
-            profile.activityRaw = p.activity
-            profile.proteinPerKgOverride = p.proteinPerKgOverride
+            let existing = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first
+            if mode == .replace || existing == nil {
+                let profile = existing
+                    ?? { let n = UserProfile(); context.insert(n); return n }()
+                profile.birthDate = p.birthDate
+                profile.heightCm = p.heightCm
+                profile.sexRaw = p.sex
+                profile.goalRaw = p.goal
+                profile.activityRaw = p.activity
+                profile.proteinPerKgOverride = p.proteinPerKgOverride
+            }
+        } else if ((try? context.fetch(FetchDescriptor<UserProfile>())) ?? []).isEmpty {
+            // A partial or hand-edited archive must not leave Profile waiting
+            // forever after a replace restore.
+            context.insert(UserProfile())
         }
 
         // Day-keyed rows dedupe by day; everything else by identity. Merging a
         // backup must never double a day's weight or a training session.
-        let existingWeightDays = Set(fetch(context).map { (m: BodyMetrics) in cal.startOfDay(for: m.date) })
+        var existingWeightDays = Set(fetch(context).map { (m: BodyMetrics) in cal.startOfDay(for: m.date) })
         for m in archive.bodyMetrics {
-            guard !existingWeightDays.contains(cal.startOfDay(for: m.date)) else { result.skipped += 1; continue }
+            let day = cal.startOfDay(for: m.date)
+            guard existingWeightDays.insert(day).inserted else { result.skipped += 1; continue }
             let row = BodyMetrics(date: m.date, weightKg: m.weightKg,
                                   source: MetricSource(rawValue: m.source) ?? .manual)
             row.bodyFatPct = m.bodyFatPct
@@ -291,8 +300,9 @@ enum DataArchiveService {
             result.added += 1
         }
 
-        let existingFoodIDs = Set(fetch(context).map { (f: Food) in f.id })
-        for f in archive.foods where !existingFoodIDs.contains(f.id) {
+        var existingFoodIDs = Set(fetch(context).map { (f: Food) in f.id })
+        for f in archive.foods {
+            guard existingFoodIDs.insert(f.id).inserted else { result.skipped += 1; continue }
             let row = Food(name: f.name, source: FoodSource(rawValue: f.source) ?? .custom)
             row.id = f.id
             row.remoteID = f.remoteID
@@ -311,12 +321,12 @@ enum DataArchiveService {
 
         // A log has no natural key, so identity is the tuple that makes two
         // entries genuinely the same: same food, same moment, same portion.
-        let existingLogKeys = Set(fetch(context).map { (l: NutritionLog) in
+        var existingLogKeys = Set(fetch(context).map { (l: NutritionLog) in
             "\(l.loggedAt.timeIntervalSince1970)|\(l.foodName ?? "")|\(l.servingGrams)"
         })
         for l in archive.nutritionLogs {
             let key = "\(l.loggedAt.timeIntervalSince1970)|\(l.foodName ?? "")|\(l.servingGrams)"
-            guard !existingLogKeys.contains(key) else { result.skipped += 1; continue }
+            guard existingLogKeys.insert(key).inserted else { result.skipped += 1; continue }
             let row = NutritionLog(date: l.date, meal: MealSlot(rawValue: l.meal) ?? .snack)
             row.loggedAt = l.loggedAt
             row.foodID = l.foodID
@@ -332,13 +342,20 @@ enum DataArchiveService {
             result.added += 1
         }
 
-        let existingExerciseIDs = Set(fetch(context).map { (e: Exercise) in e.id })
-        let existingExerciseNames = Set(fetch(context).map { (e: Exercise) in e.name })
+        let existingExercises: [Exercise] = fetch(context)
+        var exercisesByID = Dictionary(existingExercises.map { ($0.id, $0) },
+                                       uniquingKeysWith: { first, _ in first })
+        var exercisesByName = Dictionary(existingExercises.map { ($0.name, $0) },
+                                         uniquingKeysWith: { first, _ in first })
+        var exerciseIDMap: [UUID: UUID] = [:]
         for e in archive.exercises {
             // Built-ins are re-seeded on launch with fresh ids, so skip by name
             // too or every restore would duplicate the whole catalog.
-            guard !existingExerciseIDs.contains(e.id),
-                  !existingExerciseNames.contains(e.name) else { result.skipped += 1; continue }
+            if let existing = exercisesByID[e.id] ?? exercisesByName[e.name] {
+                exerciseIDMap[e.id] = existing.id
+                result.skipped += 1
+                continue
+            }
             let row = Exercise(name: e.name,
                                category: ExerciseCategory(rawValue: e.category) ?? .barbell,
                                tension: [:], bodyweightFraction: e.bodyweightFraction,
@@ -347,18 +364,23 @@ enum DataArchiveService {
             row.tensionRaw = e.tension
             row.aliases = e.aliases ?? []
             context.insert(row)
+            exercisesByID[row.id] = row
+            exercisesByName[row.name] = row
+            exerciseIDMap[e.id] = row.id
             result.added += 1
         }
 
-        let existingSessionIDs = Set(fetch(context).map { (s: TrainingSession) in s.id })
-        for s in archive.sessions where !existingSessionIDs.contains(s.id) {
+        var existingSessionIDs = Set(fetch(context).map { (s: TrainingSession) in s.id })
+        for s in archive.sessions {
+            guard existingSessionIDs.insert(s.id).inserted else { result.skipped += 1; continue }
             let session = TrainingSession(templateName: s.templateName)
             session.id = s.id
             session.startedAt = s.startedAt
             session.endedAt = s.endedAt
             context.insert(session)
             for set in s.sets {
-                guard let exerciseID = set.exerciseID else { continue }
+                guard let archivedExerciseID = set.exerciseID else { continue }
+                let exerciseID = exerciseIDMap[archivedExerciseID] ?? archivedExerciseID
                 let entry = SetEntry(order: set.order, exerciseID: exerciseID,
                                      weightKg: set.weightKg, reps: set.reps)
                 entry.rir = set.rir
@@ -370,22 +392,34 @@ enum DataArchiveService {
             result.added += 1
         }
 
-        let existingTemplateNames = Set(fetch(context).map { (t: WorkoutTemplate) in t.name })
-        for t in archive.templates where !existingTemplateNames.contains(t.name) {
+        var existingTemplateNames = Set(fetch(context).map { (t: WorkoutTemplate) in t.name })
+        for t in archive.templates {
+            guard existingTemplateNames.insert(t.name).inserted else { result.skipped += 1; continue }
             let template = WorkoutTemplate(name: t.name)
             template.id = t.id
             template.createdAt = t.createdAt
             context.insert(template)
-            for (i, id) in t.exerciseIDs.enumerated() {
-                let item = WorkoutTemplateItem(order: i, exerciseID: id)
+            for (i, archivedExerciseID) in t.exerciseIDs.enumerated() {
+                let exerciseID = exerciseIDMap[archivedExerciseID] ?? archivedExerciseID
+                let item = WorkoutTemplateItem(order: i, exerciseID: exerciseID)
                 item.template = template
                 context.insert(item)
             }
             result.added += 1
         }
 
-        let existingSupplementNames = Set(fetch(context).map { (s: Supplement) in s.name })
-        for s in archive.supplements where !existingSupplementNames.contains(s.name) {
+        let existingSupplements: [Supplement] = fetch(context)
+        var supplementsByID = Dictionary(existingSupplements.map { ($0.id, $0) },
+                                         uniquingKeysWith: { first, _ in first })
+        var supplementsByName = Dictionary(existingSupplements.map { ($0.name, $0) },
+                                           uniquingKeysWith: { first, _ in first })
+        var supplementIDMap: [UUID: UUID] = [:]
+        for s in archive.supplements {
+            if let existing = supplementsByID[s.id] ?? supplementsByName[s.name] {
+                supplementIDMap[s.id] = existing.id
+                result.skipped += 1
+                continue
+            }
             let row = Supplement(name: s.name,
                                  category: SupplementCategory(rawValue: s.category) ?? .health,
                                  servingLabel: s.servingLabel,
@@ -399,15 +433,20 @@ enum DataArchiveService {
             row.fibreG = s.fibre
             row.microsRaw = s.micros
             context.insert(row)
+            supplementsByID[row.id] = row
+            supplementsByName[row.name] = row
+            supplementIDMap[s.id] = row.id
             result.added += 1
         }
 
-        let existingEntryIDs = Set(fetch(context).map { (e: SupplementEntry) in e.id })
-        for e in archive.supplementEntries where !existingEntryIDs.contains(e.id) {
+        var existingEntryIDs = Set(fetch(context).map { (e: SupplementEntry) in e.id })
+        for e in archive.supplementEntries {
+            guard existingEntryIDs.insert(e.id).inserted else { result.skipped += 1; continue }
             // Counted, not silently dropped: an entry pointing at no supplement
             // is unusable, but the restore summary should still account for it
             // rather than reporting a total that doesn't add up.
-            guard let supplementID = e.supplementID else { result.skipped += 1; continue }
+            guard let archivedSupplementID = e.supplementID else { result.skipped += 1; continue }
+            let supplementID = supplementIDMap[archivedSupplementID] ?? archivedSupplementID
             let row = SupplementEntry(supplementID: supplementID,
                                       kind: SupplementEntryKind(rawValue: e.kind) ?? .once,
                                       servings: e.servings)
@@ -419,8 +458,10 @@ enum DataArchiveService {
             result.added += 1
         }
 
-        let existingSleepDays = Set(fetch(context).map { (s: SleepData) in cal.startOfDay(for: s.date) })
-        for s in archive.sleep where !existingSleepDays.contains(cal.startOfDay(for: s.date)) {
+        var existingSleepDays = Set(fetch(context).map { (s: SleepData) in cal.startOfDay(for: s.date) })
+        for s in archive.sleep {
+            let day = cal.startOfDay(for: s.date)
+            guard existingSleepDays.insert(day).inserted else { result.skipped += 1; continue }
             let row = SleepData(date: s.date)
             row.inBedMinutes = s.inBed
             row.asleepMinutes = s.asleep
@@ -433,8 +474,10 @@ enum DataArchiveService {
             result.added += 1
         }
 
-        let existingVitalDays = Set(fetch(context).map { (v: DailyVitals) in cal.startOfDay(for: v.date) })
-        for v in archive.vitals where !existingVitalDays.contains(cal.startOfDay(for: v.date)) {
+        var existingVitalDays = Set(fetch(context).map { (v: DailyVitals) in cal.startOfDay(for: v.date) })
+        for v in archive.vitals {
+            let day = cal.startOfDay(for: v.date)
+            guard existingVitalDays.insert(day).inserted else { result.skipped += 1; continue }
             let row = DailyVitals(date: v.date)
             row.restingHR = v.restingHR
             row.hrvSDNN = v.hrvSDNN
@@ -442,8 +485,10 @@ enum DataArchiveService {
             result.added += 1
         }
 
-        let existingEnergyDays = Set(fetch(context).map { (e: DailyEnergy) in cal.startOfDay(for: e.date) })
-        for e in archive.energy where !existingEnergyDays.contains(cal.startOfDay(for: e.date)) {
+        var existingEnergyDays = Set(fetch(context).map { (e: DailyEnergy) in cal.startOfDay(for: e.date) })
+        for e in archive.energy {
+            let day = cal.startOfDay(for: e.date)
+            guard existingEnergyDays.insert(day).inserted else { result.skipped += 1; continue }
             let row = DailyEnergy(date: e.date)
             row.activeEnergyKcal = e.active
             row.basalEnergyKcal = e.basal
@@ -463,6 +508,7 @@ enum DataArchiveService {
 
     /// Wipes every user record. Only reachable from an explicitly confirmed
     /// action — never as a side effect of signing out.
+    @MainActor
     static func eraseAll(context: ModelContext) {
         for model in AppSchema.models {
             try? context.delete(model: model)
@@ -472,5 +518,15 @@ enum DataArchiveService {
 
     private static func fetch<T: PersistentModel>(_ context: ModelContext) -> [T] {
         (try? context.fetch(FetchDescriptor<T>())) ?? []
+    }
+}
+
+/// Reads a snapshot through its own SwiftData context. Exporting every model can
+/// take noticeable time on a years-deep diary; a ModelActor keeps that work off
+/// the UI actor while retaining SwiftData's context confinement.
+@ModelActor
+actor DataArchiveExporter {
+    func export() -> DataArchive {
+        DataArchiveService.export(context: modelContext)
     }
 }

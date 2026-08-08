@@ -4,7 +4,7 @@ import Charts
 
 struct WeightView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
+    @State private var metrics: [BodyMetrics] = []
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     @State private var loggingWeight = false
@@ -186,6 +186,7 @@ struct WeightView: View {
                     }
                 }
             }
+            .task { loadRecentMetrics() }
     }
 
     var body: some View {
@@ -283,6 +284,7 @@ struct WeightView: View {
         context.insert(BodyMetrics(date: .now, weightKg: kg, source: .manual))
         recomputeTrend()
         try? context.save()
+        loadRecentMetrics()
     }
 
     private var outOfRangeMessage: String {
@@ -340,12 +342,14 @@ struct WeightView: View {
         // estimate keeps using the old number.
         recomputeTrend()
         try? context.save()
+        loadRecentMetrics()
     }
 
     private func applyDelete(_ row: BodyMetrics) {
         context.delete(row)
         recomputeTrend()
         try? context.save()
+        loadRecentMetrics()
     }
 
     private func recomputeTrend() {
@@ -355,7 +359,46 @@ struct WeightView: View {
     private func syncFromHealth() async {
         syncing = true
         defer { syncing = false }
-        await SyncCoordinator(context: context).syncAll(days: 365)
-        AggregationService(context: context).runAll()
+        let changes = await SyncCoordinator(context: context).syncAll(days: 365)
+        AggregationService(context: context)
+            .runAll(refreshWeightTrend: changes.weightTrendNeedsRefresh)
+        loadRecentMetrics()
+    }
+
+    /// Loads exactly the history this screen can display: every reading on the
+    /// latest 90 distinct days. Paging to the boundary avoids materialising an
+    /// unlimited weight history, while the final range fetch retains duplicate
+    /// readings on the oldest displayed day so its daily-low calculation stays
+    /// identical to the previous all-store query.
+    private func loadRecentMetrics() {
+        let calendar = Calendar.current
+        let pageSize = 128
+        var offset = 0
+        var scanned: [BodyMetrics] = []
+        var distinctDays = Set<Date>()
+
+        while distinctDays.count < 90 {
+            var page = FetchDescriptor<BodyMetrics>(
+                sortBy: [SortDescriptor(\BodyMetrics.date, order: .reverse)])
+            page.fetchLimit = pageSize
+            page.fetchOffset = offset
+            guard let rows = try? context.fetch(page), !rows.isEmpty else { break }
+            scanned.append(contentsOf: rows)
+            rows.forEach { distinctDays.insert(calendar.startOfDay(for: $0.date)) }
+            guard rows.count == pageSize else { break }
+            offset += pageSize
+        }
+
+        guard distinctDays.count >= 90,
+              let oldest = distinctDays.sorted(by: >).prefix(90).last
+        else {
+            metrics = scanned
+            return
+        }
+
+        let recent = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= oldest },
+            sortBy: [SortDescriptor(\BodyMetrics.date, order: .reverse)])
+        metrics = (try? context.fetch(recent)) ?? scanned
     }
 }

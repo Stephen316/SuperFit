@@ -3,13 +3,14 @@ import SwiftData
 
 struct TrainingView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \TrainingSession.startedAt, order: .reverse) private var sessions: [TrainingSession]
+    @Query private var sessions: [TrainingSession]
     @Query private var exercises: [Exercise]
     @Query(sort: \WorkoutTemplate.createdAt, order: .reverse) private var savedTemplates: [WorkoutTemplate]
 
-    @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
+    @Query private var workouts: [WorkoutRecord]
+    @Query private var loadWorkouts: [WorkoutRecord]
     @Query private var profiles: [UserProfile]
-    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+    @Query private var vitals: [DailyVitals]
 
     @State private var activeSession: TrainingSession?
     @State private var watch = WatchWorkoutMonitor()
@@ -19,6 +20,26 @@ struct TrainingView: View {
     @State private var liveActivity: WorkoutActivity?
     @State private var detailWorkout: WorkoutRecord?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    init() {
+        let sessionCutoff = Date.now.addingTimeInterval(-60 * 86_400)
+        _sessions = Query(filter: #Predicate { $0.startedAt >= sessionCutoff },
+                          sort: \TrainingSession.startedAt, order: .reverse)
+
+        var recentWorkouts = FetchDescriptor<WorkoutRecord>(
+            sortBy: [SortDescriptor(\WorkoutRecord.startedAt, order: .reverse)])
+        recentWorkouts.fetchLimit = 30
+        _workouts = Query(recentWorkouts)
+
+        let loadCutoff = Date.now.addingTimeInterval(-28 * 86_400)
+        _loadWorkouts = Query(filter: #Predicate { $0.startedAt > loadCutoff })
+
+        var latestRestingHR = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.restingHR != nil },
+            sortBy: [SortDescriptor(\DailyVitals.date, order: .reverse)])
+        latestRestingHR.fetchLimit = 1
+        _vitals = Query(latestRestingHR)
+    }
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
@@ -165,7 +186,7 @@ struct TrainingView: View {
         guard let profile = profiles.first,
               let restingHR = vitals.compactMap(\.restingHR).first
         else { return nil }
-        let records = workouts
+        let records = loadWorkouts
             .filter { !$0.activity.isStrength }
             .map { CardioRecord(date: $0.startedAt,
                                 durationMinutes: $0.durationSeconds / 60,
@@ -337,9 +358,8 @@ struct TrainingView: View {
             }
             .sheet(isPresented: $showingPicker) {
                 ActivityPickerView(
-                    savedTemplates: savedTemplates,
                     recentWatchWorkouts: unimportedWatchWorkouts,
-                    onStartStrength: { start(named: $0) },
+                    onStartStrength: { start(template: $0) },
                     onStartLive: { liveActivity = $0 },
                     onImport: { sample in
                         WorkoutSyncService(context: context).apply([sample])
@@ -352,7 +372,7 @@ struct TrainingView: View {
     /// Watch workouts that aren't already stored, so the picker never offers to
     /// import something twice.
     private var unimportedWatchWorkouts: [WorkoutSample] {
-        let stored = Set(workouts.compactMap(\.externalID))
+        let stored = Set((workouts + loadWorkouts).compactMap(\.externalID))
         return watch.todaysWorkouts.filter { !stored.contains($0.externalID) }
     }
 
@@ -518,11 +538,42 @@ struct TrainingView: View {
         return colour == MuscleVolumeScale.untrained ? .secondary : colour
     }
 
-    private func start(named templateName: String?) {
-        let session = TrainingSession(templateName: templateName)
+    private func start(template: WorkoutTemplate?) {
+        let repeated = template.map {
+            TrainingRecords.repeatedPlan(templateName: $0.name,
+                                         exerciseIDs: $0.orderedExerciseIDs,
+                                         sessions: repeatCandidates(for: $0))
+        } ?? []
+        let session = TrainingSession(templateName: template?.name)
         context.insert(session)
+        for planned in repeated {
+            let entry = SetEntry(order: planned.order,
+                                 exerciseID: planned.exerciseID,
+                                 weightKg: planned.weightKg,
+                                 reps: planned.reps)
+            entry.rir = planned.rir
+            entry.restSeconds = planned.restSeconds
+            entry.isWarmup = planned.isWarmup
+            entry.completedAt = nil
+            entry.session = session
+            context.insert(entry)
+        }
         try? context.save()
         activeSession = session
+    }
+
+    /// Recent sessions are enough for every chart on this tab, but repeat
+    /// prefill promises the latest matching workout even if it was months ago.
+    /// Query that template on demand; fall back to the full history only for a
+    /// legacy template whose original session predates template-name tagging.
+    private func repeatCandidates(for template: WorkoutTemplate) -> [TrainingSession] {
+        let name = template.name
+        let namedQuery = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.templateName == name },
+            sortBy: [SortDescriptor(\TrainingSession.startedAt, order: .reverse)])
+        let named = (try? context.fetch(namedQuery)) ?? []
+        if named.contains(where: Self.hasCompletedWork) { return named }
+        return (try? context.fetch(FetchDescriptor<TrainingSession>())) ?? []
     }
 }
 

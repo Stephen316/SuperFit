@@ -320,6 +320,20 @@ struct MetabolismEngine: Sendable {
             .filter { $0.date >= start && $0.date <= asOf }
             .sorted { $0.date < $1.date }
 
+        return estimatePrepared(records: window, windowDays: windowDays,
+                                prior: prior, asOf: asOf)
+    }
+
+    /// The same calculation as `estimate`, for callers that already maintain a
+    /// sorted trailing window. History charts advance that window one day at a
+    /// time; filtering and sorting the full year for every point was pure
+    /// duplicate work. Kept internal so ordinary callers cannot accidentally
+    /// pass records outside the requested window.
+    func estimatePrepared(records window: [DailyRecord],
+                          windowDays: Int,
+                          prior: Prior,
+                          asOf: Date) -> TDEEEstimate {
+
         // Slope from RAW daily means via Theil–Sen: smoothing first (EWMA→OLS)
         // lags the trend and biased TDEE ~11% low at 30d, ~30% at 14d in
         // validation. Theil–Sen is unbiased on clean trends and immune to

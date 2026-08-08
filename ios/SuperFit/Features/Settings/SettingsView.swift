@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 
 /// Gear in the top-right of every tab. Conflicting controls live top-left.
 struct SettingsToolbarModifier: ViewModifier {
@@ -18,129 +17,417 @@ extension View {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     @AppStorage(FoodRegionSetting.storageKey) private var foodRegionRaw = FoodRegionSetting.automatic
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Account") {
-                    NavigationLink {
-                        AccountView()
-                    } label: {
-                        Label("Account and backup", systemImage: "person.crop.circle")
-                    }
-                }
+            ZStack {
+                Theme.background
 
-                Section("Profile") {
+                ScrollView {
+                    VStack(spacing: 14) {
+                        fitnessSection
+                        dataSection
+                        preferencesSection
+                        aboutSection
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .themedChrome()
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .themedToolbarButton()
+                }
+                .withoutGlassBackground()
+            }
+        }
+    }
+
+    private var fitnessSection: some View {
+        SettingsSection(title: "Your fitness") {
+            ThemeCard(padding: 0, radius: Theme.cardRadiusCompact) {
+                VStack(spacing: 0) {
                     NavigationLink {
                         ProfileView()
                     } label: {
-                        Label("Goal, body details, activity", systemImage: "person.text.rectangle")
+                        SettingsNavigationRow(
+                            icon: "person.text.rectangle",
+                            title: "Profile",
+                            subtitle: "Goals, body details and activity"
+                        )
                     }
-                }
 
-                // Moved here when the dashboard's Trends button became the
-                // streak flame. That button was the only route to this screen,
-                // so dropping it would have made every chart in the app
-                // unreachable without deleting a line of them.
-                Section("Trends") {
+                    SettingsDivider()
+
                     NavigationLink {
                         HistoryView()
                     } label: {
-                        Label("Charts and history", systemImage: "chart.xyaxis.line")
+                        SettingsNavigationRow(
+                            icon: "chart.xyaxis.line",
+                            title: "Trends",
+                            subtitle: "Charts and training history"
+                        )
                     }
                 }
+            }
+        }
+    }
 
-                Section("Appearance") {
-                    Picker("Appearance", selection: $appearanceRaw) {
-                        ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
-                            Text(mode.displayName).tag(mode.rawValue)
+    private var dataSection: some View {
+        SettingsSection(title: "Data & connections") {
+            ThemeCard(padding: 0, radius: Theme.cardRadiusCompact) {
+                VStack(spacing: 0) {
+                    NavigationLink {
+                        AccountView()
+                    } label: {
+                        SettingsNavigationRow(
+                            icon: "person.crop.circle",
+                            title: "Account & data",
+                            subtitle: "Storage, backups and data controls"
+                        )
+                    }
+
+                    SettingsDivider()
+
+                    NavigationLink {
+                        ConnectedServicesView()
+                    } label: {
+                        SettingsNavigationRow(
+                            icon: "link",
+                            title: "Connected services",
+                            subtitle: "Food search and Garmin"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var preferencesSection: some View {
+        SettingsSection(title: "Preferences") {
+            ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label {
+                            Text("Measurement units")
+                                .font(Theme.font(16, .semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                        } icon: {
+                            Image(systemName: "ruler")
+                                .foregroundStyle(Theme.gold)
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
 
-                Section("Units") {
-                    Picker("Measurement units", selection: $unitsRaw) {
-                        ForEach(UnitSystem.allCases, id: \.rawValue) { u in
-                            Text(u.displayName).tag(u.rawValue)
-                        }
+                        Text("Metric uses kg and cm; imperial uses lb and ft/in.")
+                            .font(Theme.font(13))
+                            .foregroundStyle(Theme.textSecondary)
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                }
 
-                Section {
-                    Picker("Country", selection: $foodRegionRaw) {
+                    ThemeSegmentedControl(
+                        options: UnitSystem.allCases.map { ($0.rawValue, $0.rawValue.capitalized) },
+                        selection: $unitsRaw
+                    )
+
+                    Divider()
+                        .overlay(Theme.divider)
+
+                    Picker(selection: $foodRegionRaw) {
                         Text(FoodRegionSetting.automaticLabel())
                             .tag(FoodRegionSetting.automatic)
                         ForEach(FoodRegion.all) { region in
                             Text(region.displayName).tag(region.code)
                         }
-                    }
-                } header: {
-                    Text("Food database")
-                } footer: {
-                    Text("Ranks that country's products first in food search, then "
-                         + "neighbouring countries, then everywhere else. Nothing is "
-                         + "hidden — set this to where you buy your food, which isn't "
-                         + "always where your phone is configured.")
-                }
-
-                Section("Data sources") {
-                    NavigationLink {
-                        ConnectedServicesView()
                     } label: {
-                        Label("Connected services", systemImage: "link")
-                    }
-                }
+                        HStack(spacing: 12) {
+                            Image(systemName: "globe.europe.africa")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.gold)
+                                .frame(width: 24)
 
-                Section {
+                            Text("Food search region")
+                                .font(Theme.font(16, .semibold))
+                                .foregroundStyle(Theme.textPrimary)
+
+                            Spacer(minLength: 8)
+
+                            Text(foodRegionName)
+                                .font(Theme.font(13, .medium))
+                                .foregroundStyle(Theme.gold)
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Theme.gold)
+                    .accessibilityLabel("Food search region")
+                    .accessibilityValue(foodRegionName)
+
+                    Text("Ranks products from this region first, then nearby regions, then everywhere else. Nothing is hidden; choose where you usually buy food.")
+                        .font(Theme.font(13))
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider()
+                        .overlay(Theme.divider)
+
                     ReminderToggle()
-                } header: {
-                    Text("Reminders")
-                } footer: {
-                    Text("Daily prompts for your morning weigh-in and breakfast, "
-                         + "lunch at 2pm, a workout at 4pm, and dinner at 6pm.")
                 }
-
-                Section("Legal") {
-                    Label("Terms of service", systemImage: "doc.text")
-                        .foregroundStyle(.secondary)
-                    Label("Privacy policy", systemImage: "hand.raised")
-                        .foregroundStyle(.secondary)
-                    Text("Your health data stays on your device and your private iCloud. It is never sold or shared.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                // The MIT licence requires its notice to travel with the work, so
-                // this is an obligation rather than a courtesy.
-                Section("Acknowledgements") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Muscle diagram")
-                        Text("Anatomy adapted from react-muscle-highlighter, "
-                             + "used under the MIT licence.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Food data")
-                        Text("USDA FoodData Central, and Open Food Facts under the "
-                             + "Open Database License.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .navigationTitle("Settings")
-            .themedChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .themedList()
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
-                .withoutGlassBackground()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private var aboutSection: some View {
+        SettingsSection(title: "About") {
+            ThemeCard(padding: 0, radius: Theme.cardRadiusCompact) {
+                NavigationLink {
+                    PrivacyAboutView()
+                } label: {
+                    SettingsNavigationRow(
+                        icon: "hand.raised",
+                        title: "Privacy & about",
+                        subtitle: "Data storage, acknowledgements and version"
+                    )
+                }
+            }
+        }
+    }
+
+    private var foodRegionName: String {
+        guard foodRegionRaw != FoodRegionSetting.automatic else {
+            return FoodRegionSetting.automaticLabel()
+        }
+        return FoodRegion.region(forCode: foodRegionRaw)?.displayName ?? "Not available"
+    }
+}
+
+private struct PrivacyAboutView: View {
+    private var version: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    }
+
+    private var build: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.background
+
+            ScrollView {
+                VStack(spacing: 14) {
+                    SettingsSection(title: "Your data") {
+                        ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                AboutInformationRow(
+                                    icon: "iphone",
+                                    title: "On this device",
+                                    detail: deviceStorageDetail
+                                )
+
+                                SettingsDivider(inset: 0)
+
+                                AboutInformationRow(
+                                    icon: "icloud",
+                                    title: "iCloud",
+                                    detail: iCloudDetail
+                                )
+
+                                SettingsDivider(inset: 0)
+
+                                AboutInformationRow(
+                                    icon: "externaldrive.badge.icloud",
+                                    title: "Optional cloud backup",
+                                    detail: "Account backup is separate from iCloud. A snapshot of supported history is uploaded only after you sign in and choose Back up this device now. It is not live sync, and you can delete the copy from Account & data."
+                                )
+
+                                SettingsDivider(inset: 0)
+
+                                AboutInformationRow(
+                                    icon: "doc.badge.arrow.up",
+                                    title: "Backup files",
+                                    detail: "A backup file is created only when you choose Export backup file and is saved where you select. Saved meals and standalone cardio workouts are not included."
+                                )
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    SettingsSection(title: "Acknowledgements") {
+                        ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                AboutInformationRow(
+                                    icon: "figure.strengthtraining.traditional",
+                                    title: "Muscle diagram",
+                                    detail: "Anatomy artwork adapted from react-muscle-highlighter, used under the MIT licence."
+                                )
+
+                                SettingsDivider(inset: 0)
+
+                                AboutInformationRow(
+                                    icon: "fork.knife",
+                                    title: "Food data",
+                                    detail: "Food search uses USDA FoodData Central and Open Food Facts. Open Food Facts data is available under the Open Database License."
+                                )
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    SettingsSection(title: "App") {
+                        ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
+                            VStack(spacing: 12) {
+                                AboutValueRow(title: "Version", value: version ?? "Not available")
+                                SettingsDivider(inset: 0)
+                                AboutValueRow(title: "Build", value: build ?? "Not available")
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .navigationTitle("Privacy & about")
+        .navigationBarTitleDisplayMode(.inline)
+        .themedChrome()
+        .toolbarColorScheme(.dark, for: .navigationBar)
+    }
+
+    private var deviceStorageDetail: String {
+        if AppSchema.isEphemeral {
+            return "Storage is unavailable in this session. Changes will be lost when SuperFit closes, so export a backup before leaving."
+        }
+        return "SuperFit is offline-first. Your profile, logs, workouts and measurements are stored on this device."
+    }
+
+    private var iCloudDetail: String {
+        if AppSchema.isEphemeral {
+            return "iCloud sync is unavailable while SuperFit is using temporary session storage."
+        }
+        return "iCloud sync is not enabled in this build. Your data stays on this device unless you export a backup file or create an optional cloud backup."
+    }
+}
+
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(Theme.font(13, .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 4)
+                .accessibilityAddTraits(.isHeader)
+
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SettingsNavigationRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.gold)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(Theme.font(16, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct SettingsDivider: View {
+    var inset: CGFloat = 56
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.divider)
+            .frame(height: 1)
+            .padding(.leading, inset)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct AboutInformationRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.gold)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(Theme.font(15, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(detail)
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct AboutValueRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(Theme.font(15))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(value)
+                .font(Theme.font(15, .medium))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -149,12 +436,34 @@ private struct ReminderToggle: View {
     @State private var isUpdating = false
 
     var body: some View {
-        Toggle("Daily logging reminders", isOn: Binding(
-            get: { enabled },
-            set: update
-        ))
-        .tint(Theme.gold)
-        .disabled(isUpdating)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "bell.badge")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.gold)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Daily logging reminders")
+                    .font(Theme.font(16, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Morning weigh-in and breakfast, lunch at 2pm, workout at 4pm and dinner at 6pm.")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Toggle("Daily logging reminders", isOn: Binding(
+                get: { enabled },
+                set: update
+            ))
+            .labelsHidden()
+            .tint(Theme.gold)
+            .disabled(isUpdating)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func update(_ newValue: Bool) {

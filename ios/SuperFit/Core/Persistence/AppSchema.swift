@@ -18,6 +18,19 @@ enum AppSchema {
     /// in-memory store. The UI warns rather than silently discarding data.
     private(set) nonisolated(unsafe) static var isEphemeral = false
 
+    /// CloudKit must only be opened by a build whose provisioning profile carries
+    /// the capability. Personal-team builds deliberately omit it; attempting the
+    /// automatic configuration anyway performs a failing schema check before the
+    /// first frame. Paid/distribution builds opt in with the
+    /// `SUPERFIT_CLOUDKIT` Swift compilation condition alongside their entitlement.
+    private static var cloudKitEnabled: Bool {
+        #if SUPERFIT_CLOUDKIT
+        true
+        #else
+        false
+        #endif
+    }
+
     /// Offline-first local store with transparent CloudKit sync to the user's
     /// private database, degrading in three steps:
     ///
@@ -32,10 +45,12 @@ enum AppSchema {
     static func makeContainer() -> ModelContainer {
         let schema = Schema(models)
 
-        if let cloud = try? ModelContainer(
-            for: schema,
-            configurations: [ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)]) {
-            return cloud
+        if cloudKitEnabled {
+            if let cloud = try? ModelContainer(
+                for: schema,
+                configurations: [ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)]) {
+                return cloud
+            }
         }
         if let local = try? ModelContainer(
             for: schema,

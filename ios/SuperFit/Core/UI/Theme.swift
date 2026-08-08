@@ -150,12 +150,12 @@ extension View {
     /// Drops a `List`/`Form` onto the gradient: clears the system grouped
     /// background, restyles rows as translucent surfaces, and leaves room for
     /// the floating tab bar.
-    func themedList() -> some View {
+    func themedList(bottomPadding: CGFloat = 96) -> some View {
         scrollContentBackground(.hidden)
             .background(Theme.background)
             .listRowBackground(Theme.surface.opacity(0.55))
             .tint(Theme.gold)
-            .safeAreaPadding(.bottom, 96)
+            .safeAreaPadding(.bottom, bottomPadding)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .font(Theme.font(16))

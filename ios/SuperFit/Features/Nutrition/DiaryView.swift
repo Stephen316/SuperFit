@@ -4,11 +4,12 @@ import SwiftData
 struct DiaryView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
-    @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
-    @Query private var logs: [NutritionLog]
-    @Query private var energy: [DailyEnergy]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
+
+    @State private var metrics: [BodyMetrics] = []
+    @State private var logs: [NutritionLog] = []
+    @State private var energy: [DailyEnergy] = []
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var addingTo: MealSlot?
@@ -83,11 +84,13 @@ struct DiaryView: View {
             }
             .themedList()
             .settingsToolbar()
-            .sheet(item: $addingTo) { slot in
+            .sheet(item: $addingTo, onDismiss: loadDiaryData) { slot in
                 FoodSearchView(day: day, meal: slot)
             }
             .sheet(isPresented: $showingNutrients) { NutritionView() }
             .sheet(isPresented: $showingSupplements) { SupplementsView(day: day) }
+            .task { loadDiaryData() }
+            .onChange(of: day) { _, _ in loadDiaryData() }
         }
     }
 
@@ -135,6 +138,7 @@ struct DiaryView: View {
                 let slotLogs = dayLogs.filter { $0.mealRaw == slot.rawValue }
                 for i in offsets { context.delete(slotLogs[i]) }
                 try? context.save()
+                loadDiaryData()
             }
             Button {
                 addingTo = slot
@@ -147,6 +151,40 @@ struct DiaryView: View {
 
     private func shift(_ days: Int) {
         day = Calendar.current.date(byAdding: .day, value: days, to: day) ?? day
+    }
+
+    /// The diary can navigate to any date, while target calculation only needs
+    /// the current 30-day metabolism window. Fetch their union instead of every
+    /// food entry and Health row ever stored.
+    private func loadDiaryData() {
+        let cal = Calendar.current
+        let selected = DayBounds(day, calendar: cal)
+        let dayStart = selected.start
+        let dayEnd = selected.end
+        let now = Date.now
+        let metabolismStart = cal.date(byAdding: .day, value: -31, to: now) ?? now
+
+        let logQuery = FetchDescriptor<NutritionLog>(predicate: #Predicate {
+            ($0.date >= dayStart && $0.date < dayEnd)
+                || ($0.date >= metabolismStart && $0.date <= now)
+        })
+        logs = (try? context.fetch(logQuery)) ?? []
+
+        let metricQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= metabolismStart && $0.date <= now },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        var loadedMetrics = (try? context.fetch(metricQuery)) ?? []
+        if loadedMetrics.isEmpty {
+            var latest = FetchDescriptor<BodyMetrics>(
+                sortBy: [SortDescriptor(\.date, order: .reverse)])
+            latest.fetchLimit = 1
+            loadedMetrics = (try? context.fetch(latest)) ?? []
+        }
+        metrics = loadedMetrics
+
+        let energyQuery = FetchDescriptor<DailyEnergy>(
+            predicate: #Predicate { $0.date >= metabolismStart && $0.date <= now })
+        energy = (try? context.fetch(energyQuery)) ?? []
     }
 }
 

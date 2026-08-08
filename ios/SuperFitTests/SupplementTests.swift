@@ -125,6 +125,24 @@ struct SupplementTests {
         #expect(total.micros[Micronutrient.zinc.rawValue] == 10)
     }
 
+    @Test func batchedTotalsMatchIndependentDayTotals() {
+        let whey = makeSupplement("Whey", kcal: 113, protein: 25)
+        let daily = SupplementEntry(supplementID: whey.id, kind: .daily)
+        daily.startedOn = day(-3)
+        let skip = SupplementEntry(supplementID: whey.id, kind: .skipped)
+        skip.date = day(-1)
+        let days = (-3...1).map(day)
+        let batch = SupplementIntake.totals(
+            on: days, entries: [daily, skip], supplements: [whey], calendar: cal)
+
+        for date in days {
+            let expected = SupplementIntake.total(
+                on: date, entries: [daily, skip], supplements: [whey], calendar: cal)
+            #expect(batch[cal.startOfDay(for: date)]?.kcal == expected.kcal)
+            #expect(batch[cal.startOfDay(for: date)]?.proteinG == expected.proteinG)
+        }
+    }
+
     // MARK: Feeding the metabolism engine
 
     /// Protein shakes are real calories: leaving them out of energy balance

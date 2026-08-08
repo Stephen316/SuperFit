@@ -41,14 +41,31 @@ final class SupabaseBackup {
         case failed(String)
     }
 
+    enum SummaryStatus: Equatable {
+        case idle
+        case loading
+        case ready
+        case failed
+    }
+
     private(set) var status: Status = .idle
     private(set) var remote: BackupSummary?
+    private(set) var summaryStatus: SummaryStatus = .idle
 
     private let account: SupabaseAccount
     private static let table = "backups"
 
     init(account: SupabaseAccount) {
         self.account = account
+    }
+
+    /// The same backup object follows the account state while this screen is
+    /// open. Clear user-specific UI state before loading another account so a
+    /// previous account's success, error or timestamp is never shown as theirs.
+    func resetForAccountChange() {
+        status = .idle
+        remote = nil
+        summaryStatus = .idle
     }
 
     private var appVersion: String? {
@@ -62,8 +79,10 @@ final class SupabaseBackup {
     func refreshSummary() async {
         guard let client = account.client, let userID = account.userID else {
             remote = nil
+            summaryStatus = .idle
             return
         }
+        summaryStatus = .loading
         do {
             let rows: [BackupSummary] = try await client
                 .from(Self.table)
@@ -72,9 +91,13 @@ final class SupabaseBackup {
                 .limit(1)
                 .execute()
                 .value
+            guard account.userID == userID else { return }
             remote = rows.first
+            summaryStatus = .ready
         } catch {
+            guard account.userID == userID else { return }
             remote = nil
+            summaryStatus = .failed
         }
     }
 
@@ -93,9 +116,12 @@ final class SupabaseBackup {
         guard let client = account.client, let userID = account.userID else { return }
         status = .working
         do {
-            let archive = DataArchiveService.export(context: context)
-            if let size = try? DataArchiveService.encode(archive).count,
-               size > Self.maxArchiveBytes {
+            let exporter = DataArchiveExporter(modelContainer: context.container)
+            let archive = await exporter.export()
+            let size = try await Task.detached(priority: .userInitiated) {
+                try DataArchiveService.encode(archive).count
+            }.value
+            if size > Self.maxArchiveBytes {
                 let mb = Double(size) / 1_048_576
                 status = .failed(String(format:
                     "This backup is %.0f MB, which is too large to store. Export it to a file instead.", mb))
@@ -106,11 +132,17 @@ final class SupabaseBackup {
                                 updated_at: Date(),
                                 app_version: appVersion)
             // Upsert on the primary key: one row per user, always replaced.
-            try await client.from(Self.table).upsert(row, onConflict: "user_id").execute()
+            try await Task.detached(priority: .userInitiated) {
+                _ = try await client.from(Self.table)
+                    .upsert(row, onConflict: "user_id").execute()
+            }.value
+            guard account.userID == userID else { return }
             status = .done(row.updated_at)
             await refreshSummary()
         } catch {
-            status = .failed(error.localizedDescription)
+            if account.userID == userID {
+                status = .failed(error.localizedDescription)
+            }
         }
     }
 
@@ -130,10 +162,13 @@ final class SupabaseBackup {
                 .limit(1)
                 .execute()
                 .value
+            guard account.userID == userID else { return nil }
             status = .idle
             return rows.first?.archive
         } catch {
-            status = .failed(error.localizedDescription)
+            if account.userID == userID {
+                status = .failed(error.localizedDescription)
+            }
             return nil
         }
     }
@@ -145,10 +180,14 @@ final class SupabaseBackup {
         status = .working
         do {
             try await client.from(Self.table).delete().eq("user_id", value: userID).execute()
+            guard account.userID == userID else { return }
             remote = nil
+            summaryStatus = .ready
             status = .idle
         } catch {
-            status = .failed(error.localizedDescription)
+            if account.userID == userID {
+                status = .failed(error.localizedDescription)
+            }
         }
     }
 }

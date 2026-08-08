@@ -152,4 +152,37 @@ struct WorkoutImportTests {
                 == "Aerobic 3.4")
         #expect(GarminWorkoutDTO.effectSummary(aerobic: nil, anaerobic: nil) == nil)
     }
+
+    // MARK: Garmin link safety
+
+    /// A session token belongs to exactly 1 backend: saving the same URL keeps
+    /// it, while changing to a second URL must clear it before any API request.
+    @Test func changingGarminBackendClearsOnlyTheOldBackendsToken() {
+        let originalURL = URL(string: "https://garmin-one.example.com")!
+        let replacementURL = URL(string: "https://garmin-two.example.com")!
+        let linked = GarminProvider.Config(baseURL: originalURL,
+                                           sessionToken: "backend-one-token")
+
+        #expect(linked.settingBackend(originalURL).sessionToken == "backend-one-token")
+        #expect(linked.settingBackend(replacementURL).sessionToken == nil)
+    }
+
+    /// The callback window is at most 600 seconds and exactly 1 use; this keeps
+    /// an unsolicited or replayed deep link from creating a linked session.
+    @Test func pendingGarminLinkIsShortLivedAndSingleUse() {
+        let suiteName = "GarminConfigStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let startedAt = Date(timeIntervalSince1970: 1_750_000_000)
+
+        GarminConfigStore.beginLinking(at: startedAt, defaults: defaults)
+        #expect(GarminConfigStore.consumePendingLink(
+            at: startedAt.addingTimeInterval(600), defaults: defaults))
+        #expect(!GarminConfigStore.consumePendingLink(
+            at: startedAt.addingTimeInterval(600), defaults: defaults))
+
+        GarminConfigStore.beginLinking(at: startedAt, defaults: defaults)
+        #expect(!GarminConfigStore.consumePendingLink(
+            at: startedAt.addingTimeInterval(601), defaults: defaults))
+    }
 }

@@ -8,7 +8,8 @@
 	     degrading. AppSchema.makeContainer already falls back to an on-disk
 	     local store, so the data persists — it just doesn't sync.
 
-	     Restoring them needs a paid Apple Developer Program membership:
+		     Restoring them needs a paid Apple Developer Program membership and
+		     the SUPERFIT_CLOUDKIT Swift compilation condition:
 	         com.apple.developer.applesignin              -> ["Default"]
 	         com.apple.developer.icloud-services          -> ["CloudKit"]
 	         com.apple.developer.icloud-container-identifiers

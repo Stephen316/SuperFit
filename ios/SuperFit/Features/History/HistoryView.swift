@@ -9,18 +9,17 @@ import Charts
 /// thermogenesis during a cut, the thing this engine exists to detect, was
 /// invisible.
 struct HistoryView: View {
-    @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     @Query private var profiles: [UserProfile]
-    @Query(sort: \BodyMetrics.date) private var metrics: [BodyMetrics]
+    @Query private var metrics: [BodyMetrics]
     @Query private var logs: [NutritionLog]
     @Query private var energy: [DailyEnergy]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
-    @Query(sort: \RecoveryScoreRecord.date) private var recoveries: [RecoveryScoreRecord]
-    @Query(sort: \DailyVitals.date) private var vitals: [DailyVitals]
-    @Query(sort: \SleepData.date) private var sleep: [SleepData]
+    @Query private var recoveries: [RecoveryScoreRecord]
+    @Query private var vitals: [DailyVitals]
+    @Query private var sleep: [SleepData]
     @Query private var sessions: [TrainingSession]
     @Query private var exercises: [Exercise]
 
@@ -29,44 +28,53 @@ struct HistoryView: View {
     @State private var selectedExerciseID: UUID?
     @State private var showingRate = false
 
+    init() {
+        // The largest selectable range is one year. Metabolism needs the thirty
+        // preceding days to calculate the first visible point, hence the buffer.
+        let chartCutoff = Calendar.current.date(byAdding: .day, value: -365, to: .now) ?? .now
+        let metabolismCutoff = Calendar.current.date(byAdding: .day, value: -396, to: .now) ?? .now
+        _metrics = Query(filter: #Predicate { $0.date >= metabolismCutoff },
+                         sort: \BodyMetrics.date)
+        _logs = Query(filter: #Predicate { $0.date >= metabolismCutoff })
+        _energy = Query(filter: #Predicate { $0.date >= metabolismCutoff })
+        _recoveries = Query(filter: #Predicate { $0.date >= chartCutoff },
+                            sort: \RecoveryScoreRecord.date)
+        _vitals = Query(filter: #Predicate { $0.date >= chartCutoff },
+                        sort: \DailyVitals.date)
+        _sleep = Query(filter: #Predicate { $0.date >= chartCutoff },
+                       sort: \SleepData.date)
+        _sessions = Query(filter: #Predicate { $0.startedAt >= chartCutoff })
+    }
+
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
     private var start: Date { range.start }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.background
-                ScrollView {
-                    VStack(spacing: 14) {
-                        rangePicker
-                        energyCard
-                        weightCard
-                        rateDisclosure
-                        if !compositionPoints.isEmpty { compositionCard }
-                        recoveryCard
-                        vitalsCard
-                        sleepCard
-                        volumeCard
-                        if selectedExerciseID != nil { strengthCard }
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
+        ZStack {
+            Theme.background
+            ScrollView {
+                VStack(spacing: 14) {
+                    rangePicker
+                    energyCard
+                    weightCard
+                    rateDisclosure
+                    if !compositionPoints.isEmpty { compositionCard }
+                    recoveryCard
+                    vitalsCard
+                    sleepCard
+                    volumeCard
+                    if selectedExerciseID != nil { strengthCard }
                 }
-                .scrollIndicators(.hidden)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
             }
-            .navigationTitle("Trends")
-            .themedChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.themedToolbarButton()
-                }
-                .withoutGlassBackground()
-            }
-            .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
+            .scrollIndicators(.hidden)
         }
+        .navigationTitle("Trends")
+        .navigationBarTitleDisplayMode(.inline)
+        .themedChrome()
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
     }
 
     private var rangePicker: some View {
@@ -271,13 +279,14 @@ struct HistoryView: View {
     /// The shaded band is the same 1%/0.5% of bodyweight the calorie target is
     /// clamped to, so the chart and the target agree on what "too fast" means.
     private var rateCard: some View {
-        let points = ratePoints.map {
+        let rawPoints = ratePoints
+        let points = rawPoints.map {
             HistoryPoint(date: $0.date, value: units.displayWeight($0.value))
         }
         let rails = guardrails
         return HistoryChartCard(
             title: "Weekly change",
-            headline: points.last.map { units.weightDeltaString($0.value) },
+            headline: rawPoints.last.map { units.weightDeltaString($0.value) },
             height: 150,
             yLabel: { String(format: "%+.1f", $0) },
             content: {
@@ -423,7 +432,7 @@ struct HistoryView: View {
                         .interpolationMethod(.monotone)
                 }
             },
-            isEmpty: points.count < 2,
+            isEmpty: range.showsDailyPoints ? points.count < 2 : mean.isEmpty,
             emptyMessage: "No sleep recorded in this period."
         )
     }

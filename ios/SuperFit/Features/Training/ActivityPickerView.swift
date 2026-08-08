@@ -9,15 +9,18 @@ import SwiftData
 /// on the phone, or pull in what the watch already recorded.
 struct ActivityPickerView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @Query(sort: \WorkoutTemplate.createdAt, order: .reverse)
+    private var savedTemplates: [WorkoutTemplate]
 
-    let savedTemplates: [WorkoutTemplate]
     let recentWatchWorkouts: [WorkoutSample]
     /// Strength: nil template means an empty session.
-    let onStartStrength: (String?) -> Void
+    let onStartStrength: (WorkoutTemplate?) -> Void
     let onStartLive: (WorkoutActivity) -> Void
     let onImport: (WorkoutSample) -> Void
 
     @State private var search = ""
+    @State private var editingTemplate: WorkoutTemplate?
 
     private var groups: [WorkoutActivity.Group] {
         WorkoutActivity.Group.allCases.filter { !activities(in: $0).isEmpty }
@@ -59,6 +62,9 @@ struct ActivityPickerView: View {
                 .withoutGlassBackground()
             }
         }
+        .sheet(item: $editingTemplate) { template in
+            WorkoutTemplateEditorView(template: template)
+        }
     }
 
     /// Watch workouts not yet in the app, offered for one-tap import. This is the
@@ -92,15 +98,29 @@ struct ActivityPickerView: View {
     }
 
     private var strengthSection: some View {
-        Section("Strength") {
+        Section {
             ForEach(savedTemplates) { template in
                 Button {
-                    onStartStrength(template.name)
+                    onStartStrength(template)
                     dismiss()
                 } label: {
                     Label(template.name, systemImage: "list.bullet.rectangle")
                 }
                 .buttonStyle(.plain)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        context.delete(template)
+                        try? context.save()
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    Button {
+                        editingTemplate = template
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .tint(Theme.gold)
+                }
             }
             Button {
                 onStartStrength(nil)
@@ -109,6 +129,14 @@ struct ActivityPickerView: View {
                 Label("Empty gym workout", systemImage: "dumbbell.fill")
             }
             .buttonStyle(.plain)
+        } header: {
+            Text("Strength")
+        } footer: {
+            if savedTemplates.isEmpty {
+                Text("Save a completed gym workout to reuse it here.")
+            } else {
+                Text("\(savedTemplates.count) of \(WorkoutTemplate.maximumSaved) saved. Swipe a saved workout left to edit or delete it.")
+            }
         }
     }
 
@@ -141,6 +169,136 @@ struct ActivityPickerView: View {
                 .foregroundStyle(Theme.gold)
                 .frame(width: 28)
             Text(activity.displayName)
+        }
+    }
+}
+
+private struct WorkoutTemplateEditorView: View {
+    let template: WorkoutTemplate
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @Query(sort: \Exercise.name) private var exercises: [Exercise]
+    @Query private var templates: [WorkoutTemplate]
+
+    @State private var name: String
+    @State private var exerciseIDs: [UUID]
+    @State private var pickingExercise = false
+    @State private var errorMessage: String?
+
+    init(template: WorkoutTemplate) {
+        self.template = template
+        _name = State(initialValue: template.name)
+        _exerciseIDs = State(initialValue: template.orderedExerciseIDs)
+    }
+
+    private var trimmedName: String {
+        String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(50))
+    }
+
+    private var canSave: Bool {
+        !trimmedName.isEmpty && !exerciseIDs.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Saved workout") {
+                    TextField("Workout name", text: $name)
+                        .textInputAutocapitalization(.words)
+                }
+
+                Section {
+                    if exerciseIDs.isEmpty {
+                        Text("Add at least one exercise.")
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    ForEach(exerciseIDs, id: \.self) { id in
+                        Text(exercises.first { $0.id == id }?.name
+                             ?? "Exercise no longer available")
+                    }
+                    .onDelete { exerciseIDs.remove(atOffsets: $0) }
+                    .onMove { exerciseIDs.move(fromOffsets: $0, toOffset: $1) }
+
+                    Button { pickingExercise = true } label: {
+                        Label("Add exercise", systemImage: "plus")
+                    }
+                } header: {
+                    Text("Exercises")
+                } footer: {
+                    Text("Starting this workout copies weights, reps, RIR and sets from its latest completed session. Every copied set starts unchecked.")
+                }
+            }
+            .navigationTitle("Edit saved workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .themedChrome()
+            .themedList(bottomPadding: 24)
+            .keyboardDoneButton()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                .withoutGlassBackground()
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
+                }
+                .withoutGlassBackground()
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") { save() }
+                        .fontWeight(.semibold)
+                        .disabled(!canSave)
+                }
+                .withoutGlassBackground()
+            }
+            .sheet(isPresented: $pickingExercise) {
+                ExercisePickerView { exercise in
+                    if !exerciseIDs.contains(exercise.id) {
+                        exerciseIDs.append(exercise.id)
+                    }
+                }
+            }
+            .alert("Couldn't save workout", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } })) {
+                Button("OK", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        if templates.contains(where: {
+            $0.id != template.id
+                && $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame
+        }) {
+            errorMessage = "A saved workout named \"\(trimmedName)\" already exists. Choose another name."
+            return
+        }
+
+        let oldName = template.name
+        template.name = trimmedName
+        for item in template.items ?? [] { context.delete(item) }
+        for (order, exerciseID) in exerciseIDs.enumerated() {
+            let item = WorkoutTemplateItem(order: order, exerciseID: exerciseID)
+            item.template = template
+            context.insert(item)
+        }
+        if oldName != trimmedName {
+            // Only pay for historical session materialisation when the user
+            // actually renames a template, not whenever the editor appears.
+            let sessions = (try? context.fetch(FetchDescriptor<TrainingSession>())) ?? []
+            for session in sessions where
+                session.templateName?.caseInsensitiveCompare(oldName) == .orderedSame {
+                session.templateName = trimmedName
+            }
+        }
+        do {
+            try context.save()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

@@ -51,12 +51,28 @@ final class AggregationService {
         self.context = context
     }
 
-    func runAll() {
-        fillWeightTrend()
+    func runAll(refreshWeightTrend: Bool = true) {
+        if refreshWeightTrend { fillWeightTrend() }
         upsertMetabolicEstimates()
         refreshCyclicalPatterns()
         upsertTodayRecovery()
         try? context.save()
+    }
+
+    /// One-time repair for stores written before weight-derived values were kept
+    /// consistently in sync. It replaces the unconditional launch rebuild: once
+    /// repaired, ordinary launches only touch the trend when sync inserted a new
+    /// weight or the user edited one.
+    @discardableResult
+    func repairWeightTrendIfNeeded(defaults: UserDefaults = .standard) -> Bool {
+        let key = "superfit.weight-trend-repair-v2"
+        guard !defaults.bool(forKey: key) else { return false }
+        // The stored estimate is downstream of the trend and must be repaired
+        // in the same pass; otherwise the chart changes while the target stays
+        // stale until Health access returns.
+        refreshWeightDerived()
+        defaults.set(true, forKey: key)
+        return true
     }
 
     /// Everything downstream of a change to the weight series.
@@ -96,35 +112,56 @@ final class AggregationService {
 
         var trendByDay: [Date: Double] = [:]
         for (day, trend) in zip(days, smoothed) { trendByDay[day] = trend }
-        for m in metrics { m.trendWeightKg = trendByDay[cal.startOfDay(for: m.date)] }
+        for m in metrics {
+            let value = trendByDay[cal.startOfDay(for: m.date)]
+            if m.trendWeightKg != value { m.trendWeightKg = value }
+        }
     }
 
     // MARK: - Metabolic estimates
 
     func upsertMetabolicEstimates() {
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first else { return }
-        let logs = (try? context.fetch(FetchDescriptor<NutritionLog>())) ?? []
-        let metrics = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
+        let now = Date.now
+        let start = cal.date(byAdding: .day, value: -31, to: now) ?? now
+        let logsQuery = FetchDescriptor<NutritionLog>(
+            predicate: #Predicate { $0.date >= start && $0.date <= now })
+        let logs = (try? context.fetch(logsQuery)) ?? []
+        let metricsQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= start && $0.date <= now },
+            sortBy: [SortDescriptor(\.date)])
+        var metrics = (try? context.fetch(metricsQuery)) ?? []
+        // A user who weighs infrequently still needs the latest known weight for
+        // the BMR prior even when it predates the 30-day measurement window.
+        if metrics.isEmpty {
+            var latest = FetchDescriptor<BodyMetrics>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+            latest.fetchLimit = 1
+            metrics = (try? context.fetch(latest)) ?? []
+        }
         guard !metrics.isEmpty else { return }
 
         let supplements = (try? context.fetch(FetchDescriptor<Supplement>())) ?? []
         let entries = (try? context.fetch(FetchDescriptor<SupplementEntry>())) ?? []
-        let earliest = metrics.map(\.date).min() ?? .now
         let supplementKcal = SupplementIntake.dailyKcal(
             entries: entries, supplements: supplements,
-            from: max(earliest, Date.now.addingTimeInterval(-120 * 86_400)), to: .now)
+            from: start, to: now)
 
         let records = MetabolicRecordAssembler.dailyRecords(
             logs: logs, metrics: metrics, supplementKcal: supplementKcal)
-        let energy = (try? context.fetch(FetchDescriptor<DailyEnergy>())) ?? []
+        let energyQuery = FetchDescriptor<DailyEnergy>(
+            predicate: #Predicate { $0.date >= start && $0.date <= now })
+        let energy = (try? context.fetch(energyQuery)) ?? []
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
             avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
             leanMassKg: BodyComposition.recentLeanMassKg(metrics))
-        let today = cal.startOfDay(for: .now)
+        let today = cal.startOfDay(for: now)
         let bounds = DayBounds(today, calendar: cal)
-        let existing = (try? context.fetch(FetchDescriptor<MetabolicEstimateRecord>())) ?? []
+        let dayEnd = bounds.end
+        let existingQuery = FetchDescriptor<MetabolicEstimateRecord>(
+            predicate: #Predicate { $0.date >= today && $0.date < dayEnd })
+        let existing = (try? context.fetch(existingQuery)) ?? []
 
         for window in [7, 14, 30] {
             let est = MetabolismEngine().estimate(records: records, windowDays: window, prior: prior)
@@ -157,11 +194,15 @@ final class AggregationService {
     /// and running it for everyone keeps one code path. Whether the correction is
     /// *applied* is decided in `recoveryInputs`.
     func refreshCyclicalPatterns() {
-        let vitals = ((try? context.fetch(FetchDescriptor<DailyVitals>())) ?? [])
-            .sorted { $0.date < $1.date }
-        guard let origin = vitals.first?.date else { return }
+        var originQuery = FetchDescriptor<DailyVitals>(
+            sortBy: [SortDescriptor(\.date)])
+        originQuery.fetchLimit = 1
+        guard let origin = try? context.fetch(originQuery).first?.date else { return }
         let cutoff = Date.now.addingTimeInterval(-240 * 86_400)
-        let window = vitals.filter { $0.date >= cutoff }
+        let windowQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= cutoff },
+            sortBy: [SortDescriptor(\.date)])
+        let window = (try? context.fetch(windowQuery)) ?? []
 
         func samples(_ value: (DailyVitals) -> Double?) -> [CyclicalSample] {
             window.compactMap { row in
@@ -198,8 +239,9 @@ final class AggregationService {
         row.isActive = true
     }
 
-    /// The stored pattern for a marker, if it currently qualifies *and* applies
-    /// to this user.
+    /// Stored patterns that currently qualify and apply to this user. Both
+    /// recovery markers are loaded together so one recovery pass does not fetch
+    /// the same profile and tiny table twice.
     ///
     /// Gated on a female profile by product decision. The detector itself is
     /// blind — a 21–35 day rhythm could show up in anyone's data from shift work
@@ -208,18 +250,20 @@ final class AggregationService {
     /// expected. `.other` is excluded because it carries no information either
     /// way, and silently reshaping someone's recovery scores on an assumption is
     /// worse than leaving them alone.
-    private func activePattern(_ marker: String) -> CyclicalPattern? {
+    private func activePatterns() -> [String: CyclicalPattern] {
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first,
-              profile.sex == .female,
-              let row = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
-                  .first(where: { $0.markerRaw == marker && $0.isActive }),
-              row.profile.count == row.periodDays, row.periodDays > 0
-        else { return nil }
-        return CyclicalPattern(periodDays: row.periodDays,
-                               cyclesObserved: row.cyclesObserved,
-                               strength: row.strength,
-                               amplitude: row.amplitude,
-                               profile: row.profile)
+              profile.sex == .female else { return [:] }
+        let rows = (try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? []
+        return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+            guard row.isActive, row.profile.count == row.periodDays, row.periodDays > 0
+            else { return nil }
+            return (row.markerRaw,
+                    CyclicalPattern(periodDays: row.periodDays,
+                                    cyclesObserved: row.cyclesObserved,
+                                    strength: row.strength,
+                                    amplitude: row.amplitude,
+                                    profile: row.profile))
+        })
     }
 
     // MARK: - Recovery
@@ -229,7 +273,10 @@ final class AggregationService {
         let result = RecoveryEngine().evaluate(recoveryInputs(for: today))
 
         let bounds = DayBounds(today, calendar: cal)
-        let existing = (try? context.fetch(FetchDescriptor<RecoveryScoreRecord>())) ?? []
+        let dayEnd = bounds.end
+        let query = FetchDescriptor<RecoveryScoreRecord>(
+            predicate: #Predicate { $0.date >= today && $0.date < dayEnd })
+        let existing = (try? context.fetch(query)) ?? []
         let row = existing.first { bounds.contains($0.date) }
             ?? {
                 let r = RecoveryScoreRecord(date: today, score: 0, recommendation: "")
@@ -245,22 +292,30 @@ final class AggregationService {
         var inputs = RecoveryInputs()
 
         let bounds = DayBounds(day, calendar: cal)
-        let sleep = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
-        if let last = sleep.first(where: { bounds.contains($0.date) }) {
+        let dayStart = bounds.start
+        let dayEnd = bounds.end
+        let sleepQuery = FetchDescriptor<SleepData>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd })
+        if let last = try? context.fetch(sleepQuery).first {
             inputs.asleepMinutes = last.asleepMinutes
             inputs.sleepEfficiency = last.efficiency
         }
 
-        let vitals = ((try? context.fetch(FetchDescriptor<DailyVitals>())) ?? [])
-            .sorted { $0.date < $1.date }
         let baselineStart = day.addingTimeInterval(-60 * 86_400)
-        let baseline = vitals.filter { $0.date >= baselineStart && $0.date < day }
+        let vitalsQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= baselineStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date)])
+        let vitals = (try? context.fetch(vitalsQuery)) ?? []
+        let baseline = vitals.filter { $0.date < day }
         let todayVitals = vitals.first { bounds.contains($0.date) }
 
         // Level both sides by the same rhythm before comparing. Correcting only
         // today's reading would shift it against an uncorrected baseline and
         // invert the very error being fixed.
-        let origin = vitals.first.map { cal.startOfDay(for: $0.date) }
+        var originQuery = FetchDescriptor<DailyVitals>(sortBy: [SortDescriptor(\.date)])
+        originQuery.fetchLimit = 1
+        let origin = (try? context.fetch(originQuery).first)
+            .map { cal.startOfDay(for: $0.date) }
         func dayIndex(_ date: Date) -> Int {
             guard let origin else { return 0 }
             return Int(cal.startOfDay(for: date).timeIntervalSince(origin) / 86_400)
@@ -271,8 +326,9 @@ final class AggregationService {
             return values.map { $0.1 - pattern.offset(forDay: dayIndex($0.0)) }
         }
 
-        let hrvPattern = activePattern(Marker.hrv)
-        let rhrPattern = activePattern(Marker.restingHR)
+        let patterns = activePatterns()
+        let hrvPattern = patterns[Marker.hrv]
+        let rhrPattern = patterns[Marker.restingHR]
 
         if let todayVitals {
             inputs.hrv = todayVitals.hrvSDNN.map {
@@ -307,9 +363,11 @@ final class AggregationService {
         let records = TrainingRecords.completed(sessions, fractions: fractions)
         // Bodyweight makes unweighted work count toward load. Trend weight, not
         // the latest reading, so a water-weight spike can't move training load.
-        let bodyweight = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
-            .sorted { $0.date > $1.date }
-            .first
+        var weightQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date <= day },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        weightQuery.fetchLimit = 1
+        let bodyweight = (try? context.fetch(weightQuery).first)
             .map { $0.trendWeightKg ?? $0.weightKg } ?? 0
 
         let agg = VolumeAggregator()

@@ -40,6 +40,40 @@ struct HistorySeriesTests {
         #expect(bands.last?.value == direct.tdeeKcal)
     }
 
+    /// The moving-window implementation must be numerically identical to the
+    /// original independent engine call for every requested day, including
+    /// sparse intake and multiple records on a day.
+    @Test func movingWindowMatchesIndependentEngineCallsExactly() {
+        var records: [DailyRecord] = []
+        for i in 0..<365 {
+            let date = day(-364 + i).addingTimeInterval(Double(i % 4) * 1_800)
+            let intake: Double? = i.isMultiple(of: 5)
+                ? nil : 2_100 + Double(i % 11) * 37
+            let weight: Double? = i.isMultiple(of: 3)
+                ? nil : 88 - Double(i) * 0.015
+            records.append(DailyRecord(date: date, intakeKcal: intake,
+                                       weightKg: weight))
+        }
+        records.append(DailyRecord(date: day(-20).addingTimeInterval(7_200),
+                                   intakeKcal: nil, weightKg: 84.2))
+        let requested = stride(from: -330, through: 0, by: 3).map(day)
+        let optimized = HistorySeries.metabolismEstimates(
+            records: records, windowDays: 30, on: requested, calendar: cal) { _ in prior }
+        let engine = MetabolismEngine()
+
+        #expect(optimized.count == requested.count)
+        for (date, estimate) in optimized {
+            let direct = engine.estimate(records: records, windowDays: 30,
+                                         prior: prior, asOf: date)
+            #expect(estimate.tdeeKcal == direct.tdeeKcal)
+            #expect(estimate.confidence == direct.confidence)
+            #expect(estimate.trendSlopeKgPerWeek == direct.trendSlopeKgPerWeek)
+            #expect(estimate.avgIntakeKcal == direct.avgIntakeKcal)
+            #expect(estimate.smoothedWeightKg == direct.smoothedWeightKg)
+            #expect(estimate.standardErrorKcal == direct.standardErrorKcal)
+        }
+    }
+
     /// Steady intake with steady loss should recover ~2500 + 550 = 3050.
     @Test func tdeeRecoversTheTrueValueOnCleanData() {
         let bands = HistorySeries.tdee(records: steadyRecords(), prior: prior,

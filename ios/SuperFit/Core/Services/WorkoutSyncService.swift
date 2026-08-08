@@ -28,7 +28,9 @@ final class WorkoutSyncService {
                                  end: .now)
         guard let samples = try? await health.workouts(in: range) else { return 0 }
 
-        var imported = apply(samples)
+        let sampleRange = storageRange(starts: samples.map(\.start),
+                                       ends: samples.map(\.end), fallback: range)
+        var imported = apply(samples, in: sampleRange)
 
         // Garmin second, enriching what HealthKit already brought in. Garmin
         // Connect writes workouts to Apple Health but drops its own metrics on
@@ -37,7 +39,9 @@ final class WorkoutSyncService {
         // rather than creating a parallel copy.
         if let garmin, await garmin.isLinked,
            let enriched = try? await garmin.workouts(in: range) {
-            imported += applyGarmin(enriched)
+            let garminRange = storageRange(starts: enriched.map(\.start),
+                                           ends: enriched.map(\.end), fallback: range)
+            imported += applyGarmin(enriched, in: garminRange)
         }
 
         try? context.save()
@@ -47,7 +51,20 @@ final class WorkoutSyncService {
     /// Applies importer decisions to the store. Returns the number of new rows.
     @discardableResult
     func apply(_ samples: [WorkoutSample]) -> Int {
-        let existing = fetchRecords()
+        guard let first = samples.map(\.start).min(),
+              let last = samples.map(\.end).max() else { return 0 }
+        let range = DateInterval(start: first, end: max(last, first.addingTimeInterval(1)))
+        return apply(samples, in: range)
+    }
+
+    private func storageRange(starts: [Date], ends: [Date],
+                              fallback: DateInterval) -> DateInterval {
+        guard let first = starts.min(), let last = ends.max() else { return fallback }
+        return DateInterval(start: first, end: max(last, first.addingTimeInterval(1)))
+    }
+
+    private func apply(_ samples: [WorkoutSample], in range: DateInterval) -> Int {
+        let existing = fetchRecords(in: range)
         var byExternalID = Dictionary(
             existing.compactMap { r in r.externalID.map { ($0, r) } },
             uniquingKeysWith: { a, _ in a })
@@ -55,7 +72,7 @@ final class WorkoutSyncService {
         let decisions = WorkoutImporter.decide(
             samples: samples,
             existingExternalIDs: Set(byExternalID.keys),
-            loggedStrengthSessions: loggedStrengthSessions())
+            loggedStrengthSessions: loggedStrengthSessions(in: range))
 
         var inserted = 0
         for (sample, decision) in zip(samples, decisions) {
@@ -101,8 +118,8 @@ final class WorkoutSyncService {
     /// Fills Garmin-only fields onto workouts already imported from HealthKit,
     /// matched on start time rather than identifier: the two systems assign their
     /// own IDs to the same activity.
-    private func applyGarmin(_ enriched: [GarminWorkout]) -> Int {
-        let records = fetchRecords()
+    private func applyGarmin(_ enriched: [GarminWorkout], in range: DateInterval) -> Int {
+        let records = fetchRecords(in: range)
         var added = 0
         for item in enriched {
             guard let match = records.min(by: {
@@ -136,14 +153,22 @@ final class WorkoutSyncService {
         return added
     }
 
-    private func fetchRecords() -> [WorkoutRecord] {
-        (try? context.fetch(FetchDescriptor<WorkoutRecord>())) ?? []
+    private func fetchRecords(in range: DateInterval) -> [WorkoutRecord] {
+        let start = range.start
+        let end = range.end
+        return (try? context.fetch(FetchDescriptor<WorkoutRecord>(predicate: #Predicate {
+            $0.startedAt >= start && $0.startedAt <= end
+        }))) ?? []
     }
 
     /// Intervals of gym sessions logged in the app, so the watch's parallel
     /// strength block doesn't import as a second workout.
-    private func loggedStrengthSessions() -> [DateInterval] {
-        let sessions = (try? context.fetch(FetchDescriptor<TrainingSession>())) ?? []
+    private func loggedStrengthSessions(in range: DateInterval) -> [DateInterval] {
+        let earliestEnd = range.start
+        let latestStart = range.end
+        let sessions = (try? context.fetch(FetchDescriptor<TrainingSession>(predicate: #Predicate {
+            $0.startedAt <= latestStart && ($0.endedAt ?? $0.startedAt) >= earliestEnd
+        }))) ?? []
         return sessions.compactMap { session in
             guard let end = session.endedAt, end > session.startedAt else { return nil }
             return DateInterval(start: session.startedAt, end: end)

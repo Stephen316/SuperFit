@@ -20,16 +20,20 @@ struct DashboardView: View {
 
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
-    @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
-    @Query private var nutrition: [NutritionLog]
-    @Query(sort: \MetabolicEstimateRecord.date, order: .reverse) private var estimates: [MetabolicEstimateRecord]
-    @Query(sort: \RecoveryScoreRecord.date, order: .reverse) private var recoveries: [RecoveryScoreRecord]
-    @Query(sort: \DailyEnergy.date, order: .reverse) private var energy: [DailyEnergy]
-    @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
-    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
-    @Query(sort: \WorkoutRecord.startedAt, order: .reverse) private var workouts: [WorkoutRecord]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
+
+    // Explicit, windowed fetches rather than reactive whole-table queries. The
+    // dashboard needs one selected day plus a year for its streak; retaining every
+    // historical model made the first screen grow with the lifetime of the app.
+    @State private var metrics: [BodyMetrics] = []
+    @State private var nutrition: [NutritionLog] = []
+    @State private var estimates: [MetabolicEstimateRecord] = []
+    @State private var recoveries: [RecoveryScoreRecord] = []
+    @State private var energy: [DailyEnergy] = []
+    @State private var sleep: [SleepData] = []
+    @State private var vitals: [DailyVitals] = []
+    @State private var workouts: [WorkoutRecord] = []
 
     /// The day on screen. Every card reads from this rather than "now", so the
     /// arrows under the title move the whole page together.
@@ -41,6 +45,7 @@ struct DashboardView: View {
     @State private var showingSteps = false
     @State private var showingRestingHR = false
     @State private var showingSettings = false
+    @State private var showingWatchHelp = false
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -112,6 +117,16 @@ struct DashboardView: View {
         return workouts.filter { d.contains($0.startedAt) }
     }
 
+    /// Whether any watch-sourced reading has ever reached the store. This gates
+    /// the setup help: an empty card on a connected watch usually just means the
+    /// value hasn't synced yet — resting HR lags to the afternoon — so a set-up
+    /// user shouldn't be told to reconnect on an ordinary data gap. Only a store
+    /// with no heart or sleep data at all is treated as "no watch".
+    private var watchConnected: Bool {
+        vitals.contains { $0.restingHR != nil || $0.hrvSDNN != nil }
+            || sleep.contains { $0.asleepMinutes > 0 }
+    }
+
     /// The weight to show is the one recorded on the day being viewed, falling
     /// back to the most recent before it — stepping back a day shouldn't blank
     /// the card just because nothing was weighed that morning.
@@ -174,8 +189,21 @@ struct DashboardView: View {
             .sheet(isPresented: $showingSteps) { StepsHistoryView() }
             .sheet(isPresented: $showingRestingHR) { RestingHRHistoryView() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
-            .sheet(item: $addingTo) { slot in FoodSearchView(day: day, meal: slot) }
-            .task { await refresh() }
+            .sheet(isPresented: $showingWatchHelp) { WatchSetupHelpView() }
+            .sheet(item: $addingTo, onDismiss: loadDashboardData) { slot in
+                FoodSearchView(day: day, meal: slot)
+            }
+            .task {
+                // Repair legacy derived values before the first read, without
+                // waiting for Health authorization or a network-backed source.
+                AggregationService(context: context).repairWeightTrendIfNeeded()
+                loadDashboardData()
+                await refresh()
+            }
+            .onChange(of: day) { _, _ in loadDashboardData() }
+            .onChange(of: tab) { _, selected in
+                if selected == .home { loadDashboardData() }
+            }
         }
     }
 
@@ -183,8 +211,99 @@ struct DashboardView: View {
         guard !syncing else { return }
         syncing = true
         defer { syncing = false }
-        await SyncCoordinator(context: context).syncAll()
-        AggregationService(context: context).runAll()
+        let aggregation = AggregationService(context: context)
+        let changes = await SyncCoordinator(context: context).syncAll()
+        aggregation.runAll(refreshWeightTrend: changes.weightTrendNeedsRefresh)
+        loadDashboardData()
+    }
+
+    /// Loads exactly what the cards can consume while preserving unlimited day
+    /// navigation: an old selected day is OR'd into the one-year streak window,
+    /// and the last weight before that day is fetched separately for carry-forward.
+    private func loadDashboardData() {
+        let cal = Calendar.current
+        let selected = DayBounds(day, calendar: cal)
+        let dayStart = selected.start
+        let dayEnd = selected.end
+        let streakStart = cal.date(byAdding: .day, value: -365,
+                                   to: cal.startOfDay(for: .now)) ?? dayStart
+
+        let logQuery = FetchDescriptor<NutritionLog>(predicate: #Predicate {
+            $0.date >= streakStart || ($0.date >= dayStart && $0.date < dayEnd)
+        })
+        nutrition = (try? context.fetch(logQuery)) ?? []
+
+        let metricQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate {
+                $0.date >= streakStart || ($0.date >= dayStart && $0.date < dayEnd)
+            },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        var loadedMetrics = (try? context.fetch(metricQuery)) ?? []
+
+        func appendMetric(_ row: BodyMetrics?) {
+            guard let row, !loadedMetrics.contains(where: { $0 === row }) else { return }
+            loadedMetrics.append(row)
+        }
+        var latestQuery = FetchDescriptor<BodyMetrics>(
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        latestQuery.fetchLimit = 1
+        appendMetric((try? context.fetch(latestQuery))?.first)
+
+        var carriedQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        carriedQuery.fetchLimit = 1
+        appendMetric((try? context.fetch(carriedQuery))?.first)
+        metrics = loadedMetrics.sorted { $0.date > $1.date }
+
+        var estimateQuery = FetchDescriptor<MetabolicEstimateRecord>(
+            predicate: #Predicate { $0.windowDays == 30 },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        estimateQuery.fetchLimit = 1
+        estimates = (try? context.fetch(estimateQuery)) ?? []
+
+        let recoveryQuery = FetchDescriptor<RecoveryScoreRecord>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        recoveries = (try? context.fetch(recoveryQuery)) ?? []
+
+        let energyQuery = FetchDescriptor<DailyEnergy>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        energy = (try? context.fetch(energyQuery)) ?? []
+
+        let sleepQuery = FetchDescriptor<SleepData>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        var loadedSleep = (try? context.fetch(sleepQuery)) ?? []
+        var watchSleepQuery = FetchDescriptor<SleepData>(
+            predicate: #Predicate { $0.asleepMinutes > 0 },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        watchSleepQuery.fetchLimit = 1
+        if let proof = (try? context.fetch(watchSleepQuery))?.first,
+           !loadedSleep.contains(where: { $0 === proof }) {
+            loadedSleep.append(proof)
+        }
+        sleep = loadedSleep
+
+        let vitalQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        var loadedVitals = (try? context.fetch(vitalQuery)) ?? []
+        var watchVitalQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.restingHR != nil || $0.hrvSDNN != nil },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        watchVitalQuery.fetchLimit = 1
+        if let proof = (try? context.fetch(watchVitalQuery))?.first,
+           !loadedVitals.contains(where: { $0 === proof }) {
+            loadedVitals.append(proof)
+        }
+        vitals = loadedVitals
+
+        let workoutQuery = FetchDescriptor<WorkoutRecord>(
+            predicate: #Predicate { $0.startedAt >= dayStart && $0.startedAt < dayEnd },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        workouts = (try? context.fetch(workoutQuery)) ?? []
     }
 
     // MARK: - Header
@@ -311,15 +430,18 @@ struct DashboardView: View {
         .accessibilityLabel(label)
     }
 
-    /// settings-btn: 40pt circle, white at 5%, 20pt glyph.
+    /// settings-btn: 40pt visible circle inside a 44pt touch target.
     private func circleButton(_ icon: String, label: String,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 17))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(Theme.wash))
+            ZStack {
+                Circle().fill(Theme.wash).frame(width: 40, height: 40)
+                Image(systemName: icon)
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -335,6 +457,7 @@ struct DashboardView: View {
         let recovery = todayRecovery
         let hasData = (recovery?.dataCompleteness ?? 0) > 0
         let score = recovery?.score ?? 0
+        let needsWatch = !hasData && !watchConnected
         return VStack(spacing: 12) {
             ZStack {
                 // 94pt frame with a 6pt stroke gives a 100pt outer and 88pt inner
@@ -361,6 +484,11 @@ struct DashboardView: View {
                 Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
                     .font(Theme.text(13, .medium))
                     .foregroundStyle(hasData ? Theme.gold : Theme.textSecondary)
+            }
+            if needsWatch {
+                Button { showingWatchHelp = true } label: { WatchHelpLabel() }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
             }
         }
     }
@@ -487,16 +615,26 @@ struct DashboardView: View {
     }
 
     private var restingHRCard: some View {
-        cardButton { showingRestingHR = true } content: {
+        // Any resting HR ever recorded means the history view is worth reaching,
+        // even if today's reading hasn't landed. A store that has never seen one
+        // sends the tap to the watch setup help instead.
+        let hasHistory = vitals.contains { $0.restingHR != nil }
+        return cardButton {
+            if hasHistory { showingRestingHR = true } else { showingWatchHelp = true }
+        } content: {
             VStack(spacing: 8) {
                 cardLabel("Resting HR")
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(todayVitals?.restingHR.map { "\(Int($0))" } ?? "–")
-                        .font(Theme.text(28, .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("bpm")
-                        .font(Theme.text(16))
-                        .foregroundStyle(Theme.textSecondary)
+                if hasHistory {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(todayVitals?.restingHR.map { "\(Int($0))" } ?? "–")
+                            .font(Theme.text(28, .bold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("bpm")
+                            .font(Theme.text(16))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                } else {
+                    WatchHelpLabel(text: "Connect a watch")
                 }
             }
         }

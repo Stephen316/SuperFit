@@ -6,83 +6,111 @@ struct ConnectedServicesView: View {
     @State private var isLinked = false
     @State private var busy = false
     @State private var usdaKey = USDAKeyStore.key ?? ""
-    @State private var keyState = KeyState.unknown
+    @State private var keyState: KeyState = {
+        guard USDAKeyStore.key != nil else { return .unknown }
+        return USDAKeyStore.isBundled ? .available : .valid
+    }()
     @State private var checking = false
+    @State private var showingServerSettings = false
 
     private let garmin = GarminProvider()
     private let usda = USDAClient()
 
-    private enum KeyState { case unknown, valid, invalid }
+    private enum KeyState { case unknown, available, valid, invalid }
 
     var body: some View {
         Form {
             Section {
-                SecureField("Paste your FDC API key", text: $usdaKey)
+                LabeledContent("USDA key") {
+                    keyStatus
+                }
+
+                SecureField("Paste API key", text: $usdaKey)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .onSubmit(saveKey)
+                    .onChange(of: usdaKey) { _, value in
+                        if value != USDAKeyStore.key { keyState = .unknown }
+                    }
+
                 HStack {
-                    Button(checking ? "Checking…" : "Save and verify") { saveKey() }
+                    Button(checking ? "Checking…" : "Save and verify key") { saveKey() }
                         .disabled(usdaKey.trimmingCharacters(in: .whitespaces).isEmpty || checking)
                     Spacer()
-                    switch keyState {
-                    case .valid:
-                        Label("Working", systemImage: "checkmark.circle.fill")
-                            .font(.caption).foregroundStyle(.green)
-                    case .invalid:
-                        Label("Rejected", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption).foregroundStyle(.orange)
-                    case .unknown:
-                        EmptyView()
-                    }
+                    if checking { ProgressView() }
                 }
-                Link("Get a free key", destination: URL(string: "https://fdc.nal.usda.gov/api-key-signup.html")!)
-                    .font(.caption)
+
+                Link("Get a free USDA key",
+                     destination: URL(string: "https://fdc.nal.usda.gov/api-key-signup.html")!)
+                    .font(Theme.font(13))
             } header: {
-                Text("Food database")
+                Text("Food search")
             } footer: {
-                Text("Food search uses USDA FoodData Central, which needs a free API key. Without one, search falls back to Open Food Facts and foods you've already logged. Foods you log are saved on device and keep working offline.")
+                Text("A free USDA key adds more generic and branded foods. Without one, search still uses Open Food Facts and foods you've logged before.")
             }
 
             Section {
+                LabeledContent("Garmin Connect") {
+                    Label(isLinked ? "Connected" : "Not connected",
+                          systemImage: isLinked ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isLinked ? .green : Theme.textSecondary)
+                }
+
                 if isLinked {
-                    LabeledContent("Garmin") {
-                        Label("Connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    }
-                    Button("Disconnect", role: .destructive) {
+                    Button("Disconnect Garmin", role: .destructive) {
                         Task { await garmin.unlink(); await refresh() }
                     }
                 } else {
                     Button("Connect Garmin") { link() }
-                        .disabled(URL(string: backendURL) == nil || busy)
+                        .disabled(validBackendURL == nil || busy)
+
+                    if validBackendURL == nil {
+                        Label("Server setup required", systemImage: "info.circle")
+                            .font(Theme.font(13))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+
+                    if busy {
+                        ProgressView("Opening Garmin…")
+                    }
+                }
+
+                if !isLinked {
+                    DisclosureGroup("Server settings", isExpanded: $showingServerSettings) {
+                        TextField("https://your-server.example.com", text: $backendURL)
+                            .textContentType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .onSubmit(saveBackend)
+
+                        if !backendURL.isEmpty && validBackendURL == nil {
+                            Label("Enter a complete HTTPS address", systemImage: "exclamationmark.triangle.fill")
+                                .font(Theme.font(13))
+                                .foregroundStyle(.orange)
+                        }
+
+                        Button("Save server") { saveBackend() }
+                            .disabled(validBackendURL == nil)
+                    }
                 }
             } header: {
                 Text("Garmin")
             } footer: {
                 Text(isLinked
-                     ? "HRV and sleep stages come from Garmin, which Garmin Connect doesn't share with Apple Health. Everything else still syncs through Apple Health."
-                     : "Garmin's HRV and detailed sleep don't reach Apple Health. Connecting fills those gaps for recovery scoring.")
-            }
-
-            Section {
-                TextField("https://your-backend.example.com", text: $backendURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .onSubmit(saveBackend)
-            } header: {
-                Text("Backend")
-            } footer: {
-                Text("Garmin requires a server to hold API credentials and receive their data pushes. See docs/GARMIN.md.")
+                     ? "Garmin adds HRV and detailed sleep that Garmin Connect does not share with Apple Health."
+                     : "Garmin can fill gaps in recovery data. It requires a separately hosted SuperFit server, configured under Server settings.")
             }
         }
         .navigationTitle("Connected services")
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+        .themedList(bottomPadding: 24)
         .keyboardDoneButton()
-        .task { await refresh() }
+        .task {
+            await refresh()
+            showingServerSettings = validBackendURL == nil
+        }
         .onOpenURL { url in
             guard url.scheme == "superfit", url.host == "garmin",
                   let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -92,28 +120,66 @@ struct ConnectedServicesView: View {
         }
     }
 
+    @ViewBuilder
+    private var keyStatus: some View {
+        switch keyState {
+        case .available:
+            Label("Key available", systemImage: "key.fill")
+                .foregroundStyle(Theme.gold)
+        case .valid:
+            Label("Verified", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .invalid:
+            Label("Couldn't verify", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case .unknown:
+            Text("Not verified")
+                .foregroundStyle(Theme.textSecondary)
+        }
+    }
+
+    private var validBackendURL: URL? {
+        let value = backendURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value), url.scheme == "https", url.host != nil else {
+            return nil
+        }
+        return url
+    }
+
     private func saveKey() {
-        let trimmed = usdaKey.trimmingCharacters(in: .whitespaces)
+        let trimmed = usdaKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         checking = true
         Task {
             defer { checking = false }
             let ok = await usda.validate(key: trimmed)
+            guard usdaKey.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else {
+                return
+            }
             keyState = ok ? .valid : .invalid
             if ok { USDAKeyStore.save(trimmed) }
         }
     }
 
     private func saveBackend() {
-        guard let url = URL(string: backendURL), url.scheme == "https" else { return }
-        Task { await garmin.setBackend(url); await refresh() }
+        guard let url = validBackendURL else { return }
+        Task {
+            await garmin.setBackend(url)
+            await refresh()
+        }
     }
 
     private func link() {
-        saveBackend()
+        guard let backend = validBackendURL else {
+            showingServerSettings = true
+            return
+        }
         busy = true
         Task {
             defer { busy = false }
+            // Save and read on the same actor task so authorization cannot race
+            // the server update.
+            await garmin.setBackend(backend)
             if let url = await garmin.authorizationURL() { openURL(url) }
         }
     }

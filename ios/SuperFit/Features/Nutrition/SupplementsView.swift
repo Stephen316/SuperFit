@@ -159,6 +159,14 @@ struct SupplementPickerView: View {
     @State private var creatingCustom = false
     @State private var confirmingDuplicate = false
 
+    init(day: Date) {
+        self.day = day
+        let bounds = DayBounds(day)
+        let start = bounds.start
+        let end = bounds.end
+        _logs = Query(filter: #Predicate { $0.date >= start && $0.date < end })
+    }
+
     /// Food-like supplements can be reached from the food diary too, and both
     /// count toward the day's totals.
     private var alreadyLoggedAsFood: Bool {
