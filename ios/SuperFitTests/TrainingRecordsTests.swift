@@ -69,4 +69,102 @@ struct TrainingRecordsTests {
         let records = TrainingRecords.completed([s], fractions: [id: 1.0])
         #expect(records.first?.bodyweightFraction == 1.0)
     }
+
+    /// Starting a saved workout repeats the newest completed version, including
+    /// set details, but ignores a newer abandoned attempt and removed exercises.
+    @Test func savedWorkoutRepeatsTheLatestCompletedPlan() throws {
+        let context = try makeContext()
+        let keptExercise = UUID()
+        let removedExercise = UUID()
+
+        let older = TrainingSession(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            templateName: "Pull")
+        context.insert(older)
+        let olderSet = SetEntry(order: 0, exerciseID: keptExercise,
+                                weightKg: 50, reps: 10)
+        olderSet.completedAt = older.startedAt
+        olderSet.session = older
+        context.insert(olderSet)
+
+        let latest = TrainingSession(
+            startedAt: Date(timeIntervalSince1970: 1_710_000_000),
+            templateName: "Pull")
+        context.insert(latest)
+        let warmup = SetEntry(order: 0, exerciseID: keptExercise,
+                              weightKg: 40, reps: 12)
+        warmup.rir = 4
+        warmup.restSeconds = 60
+        warmup.isWarmup = true
+        warmup.completedAt = latest.startedAt
+        warmup.session = latest
+        context.insert(warmup)
+        let working = SetEntry(order: 1, exerciseID: keptExercise,
+                               weightKg: 70, reps: 8)
+        working.rir = 2
+        working.restSeconds = 180
+        working.completedAt = latest.startedAt
+        working.session = latest
+        context.insert(working)
+        let removed = SetEntry(order: 2, exerciseID: removedExercise,
+                               weightKg: 90, reps: 6)
+        removed.completedAt = latest.startedAt
+        removed.session = latest
+        context.insert(removed)
+
+        let abandoned = TrainingSession(
+            startedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            templateName: "Pull")
+        context.insert(abandoned)
+        let abandonedSet = SetEntry(order: 0, exerciseID: keptExercise,
+                                    weightKg: 100, reps: 3)
+        abandonedSet.session = abandoned
+        context.insert(abandonedSet)
+
+        let plan = TrainingRecords.repeatedPlan(
+            templateName: "pull",
+            exerciseIDs: [keptExercise],
+            sessions: [older, latest, abandoned])
+
+        #expect(plan.count == 2)
+        #expect(plan[0] == .init(order: 0, exerciseID: keptExercise,
+                                 weightKg: 40, reps: 12, rir: 4,
+                                 restSeconds: 60, isWarmup: true))
+        #expect(plan[1] == .init(order: 1, exerciseID: keptExercise,
+                                 weightKg: 70, reps: 8, rir: 2,
+                                 restSeconds: 180, isWarmup: false))
+    }
+
+    @Test func savedWorkoutLimitIsEight() {
+        #expect(WorkoutTemplate.canCreate(savedCount: 7))
+        #expect(!WorkoutTemplate.canCreate(savedCount: 8))
+        #expect(!WorkoutTemplate.canCreate(savedCount: 9))
+    }
+
+    /// Older templates did not tag the session that created them. An exact
+    /// exercise-order match still makes that workout available for first reuse.
+    @Test func savedWorkoutFindsItsLegacyUntaggedSession() throws {
+        let context = try makeContext()
+        let row = UUID()
+        let curl = UUID()
+        let session = TrainingSession(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        context.insert(session)
+        let first = SetEntry(order: 0, exerciseID: row, weightKg: 75, reps: 8)
+        first.completedAt = session.startedAt
+        first.session = session
+        context.insert(first)
+        let second = SetEntry(order: 1, exerciseID: curl, weightKg: 15, reps: 12)
+        second.completedAt = session.startedAt
+        second.session = session
+        context.insert(second)
+
+        let plan = TrainingRecords.repeatedPlan(
+            templateName: "Pull",
+            exerciseIDs: [row, curl],
+            sessions: [session])
+
+        #expect(plan.map(\.exerciseID) == [row, curl])
+        #expect(plan.map(\.weightKg) == [75, 15])
+    }
 }

@@ -337,9 +337,8 @@ struct TrainingView: View {
             }
             .sheet(isPresented: $showingPicker) {
                 ActivityPickerView(
-                    savedTemplates: savedTemplates,
                     recentWatchWorkouts: unimportedWatchWorkouts,
-                    onStartStrength: { start(named: $0) },
+                    onStartStrength: { start(template: $0) },
                     onStartLive: { liveActivity = $0 },
                     onImport: { sample in
                         WorkoutSyncService(context: context).apply([sample])
@@ -518,9 +517,26 @@ struct TrainingView: View {
         return colour == MuscleVolumeScale.untrained ? .secondary : colour
     }
 
-    private func start(named templateName: String?) {
-        let session = TrainingSession(templateName: templateName)
+    private func start(template: WorkoutTemplate?) {
+        let repeated = template.map {
+            TrainingRecords.repeatedPlan(templateName: $0.name,
+                                         exerciseIDs: $0.orderedExerciseIDs,
+                                         sessions: sessions)
+        } ?? []
+        let session = TrainingSession(templateName: template?.name)
         context.insert(session)
+        for planned in repeated {
+            let entry = SetEntry(order: planned.order,
+                                 exerciseID: planned.exerciseID,
+                                 weightKg: planned.weightKg,
+                                 reps: planned.reps)
+            entry.rir = planned.rir
+            entry.restSeconds = planned.restSeconds
+            entry.isWarmup = planned.isWarmup
+            entry.completedAt = nil
+            entry.session = session
+            context.insert(entry)
+        }
         try? context.save()
         activeSession = session
     }

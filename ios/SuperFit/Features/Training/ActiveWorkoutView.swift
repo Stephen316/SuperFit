@@ -15,6 +15,7 @@ struct ActiveWorkoutView: View {
     @State private var templateName = ""
     @State private var confirmingOverwrite = false
     @State private var confirmingDiscard = false
+    @State private var showingTemplateLimit = false
 
     private var plannedExercises: [Exercise] {
         guard let name = session.templateName,
@@ -89,6 +90,16 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Replace the existing workout with this one, or cancel to pick a different name.")
             }
+            .alert("Saved workout limit reached", isPresented: $showingTemplateLimit) {
+                Button("Manage saved workouts") {
+                    discardIfEmpty()
+                    try? context.save()
+                    dismiss()
+                }
+                Button("Keep editing", role: .cancel) {}
+            } message: {
+                Text("You can save up to 8 workouts. Delete a previous saved workout from New workout before saving another.")
+            }
             .alert("No sets completed", isPresented: $confirmingDiscard) {
                 // A fresh session with exercises is worth keeping as a plan even
                 // when nothing was done — that is what "saved workouts" are for.
@@ -136,6 +147,11 @@ struct ActiveWorkoutView: View {
             confirmingOverwrite = true
             return
         }
+        guard WorkoutTemplate.canCreate(savedCount: savedTemplates.count) else {
+            Task { @MainActor in showingTemplateLimit = true }
+            return
+        }
+        session.templateName = trimmedTemplateName
         let template = WorkoutTemplate(name: trimmedTemplateName)
         context.insert(template)
         setItems(on: template)
@@ -146,6 +162,7 @@ struct ActiveWorkoutView: View {
 
     private func overwriteTemplate() {
         guard let existing = existingTemplate else { dismiss(); return }
+        session.templateName = existing.name
         for item in existing.items ?? [] { context.delete(item) }
         setItems(on: existing)
         discardIfEmpty()

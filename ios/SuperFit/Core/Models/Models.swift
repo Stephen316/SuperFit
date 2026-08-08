@@ -470,12 +470,18 @@ final class Exercise {
 /// User-saved reusable workout (built-ins live in ExerciseLibrary.templates).
 @Model
 final class WorkoutTemplate {
+    static let maximumSaved = 8
+
     var id: UUID = UUID()
     var name: String = ""
     var createdAt: Date = Date()
     @Relationship(deleteRule: .cascade) var items: [WorkoutTemplateItem]? = []
 
     init(name: String) { self.name = name }
+
+    static func canCreate(savedCount: Int) -> Bool {
+        savedCount < maximumSaved
+    }
 
     var orderedExerciseIDs: [UUID] {
         (items ?? []).sorted { $0.order < $1.order }.compactMap(\.exerciseID)
