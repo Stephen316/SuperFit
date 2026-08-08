@@ -97,6 +97,15 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    ReminderToggle()
+                } header: {
+                    Text("Reminders")
+                } footer: {
+                    Text("Daily prompts for your morning weigh-in and breakfast, "
+                         + "lunch at 2pm, a workout at 4pm, and dinner at 6pm.")
+                }
+
                 Section("Legal") {
                     Label("Terms of service", systemImage: "doc.text")
                         .foregroundStyle(.secondary)
@@ -131,6 +140,33 @@ struct SettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
             }
+        }
+    }
+}
+
+private struct ReminderToggle: View {
+    @AppStorage(ReminderSettings.enabledKey) private var enabled = false
+    @State private var isUpdating = false
+
+    var body: some View {
+        Toggle("Daily logging reminders", isOn: Binding(
+            get: { enabled },
+            set: update
+        ))
+        .tint(Theme.gold)
+        .disabled(isUpdating)
+    }
+
+    private func update(_ newValue: Bool) {
+        isUpdating = true
+        Task {
+            if newValue {
+                enabled = await ReminderService.enable()
+            } else {
+                enabled = false
+                await ReminderService.disable()
+            }
+            isUpdating = false
         }
     }
 }
