@@ -56,8 +56,8 @@ struct TrainingView: View {
     /// Including the untrained ones is the point — "least trained first" is
     /// meaningless if a muscle you never touched simply isn't in the list, and
     /// the gap is what the table exists to show.
-    private var weeklyRows: [MuscleRow] {
-        let volume = thisWeekVolume
+    private func weeklyRows(_ volume: [MuscleGroup: VolumeAggregator.EffectiveVolume])
+        -> [MuscleRow] {
         let term = muscleQuery.trimmingCharacters(in: .whitespaces)
         return MuscleGroup.allCases
             .map { MuscleRow(muscle: $0, volume: volume[$0]) }
@@ -91,6 +91,13 @@ struct TrainingView: View {
 
     /// One pass over the week, since the table, the ordering and the diagram all
     /// read the same figures.
+    ///
+    /// Expensive — it walks every set of every session — so `body` computes it
+    /// **once** and hands the result down. It used to be read straight from the
+    /// diagram's `rank` and `colour` closures, which `Canvas` calls per region
+    /// while drawing: one tap on this tab recomputed the whole training history
+    /// 339 times, 380 ms of it on a store holding a single session, and growing
+    /// with every workout logged.
     private var thisWeekVolume: [MuscleGroup: VolumeAggregator.EffectiveVolume] {
         guard let week = currentWeek else { return [:] }
         return VolumeAggregator().weeklyVolume(records: allRecords,
@@ -174,18 +181,26 @@ struct TrainingView: View {
         return ProgressionAnalyzer().progressions(records: allRecords, window: window)
     }
 
-    /// Top gainers *and* anything going backwards. `progressions` is sorted by
-    /// change descending, so a plain `prefix` would hide every regression once
-    /// more than a handful of lifts are tracked — losing exactly the lifts worth
+    /// Top gainers *and* anything going backwards. The list is sorted by change
+    /// descending, so a plain `prefix` would hide every regression once more
+    /// than a handful of lifts are tracked — losing exactly the lifts worth
     /// acting on.
-    private var shownProgressions: [ExerciseProgression] {
-        guard progressions.count > 6 else { return progressions }
-        let declining = progressions.filter { $0.change < 0 }
-        let gaining = progressions.filter { $0.change >= 0 }
+    ///
+    /// Takes the list rather than reading `progressions`, which re-runs the
+    /// analyser over every record each time it is touched — and this function
+    /// touched it five times.
+    private func shownProgressions(_ all: [ExerciseProgression]) -> [ExerciseProgression] {
+        guard all.count > 6 else { return all }
+        let declining = all.filter { $0.change < 0 }
+        let gaining = all.filter { $0.change >= 0 }
         return Array(gaining.prefix(4)) + Array(declining.suffix(3))
     }
 
     var body: some View {
+        // Both walk the whole training history, and everything below reads them
+        // several times over. Once per redraw, not once per reader.
+        let volume = thisWeekVolume
+        let progress = progressions
         NavigationStack {
             List {
                 Section {
@@ -237,22 +252,22 @@ struct TrainingView: View {
                     // happens to be listed first.
                     MuscleMap(figure: BodyArt.figure(for: profiles.first?.sex ?? .other),
                               untrained: MuscleVolumeScale.untrained,
-                              rank: { thisWeekVolume[$0]?.effective ?? 0 },
-                              colour: { MuscleVolumeScale.colour(for: thisWeekVolume[$0], muscle: $0) })
+                              rank: { volume[$0]?.effective ?? 0 },
+                              colour: { MuscleVolumeScale.colour(for: volume[$0], muscle: $0) })
                         .frame(height: 340)
                         .padding(.vertical, 4)
                         .listRowInsets(.init(top: 6, leading: 6, bottom: 6, trailing: 6))
 
-                    overallBand
+                    overallBand(volume)
                 } header: {
                     Text("Muscles worked this week")
                 }
 
-                weeklyTable
+                weeklyTable(volume)
 
-                if !progressions.isEmpty {
+                if !progress.isEmpty {
                     Section("Strength — last 60 days") {
-                        ForEach(shownProgressions, id: \.exerciseID) { p in
+                        ForEach(shownProgressions(progress), id: \.exerciseID) { p in
                             HStack {
                                 Text(exercises.first { $0.id == p.exerciseID }?.name ?? "Exercise")
                                 Spacer()
@@ -391,8 +406,9 @@ struct TrainingView: View {
     /// enough of it. Deliberately just a colour and a word — the thresholds
     /// behind it differ per muscle, and spelling that out here would be a
     /// paragraph nobody reads under a picture that already made the point.
-    private var overallBand: some View {
-        let band = MuscleVolumeScale.overall(thisWeekVolume)
+    private func overallBand(_ volume: [MuscleGroup: VolumeAggregator.EffectiveVolume])
+        -> some View {
+        let band = MuscleVolumeScale.overall(volume)
         return Text(band.title)
             .font(Theme.text(15, .semibold))
             .foregroundStyle(band.colour)
@@ -410,8 +426,10 @@ struct TrainingView: View {
     }
 
     /// Every muscle group and what it got this week, sortable and searchable.
-    private var weeklyTable: some View {
-        Section {
+    private func weeklyTable(_ volume: [MuscleGroup: VolumeAggregator.EffectiveVolume])
+        -> some View {
+        let rows = weeklyRows(volume)
+        return Section {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -426,11 +444,11 @@ struct TrainingView: View {
                 }
             }
 
-            if weeklyRows.isEmpty {
+            if rows.isEmpty {
                 Text("No muscle matches \"\(muscleQuery)\".")
                     .foregroundStyle(.secondary)
             }
-            ForEach(weeklyRows) { row in
+            ForEach(rows) { row in
                 HStack {
                     Text(row.muscle.displayName)
                         .lineLimit(1)
