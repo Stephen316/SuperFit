@@ -63,6 +63,7 @@ struct CloudAccountSection: View {
         Section {
             Label("Unavailable in this build", systemImage: "icloud.slash")
                 .foregroundStyle(Theme.textSecondary)
+                .compactSettingsRow()
         } header: {
             SettingsSectionHeader(
                 title: "Cloud backup",

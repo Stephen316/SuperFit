@@ -144,30 +144,53 @@ struct SettingsView: View {
                             .foregroundStyle(Theme.gold)
                             .frame(width: 24)
 
-                        Text("Food search region")
+                        Text("Food search country")
                             .font(Theme.font(16, .semibold))
                             .foregroundStyle(Theme.textPrimary)
 
                         SettingsInfoButton(
-                            title: "Food search region",
+                            title: "Food search country",
                             message: "Ranks products from this region first, then nearby regions, then everywhere else. Nothing is hidden; choose where you usually buy food."
                         )
 
-                        Spacer(minLength: 8)
+                        Spacer()
+                    }
 
-                        Picker("Food search region", selection: $foodRegionRaw) {
+                    Menu {
+                        Picker("Country", selection: $foodRegionRaw) {
                             Text(FoodRegionSetting.automaticLabel())
                                 .tag(FoodRegionSetting.automatic)
                             ForEach(FoodRegion.all) { region in
                                 Text(region.displayName).tag(region.code)
                             }
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .tint(Theme.gold)
-                        .accessibilityLabel("Food search region")
-                        .accessibilityValue(foodRegionName)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Country")
+                                .font(Theme.font(14, .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer(minLength: 12)
+                            Text(foodRegionName)
+                                .font(Theme.font(14, .semibold))
+                                .foregroundStyle(Theme.gold)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Theme.wash, in: RoundedRectangle(
+                            cornerRadius: Theme.controlRadius, style: .continuous))
+                        .overlay(RoundedRectangle(
+                            cornerRadius: Theme.controlRadius, style: .continuous)
+                            .strokeBorder(Theme.hairline, lineWidth: 1))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Food search country")
+                    .accessibilityValue(foodRegionName)
 
                     Divider()
                         .overlay(Theme.divider)

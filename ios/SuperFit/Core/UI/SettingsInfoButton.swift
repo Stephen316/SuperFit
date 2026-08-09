@@ -12,9 +12,9 @@ struct SettingsInfoButton: View {
             showingInfo = true
         } label: {
             Image(systemName: "info.circle")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.gold)
-                .frame(width: 30, height: 30)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 18, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -24,6 +24,14 @@ struct SettingsInfoButton: View {
         } message: {
             Text(message)
         }
+    }
+}
+
+extension View {
+    /// A compact Form row for short status values. SwiftUI's default minimum
+    /// leaves single-row settings cards looking mostly empty.
+    func compactSettingsRow() -> some View {
+        listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     }
 }
 

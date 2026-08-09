@@ -33,6 +33,8 @@ struct AccountView: View {
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
         .themedList(bottomPadding: 24)
+        .environment(\.defaultMinListRowHeight, 34)
+        .listSectionSpacing(12)
         .task {
             if backup == nil { backup = SupabaseBackup(account: cloud) }
             await cloud.restore()
@@ -101,6 +103,7 @@ struct AccountView: View {
                         .foregroundStyle(.green)
                 }
             }
+            .compactSettingsRow()
         } header: {
             SettingsSectionHeader(
                 title: "Automatic storage",

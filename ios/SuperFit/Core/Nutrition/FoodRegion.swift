@@ -86,11 +86,44 @@ struct FoodRegion: Sendable, Identifiable, Hashable {
         code: "NZ", displayName: "New Zealand", tag: "new-zealand",
         neighbours: ["AU"])
 
-    static let all: [FoodRegion] = [
+    private static let curated: [FoodRegion] = [
         australia, austria, belgium, canada, denmark, finland, france, germany,
         ireland, italy, netherlands, newZealand, norway, poland, portugal, spain,
         sweden, switzerland, unitedKingdom, unitedStates,
     ]
+
+    /// Every ISO country is selectable. The established markets above retain
+    /// their hand-tuned neighbouring shelves; other countries still receive an
+    /// exact local-country tier and fall straight through to global results
+    /// after it rather than disappearing from Settings entirely.
+    static let all: [FoodRegion] = {
+        let english = Locale(identifier: "en_US")
+        var regions = Dictionary(uniqueKeysWithValues: curated.map { ($0.code, $0) })
+
+        for isoRegion in Locale.Region.isoRegions {
+            let code = isoRegion.identifier.uppercased()
+            guard code.count == 2, regions[code] == nil,
+                  let name = english.localizedString(forRegionCode: code) else { continue }
+            regions[code] = FoodRegion(
+                code: code,
+                displayName: name,
+                tag: countryTag(from: name),
+                neighbours: []
+            )
+        }
+
+        return regions.values.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
+    }()
+
+    private static func countryTag(from name: String) -> String {
+        name.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: nil)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
 
     static func region(forCode code: String?) -> FoodRegion? {
         guard let code, !code.isEmpty else { return nil }

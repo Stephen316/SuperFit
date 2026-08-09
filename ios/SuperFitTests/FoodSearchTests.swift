@@ -244,8 +244,11 @@ struct FoodSearchTests {
     }
 
     @Test func everyRegionHasADistinctCodeAndTag() {
+        #expect(FoodRegion.all.count > 200)
         #expect(Set(FoodRegion.all.map(\.code)).count == FoodRegion.all.count)
         #expect(Set(FoodRegion.all.map(\.tag)).count == FoodRegion.all.count)
+        #expect(FoodRegion.region(forCode: "JP")?.displayName == "Japan")
+        #expect(FoodRegion.region(forCode: "BR")?.displayName == "Brazil")
     }
 
     // MARK: Store filter
