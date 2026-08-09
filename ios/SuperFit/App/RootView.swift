@@ -18,6 +18,23 @@ enum AppTab: String, CaseIterable {
         case .sleep: return "moon.stars"
         }
     }
+
+    func moved(by offset: Int) -> AppTab? {
+        guard let index = Self.allCases.firstIndex(of: self) else { return nil }
+        let destination = index + offset
+        guard Self.allCases.indices.contains(destination) else { return nil }
+        return Self.allCases[destination]
+    }
+
+    /// The tab whose centre is nearest a horizontal point in the bar.
+    /// Clamping keeps a finger just outside either edge attached to the first
+    /// or last tab instead of cancelling an otherwise deliberate slide.
+    static func nearest(to locationX: CGFloat, in width: CGFloat) -> AppTab? {
+        guard width > 0, !allCases.isEmpty else { return nil }
+        let segmentWidth = width / CGFloat(allCases.count)
+        let index = min(max(Int(locationX / segmentWidth), 0), allCases.count - 1)
+        return allCases[index]
+    }
 }
 
 struct RootView: View {
@@ -26,24 +43,42 @@ struct RootView: View {
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @State private var tab = AppTab.home
     @State private var garmin = GarminProvider()
+    @State private var tabDragOffset: CGFloat = 0
+
+    private static let tabAnimation = Animation.easeOut(duration: 0.2)
+    private static let dragTrackingRate: CGFloat = 0.82
+    private static let edgeResistance: CGFloat = 0.18
+    private static let completionFraction: CGFloat = 0.2
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Theme.background
 
-            TabView(selection: $tab) {
-                DiaryView().tag(AppTab.diet)
-                TrainingView().tag(AppTab.train)
-                DashboardView(tab: $tab).tag(AppTab.home)
-                WeightView().tag(AppTab.weight)
-                SleepView().tag(AppTab.sleep)
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    DiaryView()
+                        .frame(width: geometry.size.width)
+                        .accessibilityHidden(tab != .diet)
+                    TrainingView()
+                        .frame(width: geometry.size.width)
+                        .accessibilityHidden(tab != .train)
+                    DashboardView(tab: $tab)
+                        .frame(width: geometry.size.width)
+                        .accessibilityHidden(tab != .home)
+                    WeightView()
+                        .frame(width: geometry.size.width)
+                        .accessibilityHidden(tab != .weight)
+                    SleepView()
+                        .frame(width: geometry.size.width)
+                        .accessibilityHidden(tab != .sleep)
+                }
+                .frame(width: geometry.size.width * CGFloat(AppTab.allCases.count),
+                       alignment: .leading)
+                .offset(x: -CGFloat(selectedTabIndex) * geometry.size.width + tabDragOffset)
+                .animation(Self.tabAnimation, value: tab)
+                .simultaneousGesture(tabSwipeGesture(width: geometry.size.width))
             }
-            // Deliberately *not* `.page`. Its horizontal paging gesture wins over
-            // every List row swipe in the app, so swipe-to-delete silently did
-            // nothing anywhere — swiping a weigh-in changed tab instead. The
-            // default style keeps each tab alive (so scroll positions and search
-            // text survive switching) and leaves row swipes to the rows.
-            .toolbar(.hidden, for: .tabBar)
+            .clipped()
             .ignoresSafeArea(.keyboard)
 
             TabBar(selection: $tab)
@@ -75,6 +110,59 @@ struct RootView: View {
 
     private var appearance: AppAppearance {
         AppAppearance(rawValue: appearanceRaw) ?? .dark
+    }
+
+    private var selectedTabIndex: Int {
+        AppTab.allCases.firstIndex(of: tab) ?? 0
+    }
+
+    /// The page tracks most of the finger's travel, then settles to the next tab
+    /// or returns home based on distance and predicted momentum. Keeping the
+    /// gesture simultaneous and direction-locked leaves vertical lists in
+    /// control. The leading 32 points remain reserved for NavigationStack's
+    /// native back gesture.
+    private func tabSwipeGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                let offset = interactiveOffset(for: value, width: width)
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { tabDragOffset = offset }
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                let predicted = value.predictedEndTranslation.width
+                let isHorizontal = value.startLocation.x >= 32 &&
+                    abs(horizontal) > abs(vertical) * 1.2
+                let crossedDistance = abs(horizontal) >= width * Self.completionFraction
+                let hasMomentum = abs(horizontal) >= 32 && abs(predicted) >= width * 0.45
+                let offset = horizontal < 0 ? 1 : -1
+
+                if isHorizontal,
+                   (crossedDistance || hasMomentum),
+                   let destination = tab.moved(by: offset) {
+                    withAnimation(Self.tabAnimation) {
+                        tab = destination
+                        tabDragOffset = 0
+                    }
+                } else {
+                    withAnimation(Self.tabAnimation) { tabDragOffset = 0 }
+                }
+            }
+    }
+
+    private func interactiveOffset(for value: DragGesture.Value, width: CGFloat) -> CGFloat {
+        let horizontal = value.translation.width
+        let vertical = value.translation.height
+        guard value.startLocation.x >= 32,
+              abs(horizontal) > abs(vertical) * 1.2
+        else { return 0 }
+
+        let direction = horizontal < 0 ? 1 : -1
+        let canChangeTab = tab.moved(by: direction) != nil
+        let rate = canChangeTab ? Self.dragTrackingRate : Self.edgeResistance
+        return min(max(horizontal * rate, -width), width)
     }
 
     private func ensureProfile() {
@@ -136,8 +224,10 @@ private struct TabBar: View {
     /// than two straight moves with a corner between them.
     private static let pulseScale: CGFloat = 0.92
     private static let pulseDuration: Double = 0.5
+    private static let selectionAnimation = Animation.easeOut(duration: 0.2)
 
     @State private var homeScale: CGFloat = 1
+    @State private var dragPreview: AppTab?
 
     /// Down and back, each leg an ease-in-out. That curve is already an S, and
     /// because it leaves and arrives at zero velocity the two legs meet at the
@@ -156,10 +246,14 @@ private struct TabBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(AppTab.allCases, id: \.self) { tab in
-                button(tab).frame(maxWidth: .infinity)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                ForEach(AppTab.allCases, id: \.self) { tab in
+                    button(tab).frame(maxWidth: .infinity)
+                }
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(barSwipeGesture(width: geometry.size.width))
         }
         .frame(height: 72)
         .background(alignment: .top) {
@@ -174,6 +268,41 @@ private struct TabBar: View {
         .offset(y: Self.dropBelowSafeArea)
     }
 
+    /// Sliding previews the tab nearest the finger, then commits that exact tab
+    /// on release. The minimum distance keeps taps in the existing Buttons;
+    /// unlike a tap, sliding onto Home does not trigger its press pulse.
+    private func barSwipeGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height),
+                      let nearest = AppTab.nearest(to: value.location.x, in: width)
+                else {
+                    dragPreview = nil
+                    return
+                }
+                dragPreview = nearest
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height),
+                      let destination = AppTab.nearest(to: value.location.x, in: width)
+                else {
+                    withAnimation(Self.selectionAnimation) { dragPreview = nil }
+                    return
+                }
+                withAnimation(Self.selectionAnimation) {
+                    selection = destination
+                    dragPreview = nil
+                }
+            }
+    }
+
+    private func select(_ tab: AppTab) {
+        if tab == .home { pulseHome() }
+        // This is the original tap timing; sliding uses selectionAnimation
+        // independently so adding drag tracking does not change button feel.
+        withAnimation(.easeOut(duration: 0.18)) { selection = tab }
+    }
+
     /// Home gets its own button style. `.plain` fades its label while held,
     /// which is unobtrusive on the small icon tabs but turns the well — a solid
     /// 83pt disc — translucent, so the bar looks like it flickers. Home keeps
@@ -181,20 +310,18 @@ private struct TabBar: View {
     /// were.
     @ViewBuilder
     private func button(_ tab: AppTab) -> some View {
-        let select = {
-            if tab == .home { pulseHome() }
-            withAnimation(.easeOut(duration: 0.18)) { selection = tab }
-        }
         if tab == .home {
-            Button(action: select) { item(tab) }.buttonStyle(UndimmedButtonStyle())
+            Button { select(tab) } label: { item(tab) }
+                .buttonStyle(UndimmedButtonStyle())
         } else {
-            Button(action: select) { item(tab) }.buttonStyle(.plain)
+            Button { select(tab) } label: { item(tab) }
+                .buttonStyle(.plain)
         }
     }
 
     @ViewBuilder
     private func item(_ tab: AppTab) -> some View {
-        let active = selection == tab
+        let active = (dragPreview ?? selection) == tab
         let tint = active ? Theme.gold : Theme.textSecondary
 
         if tab == .home {
