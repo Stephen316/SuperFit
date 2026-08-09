@@ -46,7 +46,11 @@ enum ExerciseLibrary {
         Entry("Barbell Bench Press", .barbell, [.chest: 5, .frontDelts: 3, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2,
                                         .upperChest: 2],
               alias: ["bench press", "flat bench", "bb bench", "flat barbell press"]),
-        Entry("Incline Barbell Press", .barbell, [.upperChest: 5, .chest: 3, .frontDelts: 3,
+        // Incline presses lead with the clavicular (upper) head but still drive
+        // the sternal (mid) head hard across the usable 15–45° range — EMG has the
+        // mid pec well activated, not merely assisting — so mid chest is a 4
+        // (targeted, sharing the work) rather than a 3. See ChestRegionSplitTests.
+        Entry("Incline Barbell Press", .barbell, [.upperChest: 5, .chest: 4, .frontDelts: 3,
                                           .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2],
               alias: ["incline bench", "incline bench press"]),
         Entry("Decline Barbell Press", .barbell, [.chest: 5, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2, .frontDelts: 2],
@@ -56,7 +60,7 @@ enum ExerciseLibrary {
         Entry("Flat Dumbbell Press", .dumbbell, [.chest: 5, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2, .frontDelts: 2,
                                          .upperChest: 2],
               alias: ["dumbbell bench press", "db bench", "db press"]),
-        Entry("Incline Dumbbell Press", .dumbbell, [.upperChest: 5, .chest: 3, .frontDelts: 3,
+        Entry("Incline Dumbbell Press", .dumbbell, [.upperChest: 5, .chest: 4, .frontDelts: 3,
                                             .tricepsLateral: 2, .tricepsLong: 2, .tricepsMedial: 1],
               alias: ["incline db press", "incline dumbbell bench"]),
         Entry("Decline Dumbbell Press", .dumbbell, [.chest: 5, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2],
@@ -619,18 +623,93 @@ enum ExerciseLibrary {
               bodyweight: 0.5, alias: ["mountain climbers"]),
         Entry("Hollow Hold", .bodyweight, [.upperAbs: 5, .lowerAbs: 5], bodyweight: 0.0,
               alias: ["hollow body hold"]),
-        Entry("Machine Crunch", .machine,
-              [.upperAbs: 5, .lowerAbs: 5, .obliques: 2],
-              alias: ["abdominal crunch machine", "seated ab crunch",
+        // MARK: Chest — additional variations
+        Entry("Incline Dumbbell Fly", .dumbbell, [.upperChest: 5, .chest: 2, .frontDelts: 1],
+              alias: ["incline fly", "incline db fly"]),
+        Entry("Standing Cable Chest Press", .cable, [.chest: 5, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2, .frontDelts: 2, .upperAbs: 1, .lowerAbs: 1],
+              alias: ["cable chest press", "standing cable press"]),
+
+        // MARK: Shoulders — variations
+        Entry("Cable Front Raise", .cable, [.frontDelts: 4],
+              alias: ["cable front delt raise"]),
+        Entry("Seated Barbell Shoulder Press", .barbell, [.frontDelts: 5, .sideDelts: 3, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2],
+              alias: ["seated military press", "seated ohp", "seated barbell press"]),
+        Entry("Behind-the-Neck Press", .barbell, [.frontDelts: 4, .sideDelts: 4, .tricepsLateral: 3, .tricepsLong: 3, .tricepsMedial: 2],
+              alias: ["btn press", "behind neck press"]),
+        Entry("Dumbbell Upright Row", .dumbbell, [.sideDelts: 4, .upperTraps: 4, .middleTraps: 3, .lowerTraps: 3, .biceps: 2],
+              alias: ["db upright row"]),
+        Entry("Seated Dumbbell Lateral Raise", .dumbbell, [.sideDelts: 5],
+              alias: ["seated side raise", "seated lateral raise"]),
+        Entry("Prone Incline Rear Delt Raise", .dumbbell, [.rearDelts: 5, .rhomboids: 2, .middleTraps: 2],
+              alias: ["incline rear delt raise", "prone rear delt raise"]),
+        Entry("Cable Rear Delt Row", .cable, [.rearDelts: 4, .rhomboids: 3, .middleTraps: 3, .upperTraps: 1],
+              alias: ["rope rear delt row", "rear delt row"]),
+
+        // MARK: Back — machines and variations
+        Entry("Close-Grip Lat Pulldown", .cable, [.lats: 5, .biceps: 4, .rhomboids: 2, .middleTraps: 2],
+              alias: ["close grip pulldown", "narrow pulldown", "v-bar pulldown"]),
+        Entry("Wide-Grip Seated Cable Row", .cable, [.rhomboids: 5, .middleTraps: 5, .rearDelts: 3, .lats: 3, .biceps: 2],
+              alias: ["wide cable row", "wide grip row"]),
+        Entry("Cable Shrug", .cable, [.upperTraps: 5, .middleTraps: 4, .lowerTraps: 4],
+              alias: ["cable shrugs"]),
+        Entry("Trap Bar Shrug", .barbell, [.upperTraps: 5, .middleTraps: 4, .lowerTraps: 4, .wristFlexors: 2, .brachioradialis: 1],
+              alias: ["hex bar shrug"]),
+
+        // MARK: Biceps — variations
+        Entry("Drag Curl", .barbell, [.biceps: 5, .wristFlexors: 1],
+              alias: ["barbell drag curl"]),
+
+        // MARK: Triceps — machines and variations
+        Entry("Reverse-Grip Pushdown", .cable, [.tricepsMedial: 5, .tricepsLateral: 4, .tricepsLong: 4],
+              alias: ["underhand pushdown", "supinated pushdown"]),
+        Entry("Close-Grip Dumbbell Press", .dumbbell, [.tricepsLateral: 4, .tricepsLong: 4, .tricepsMedial: 3, .chest: 3, .frontDelts: 2],
+              alias: ["crush press", "squeeze press", "hex press"]),
+
+        // MARK: Quads — variations
+        Entry("Smith Machine Lunge", .machine, [.gluteusMaximus: 4, .gluteusMedius: 2, .vastusLateralis: 4, .vastusMedialis: 4, .rectusFemoris: 4],
+              alias: ["smith lunge", "smith split squat"]),
+        Entry("Landmine Squat", .barbell, [.vastusLateralis: 4, .vastusMedialis: 4, .rectusFemoris: 4, .gluteusMaximus: 4, .gluteusMedius: 2, .upperAbs: 2, .lowerAbs: 2],
+              alias: ["landmine goblet squat", "viking squat"]),
+        Entry("Curtsy Lunge", .dumbbell, [.gluteusMaximus: 4, .gluteusMedius: 4, .vastusLateralis: 3, .vastusMedialis: 3, .rectusFemoris: 3, .adductorLongus: 3, .adductorMagnus: 3],
+              bodyweight: 0.85, alias: ["curtsey lunge"]),
+        Entry("Cossack Squat", .bodyweight, [.adductorLongus: 4, .adductorMagnus: 4, .pectineus: 3, .vastusLateralis: 4, .vastusMedialis: 4, .rectusFemoris: 4, .gluteusMaximus: 3, .gluteusMedius: 3],
+              bodyweight: 0.85, alias: ["cossack"]),
+
+        // MARK: Hamstrings and glutes — variations
+        // Ballistic hip hinge: glutes and hamstrings drive it, erectors brace.
+        Entry("Kettlebell Swing", .dumbbell, [.gluteusMaximus: 5, .gluteusMedius: 2, .bicepsFemoris: 4, .semitendinosus: 4, .erectorSpinae: 3, .upperAbs: 2, .lowerAbs: 2],
+              alias: ["kb swing", "russian swing", "kettlebell swings"]),
+        Entry("Smith Machine Hip Thrust", .machine, [.gluteusMaximus: 5, .gluteusMedius: 3, .bicepsFemoris: 3, .semitendinosus: 3],
+              alias: ["smith hip thrust"]),
+        Entry("B-Stance Hip Thrust", .barbell, [.gluteusMaximus: 5, .gluteusMedius: 3, .bicepsFemoris: 3, .semitendinosus: 3],
+              alias: ["staggered hip thrust", "kickstand hip thrust"]),
+        Entry("Copenhagen Plank", .bodyweight, [.adductorLongus: 5, .adductorMagnus: 5, .pectineus: 4, .obliques: 3],
+              bodyweight: 0.5, alias: ["copenhagen", "copenhagen adduction"]),
+
+        // MARK: Core — machines and variations
+        Entry("Machine Crunch", .machine, [.upperAbs: 5, .lowerAbs: 5, .obliques: 2],
+              alias: ["ab machine", "ab crunch machine", "seated crunch machine",
+                      "abdominal crunch machine", "seated ab crunch",
                       "machine plate loaded crunch"]),
         Entry("Reverse Crunch", .bodyweight,
-              [.lowerAbs: 5, .upperAbs: 5, .obliques: 2],
-              bodyweight: 0.3,
-              alias: ["lying reverse crunch", "hip lift crunch"]),
+              [.lowerAbs: 5, .upperAbs: 5, .obliques: 2], bodyweight: 0.3,
+              alias: ["reverse crunches", "lying reverse crunch", "hip lift crunch"]),
         Entry("Rotary Torso Machine", .machine,
               [.obliques: 5, .upperAbs: 3, .lowerAbs: 3],
               alias: ["torso rotation machine", "rotary torso",
                       "seated torso twist machine"]),
+        Entry("Bicycle Crunch", .bodyweight, [.obliques: 5, .upperAbs: 3, .lowerAbs: 3], bodyweight: 0.3,
+              alias: ["bicycle", "air bike crunch", "bicycle crunches"]),
+        Entry("Toes-to-Bar", .bodyweight, [.lowerAbs: 5, .upperAbs: 4, .obliques: 2, .lats: 2, .wristFlexors: 1, .brachioradialis: 1],
+              bodyweight: 0.5, alias: ["t2b", "toes to bar"]),
+        Entry("V-Up", .bodyweight, [.upperAbs: 5, .lowerAbs: 5, .rectusFemoris: 2], bodyweight: 0.35,
+              alias: ["v ups", "jackknife"]),
+        Entry("Landmine Rotation", .barbell, [.obliques: 5, .upperAbs: 3, .lowerAbs: 3, .frontDelts: 2],
+              alias: ["landmine twist", "landmine oblique twist"]),
+
+        // MARK: Forearms — variations
+        Entry("Behind-the-Back Wrist Curl", .barbell, [.wristFlexors: 5, .brachioradialis: 3],
+              alias: ["behind back wrist curl"]),
     ]
 
     @MainActor

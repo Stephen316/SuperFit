@@ -421,3 +421,59 @@ struct OverallBandTests {
         #expect(MuscleVolumeScale.overall(v) >= .onTrack)
     }
 }
+
+/// Reported case: "I did 3 sets of incline dumbbell press (which hits the whole
+/// chest) and 3 of pec deck — why does Chest say 3?"
+///
+/// The fix: incline presses lead with the upper (clavicular) head but still drive
+/// the mid (sternal) head hard, so mid chest is a **4** — a targeted set sharing
+/// the work — not a 3. Incline therefore counts a direct set for *both* Upper
+/// chest (its 5) and Chest (its 4), the same way bench counts chest and front
+/// delts. So three incline plus three pec deck reads as **6 direct Chest sets**
+/// (and 3 direct Upper chest), matching the six chest sets that were performed.
+@Suite struct ChestRegionSplitTests {
+    private let agg = VolumeAggregator()
+    private let week = DateInterval(start: Date(timeIntervalSince1970: 1_700_000_000),
+                                    duration: 7 * 86_400)
+    private let incline = UUID()
+    private let pecDeck = UUID()
+
+    private func catalogueTension(_ name: String) -> [MuscleGroup: Int] {
+        ExerciseLibrary.catalog.first { $0.name == name }?.tension ?? [:]
+    }
+    private func sets(_ id: UUID, _ n: Int) -> [LiftRecord] {
+        (0..<n).map { i in
+            LiftRecord(date: week.start.addingTimeInterval(Double(i) * 3600),
+                       exerciseID: id, weightKg: 30, reps: 10, isWarmup: false)
+        }
+    }
+
+    @Test func inclineAndPecDeckBothCountTowardChest() {
+        let muscles: [UUID: [MuscleGroup: Int]] = [
+            incline: catalogueTension("Incline Dumbbell Press"),
+            pecDeck: catalogueTension("Pec Deck"),
+        ]
+        let records = sets(incline, 3) + sets(pecDeck, 3)
+        let direct = agg.weeklySetCounts(records: records, muscles: muscles, week: week)
+        let secondary = agg.weeklySecondarySetCounts(records: records, muscles: muscles, week: week)
+
+        // The whole-chest complaint, resolved: six chest sets read as six.
+        #expect(direct[.chest] == 6, "3 incline (now a direct chest set) + 3 pec deck")
+        // Incline still leads the upper chest, so that reads three direct sets.
+        #expect(direct[.upperChest] == 3)
+        // Pec deck's slight upper-chest involvement (a 1) stays secondary.
+        #expect(secondary[.upperChest] == 3)
+        // Incline's mid chest is now a whole set, so it is no longer secondary.
+        #expect((secondary[.chest] ?? 0) == 0)
+    }
+
+    @Test func inclinePressTrainsTheWholeChest() {
+        // Pins the data behind the fix: incline is a direct set for both chest
+        // regions, and pec deck stays a mid-chest lift. A change back to 3 fails
+        // here on purpose so the choice is made deliberately.
+        #expect(catalogueTension("Incline Dumbbell Press")[.upperChest] == 5)
+        #expect(catalogueTension("Incline Dumbbell Press")[.chest] == 4)
+        #expect(catalogueTension("Incline Barbell Press")[.chest] == 4)
+        #expect(catalogueTension("Pec Deck")[.chest] == 5)
+    }
+}

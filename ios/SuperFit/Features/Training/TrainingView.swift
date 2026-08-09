@@ -15,6 +15,7 @@ struct TrainingView: View {
     @State private var activeSession: TrainingSession?
     @State private var watch = WatchWorkoutMonitor()
     @State private var showingPicker = false
+    @State private var showingMuscleBreakdown = false
     @State private var muscleQuery = ""
     @State private var leastTrainedFirst = false
     @State private var liveActivity: WorkoutActivity?
@@ -298,11 +299,25 @@ struct TrainingView: View {
                         .listRowInsets(.init(top: 6, leading: 6, bottom: 6, trailing: 6))
 
                     overallBand(volume)
+
+                    Button { showingMuscleBreakdown = true } label: {
+                        HStack(spacing: 10) {
+                            Label("View muscle breakdown", systemImage: "list.bullet")
+                                .foregroundStyle(Theme.textPrimary)
+                            Spacer()
+                            Text("\(trainedMuscleCount(volume)) trained")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.gold)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows every muscle and its sets for this week")
                 } header: {
                     Text("Muscles worked this week")
                 }
-
-                weeklyTable(volume)
 
                 if !progress.isEmpty {
                     Section("Strength — last 60 days") {
@@ -317,6 +332,15 @@ struct TrainingView: View {
                                     .foregroundStyle(p.change >= 0 ? .green : .orange)
                             }
                         }
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        ExerciseProgressView()
+                    } label: {
+                        Label("Weight progress", systemImage: "chart.xyaxis.line")
+                            .foregroundStyle(Theme.gold)
                     }
                 }
 
@@ -374,6 +398,9 @@ struct TrainingView: View {
             .sheet(item: $detailWorkout) { workout in
                 WorkoutDetailView(workout: workout)
             }
+            .sheet(isPresented: $showingMuscleBreakdown) {
+                muscleBreakdownSheet(volume)
+            }
             .sheet(isPresented: $showingPicker) {
                 ActivityPickerView(
                     recentWatchWorkouts: unimportedWatchWorkouts,
@@ -385,6 +412,31 @@ struct TrainingView: View {
                     })
             }
         }
+    }
+
+    private func trainedMuscleCount(
+        _ volume: [MuscleGroup: VolumeAggregator.EffectiveVolume]
+    ) -> Int {
+        volume.values.filter { $0.effective > 0 }.count
+    }
+
+    private func muscleBreakdownSheet(
+        _ volume: [MuscleGroup: VolumeAggregator.EffectiveVolume]
+    ) -> some View {
+        NavigationStack {
+            List { weeklyTable(volume) }
+                .navigationTitle("Muscles trained")
+                .navigationBarTitleDisplayMode(.inline)
+                .themedChrome()
+                .themedList(bottomPadding: 24)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showingMuscleBreakdown = false }
+                    }
+                    .withoutGlassBackground()
+                }
+        }
+        .presentationDetents([.large])
     }
 
     /// Watch workouts that aren't already stored, so the picker never offers to
