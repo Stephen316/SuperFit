@@ -7,11 +7,18 @@ enum UnitSystem: String, CaseIterable {
     var displayName: String { self == .metric ? "Metric (kg, cm)" : "Imperial (lb, ft/in)" }
     var weightUnit: String { self == .metric ? "kg" : "lb" }
     var heightUnit: String { self == .metric ? "cm" : "in" }
+    var volumeUnit: String { self == .metric ? "ml" : "fl oz" }
 
     func displayWeight(_ kg: Double) -> Double { self == .metric ? kg : kg * 2.20462 }
     func storeWeight(_ value: Double) -> Double { self == .metric ? value : value / 2.20462 }
     func displayHeight(_ cm: Double) -> Double { self == .metric ? cm : cm / 2.54 }
     func storeHeight(_ value: Double) -> Double { self == .metric ? value : value * 2.54 }
+    func displayVolume(_ millilitres: Double) -> Double {
+        self == .metric ? millilitres : millilitres / 29.5735
+    }
+    func storeVolume(_ value: Double) -> Double {
+        self == .metric ? value : value * 29.5735
+    }
 
     func weightString(_ kg: Double, decimals: Int = 1) -> String {
         String(format: "%.\(decimals)f %@", displayWeight(kg), weightUnit)

@@ -4,7 +4,7 @@ import SwiftData
 enum AppSchema {
     static let models: [any PersistentModel.Type] = [
         UserProfile.self, BodyMetrics.self, DailyEnergy.self,
-        Food.self, NutritionLog.self,
+        Food.self, NutritionLog.self, HydrationLog.self, HydrationSettings.self,
         SavedMeal.self, SavedMealItem.self,
         Exercise.self, TrainingSession.self, SetEntry.self, WorkoutRecord.self,
         WorkoutTemplate.self, WorkoutTemplateItem.self,

@@ -20,6 +20,8 @@ struct DataArchiveTests {
         profile.goal = .recomposition
         context.insert(profile)
 
+        context.insert(HydrationSettings(dailyGoalMl: 2_800))
+
         context.insert(BodyMetrics(date: Date(timeIntervalSince1970: 1_700_000_000),
                                    weightKg: 82.4))
 
@@ -30,6 +32,10 @@ struct DataArchiveTests {
         log.proteinG = 56
         log.micros = [.iron: 1.9, .potassium: 460]
         context.insert(log)
+
+        context.insert(HydrationLog(
+            date: Date(timeIntervalSince1970: 1_700_000_000),
+            millilitres: 1_750))
 
         let exercise = Exercise(name: "My Custom Press", category: .barbell,
                                 tension: [.chest: 5, .tricepsLateral: 3], isCustom: true)
@@ -65,6 +71,8 @@ struct DataArchiveTests {
         #expect(archive.profile?.heightCm == 183)
         #expect(archive.bodyMetrics.count == 1)
         #expect(archive.nutritionLogs.count == 1)
+        #expect(archive.hydration?.count == 1)
+        #expect(archive.hydrationGoalMl == 2_800)
         #expect(archive.exercises.count == 1)
         #expect(archive.sessions.count == 1)
         #expect(archive.sessions.first?.sets.count == 1)
@@ -93,6 +101,7 @@ struct DataArchiveTests {
         #expect(restored.bodyMetrics.first?.weightKg == 82.4)
         #expect(restored.sessions.first?.sets.first?.rir == 2)
         #expect(restored.nutritionLogs.first?.micros.isEmpty == false)
+        #expect(restored.hydration?.first?.millilitres == 1_750)
     }
 
     /// The whole point: a backup restored into an empty install must reproduce
@@ -119,6 +128,10 @@ struct DataArchiveTests {
 
         let weights = try fresh.fetch(FetchDescriptor<BodyMetrics>())
         #expect(weights.first?.weightKg == 82.4)
+        let hydration = try fresh.fetch(FetchDescriptor<HydrationLog>())
+        #expect(hydration.count == 1)
+        #expect(hydration.first?.millilitres == 1_750)
+        #expect(try fresh.fetch(FetchDescriptor<HydrationSettings>()).first?.dailyGoalMl == 2_800)
     }
 
     // MARK: Merge safety
@@ -134,12 +147,14 @@ struct DataArchiveTests {
         DataArchiveService.restore(archive, mode: .merge, context: fresh)
         let afterFirst = try fresh.fetch(FetchDescriptor<NutritionLog>()).count
         let weightsFirst = try fresh.fetch(FetchDescriptor<BodyMetrics>()).count
+        let hydrationFirst = try fresh.fetch(FetchDescriptor<HydrationLog>()).count
 
         DataArchiveService.restore(archive, mode: .merge, context: fresh)
         #expect(try fresh.fetch(FetchDescriptor<NutritionLog>()).count == afterFirst)
         #expect(try fresh.fetch(FetchDescriptor<BodyMetrics>()).count == weightsFirst)
         #expect(try fresh.fetch(FetchDescriptor<TrainingSession>()).count == 1)
         #expect(try fresh.fetch(FetchDescriptor<Supplement>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<HydrationLog>()).count == hydrationFirst)
     }
 
     @Test func mergeKeepsDataThatIsNotInTheArchive() throws {
@@ -383,6 +398,8 @@ struct DataArchiveTests {
         #expect(try context.fetch(FetchDescriptor<TrainingSession>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<BodyMetrics>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<Supplement>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<HydrationLog>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<HydrationSettings>()).isEmpty)
     }
 
     // MARK: Sign-out must not touch data
