@@ -181,16 +181,15 @@ struct FoodPickerView: View {
 
     private var filterBar: some View {
         VStack(spacing: 8) {
-            Picker("Filter", selection: $filter) {
-                ForEach(FoodFilter.allCases) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
+            FeatureTabControl(
+                options: FoodFilter.allCases.map { ($0, $0.label) },
+                selection: $filter)
             .padding(.horizontal, 16)
 
             if filter == .all && !stores.isEmpty { storeBar }
         }
         .padding(.bottom, 8)
-        .background(.bar)
+        .background(Theme.tabBar)
     }
 
     /// Own-brand filters for the local retailers.
@@ -209,18 +208,22 @@ struct FoodPickerView: View {
                         runSearch()
                     } label: {
                         Text(brand.displayName)
-                            .font(.caption.weight(selected ? .semibold : .regular))
+                            .font(Theme.text(13, selected ? .semibold : .regular))
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .frame(minHeight: 44)
                             .background(
-                                Capsule()
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(selected ? Theme.gold.opacity(0.25) : .clear)
-                                    .overlay(Capsule().stroke(
-                                        selected ? Theme.gold : Theme.hairline.opacity(0.4),
-                                        lineWidth: 1)))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .stroke(selected ? Theme.gold : Theme.hairline,
+                                                    lineWidth: 1)
+                                    )
+                            )
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(selected ? Theme.gold : .secondary)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 16)

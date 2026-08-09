@@ -82,10 +82,10 @@ struct MacroAdherenceView: View {
         let allPoints = points
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
                     VStack(spacing: 14) {
-                        ThemeSegmentedControl(
+                        FeatureTabControl(
                             options: HistoryRange.allCases.map { ($0, $0.label) },
                             selection: $range)
 
@@ -202,10 +202,7 @@ struct MacroAdherenceView: View {
             stat("Target now", target.map { "\(Int($0.rounded())) g" } ?? "—")
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
@@ -264,10 +261,7 @@ struct MacroAdherenceView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var explanation: String {

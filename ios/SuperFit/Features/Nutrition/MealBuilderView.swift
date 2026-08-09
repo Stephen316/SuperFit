@@ -49,7 +49,7 @@ struct MealBuilderView: View {
             .navigationTitle(existing == nil ? "New meal" : "Edit meal")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -247,7 +247,7 @@ private struct MealIngredientView: View {
             .navigationTitle("Add ingredient")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }

@@ -151,6 +151,88 @@ extension View {
     }
 }
 
+// MARK: - Secondary screens
+
+private struct FeatureListModifier: ViewModifier {
+    let bottomPadding: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Theme.backgroundTop)
+            .listRowBackground(Theme.surface)
+            .listRowSeparatorTint(Theme.hairline)
+            .tint(Theme.gold)
+            .safeAreaPadding(.bottom, bottomPadding)
+            .toolbarBackground(Theme.tabBar, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .font(Theme.text(16))
+    }
+}
+
+private struct FeaturePanelModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: 1)
+            )
+    }
+}
+
+extension View {
+    func featureList(bottomPadding: CGFloat = 96) -> some View {
+        modifier(FeatureListModifier(bottomPadding: bottomPadding))
+    }
+
+    func featurePanel() -> some View {
+        modifier(FeaturePanelModifier())
+    }
+}
+
+struct FeatureBackground: View {
+    var body: some View {
+        Theme.backgroundTop.ignoresSafeArea()
+    }
+}
+
+struct FeatureTabControl<Value: Hashable>: View {
+    let options: [(value: Value, title: String)]
+    @Binding var selection: Value
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                Button { selection = option.value } label: {
+                    VStack(spacing: 0) {
+                        Text(option.title)
+                            .font(Theme.text(14, selection == option.value ? .semibold : .regular))
+                            .foregroundStyle(selection == option.value
+                                             ? Theme.textPrimary : Theme.textSecondary)
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                        Rectangle()
+                            .fill(selection == option.value ? Theme.gold : Color.clear)
+                            .frame(height: 2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == option.value ? .isSelected : [])
+            }
+        }
+        .background(Theme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+        }
+    }
+}
+
 // MARK: - Controls
 
 /// The dashboard's day stepper, generalised: a hairline-bordered capsule of

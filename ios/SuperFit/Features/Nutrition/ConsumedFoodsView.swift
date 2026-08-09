@@ -42,7 +42,7 @@ struct ConsumedFoodsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 if dayLogs.isEmpty {
                     emptyState
                 } else {
@@ -84,10 +84,7 @@ struct ConsumedFoodsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private func mealCard(_ slot: MealSlot, _ entries: [NutritionLog]) -> some View {
@@ -125,10 +122,7 @@ struct ConsumedFoodsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var emptyState: some View {

@@ -206,7 +206,7 @@ struct WeightView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
             .settingsToolbar()
             .confirmationDialog("Weigh-in", isPresented: Binding(
                 get: { options != nil },

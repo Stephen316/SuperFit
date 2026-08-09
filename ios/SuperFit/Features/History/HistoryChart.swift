@@ -94,10 +94,7 @@ struct HistoryChartCard<Content: ChartContent>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var changeTint: Color {

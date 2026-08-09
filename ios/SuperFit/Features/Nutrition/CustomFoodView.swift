@@ -36,10 +36,10 @@ struct CustomFoodView: View {
                     TextField("Brand (optional)", text: $brand)
                 }
                 Section {
-                    Picker("Values are", selection: $basis) {
-                        ForEach(Basis.allCases) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+                    FeatureTabControl(
+                        options: Basis.allCases.map { ($0, $0.label) },
+                        selection: $basis)
+                        .accessibilityLabel("Nutrition label basis")
                     if basis == .perServing {
                         LabeledContent("Serving size") {
                             NumberField(title: "Serving size", unit: "g", value: $servingGrams)
@@ -73,7 +73,7 @@ struct CustomFoodView: View {
             .navigationTitle("Custom food")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }

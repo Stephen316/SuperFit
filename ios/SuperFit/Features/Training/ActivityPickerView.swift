@@ -54,7 +54,7 @@ struct ActivityPickerView: View {
             .navigationTitle("New workout")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
@@ -232,7 +232,7 @@ private struct WorkoutTemplateEditorView: View {
             .navigationTitle("Edit saved workout")
             .navigationBarTitleDisplayMode(.inline)
             .themedChrome()
-            .themedList(bottomPadding: 24)
+            .featureList(bottomPadding: 24)
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -360,6 +360,6 @@ struct ActivityStartOptionsView: View {
         .navigationTitle(activity.displayName)
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
-        .themedList()
+        .featureList()
     }
 }

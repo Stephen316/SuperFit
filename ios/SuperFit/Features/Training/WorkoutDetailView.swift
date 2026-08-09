@@ -35,7 +35,7 @@ struct WorkoutDetailView: View {
             .navigationTitle(workout.activity.displayName)
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()

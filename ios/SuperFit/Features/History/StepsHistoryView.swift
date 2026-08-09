@@ -27,10 +27,10 @@ struct StepsHistoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
                     VStack(spacing: 14) {
-                        ThemeSegmentedControl(
+                        FeatureTabControl(
                             options: HistoryRange.allCases.map { ($0, $0.label) },
                             selection: $range)
 
@@ -68,10 +68,7 @@ struct StepsHistoryView: View {
             stat("Total", all.isEmpty ? "—" : compact(total))
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     /// Step totals run to six figures over a quarter, which doesn't fit the

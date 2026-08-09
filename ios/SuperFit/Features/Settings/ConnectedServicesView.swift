@@ -107,7 +107,7 @@ struct ConnectedServicesView: View {
         .navigationTitle("Connected services")
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
-        .themedList(bottomPadding: 24)
+        .featureList(bottomPadding: 24)
         .keyboardDoneButton()
         .task {
             await refresh()

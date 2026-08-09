@@ -382,7 +382,7 @@ struct TrainingView: View {
             .navigationTitle("Train")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .settingsToolbar()
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)
@@ -428,7 +428,7 @@ struct TrainingView: View {
                 .navigationTitle("Muscles trained")
                 .navigationBarTitleDisplayMode(.inline)
                 .themedChrome()
-                .themedList(bottomPadding: 24)
+                .featureList(bottomPadding: 24)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { showingMuscleBreakdown = false }

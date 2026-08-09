@@ -35,7 +35,7 @@ struct RestingHRHistoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
                     VStack(spacing: 14) {
                         summaryCard
@@ -73,10 +73,7 @@ struct RestingHRHistoryView: View {
             stat("Change", change.map { String(format: "%+.1f", $0) } ?? "—")
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
@@ -134,9 +131,6 @@ struct RestingHRHistoryView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 }

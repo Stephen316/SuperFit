@@ -66,7 +66,7 @@ struct SleepView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
             .settingsToolbar()
         }
     }

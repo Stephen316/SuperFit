@@ -14,9 +14,9 @@ struct WatchSetupHelpView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
-                    VStack(spacing: 14) {
+                    LazyVStack(spacing: 14) {
                         intro
                         appleWatchCard
                         garminCard
@@ -115,14 +115,7 @@ struct WatchSetupHelpView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .fill(Theme.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 }
 

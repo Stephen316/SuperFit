@@ -76,7 +76,7 @@ struct CloudAccountSection: View {
 
     private var signedOut: some View {
         Section {
-            ThemeSegmentedControl(
+            FeatureTabControl(
                 options: Mode.allCases.map { ($0, $0.rawValue) },
                 selection: $mode)
                 .accessibilityLabel("Cloud backup account")

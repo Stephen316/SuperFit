@@ -35,17 +35,15 @@ struct ExerciseProgressView: View {
     var body: some View {
         let data = series
         return ZStack {
-            Theme.background
+            FeatureBackground()
             ScrollView {
                 // Lazy so only the charts scrolled into view are built — a heavy
                 // lifter with dozens of exercises pays for what's on screen, not
                 // for the whole history at once.
                 LazyVStack(spacing: 14) {
-                    Picker("Range", selection: $range) {
-                        ForEach(LiftRange.allCases) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .tint(Theme.gold)
+                    FeatureTabControl(
+                        options: LiftRange.allCases.map { ($0, $0.label) },
+                        selection: $range)
 
                     if data.isEmpty {
                         emptyState

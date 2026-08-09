@@ -30,8 +30,8 @@ struct LiveCardioView: View {
 
     var body: some View {
         ZStack {
-            Theme.background
-            VStack(spacing: 28) {
+            FeatureBackground()
+            VStack(spacing: 24) {
                 header
                 Spacer()
                 elapsedDisplay
@@ -40,7 +40,7 @@ struct LiveCardioView: View {
                 controls
             }
             .padding(.horizontal, 24)
-            .padding(.vertical, 40)
+            .padding(.vertical, 24)
         }
         .onAppear {
             if tracksDistance { location.start() }
@@ -129,8 +129,11 @@ struct LiveCardioView: View {
                 Text("Discard")
                     .font(Theme.font(16, .medium))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Capsule().stroke(Theme.hairline, lineWidth: 1))
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Theme.hairline, lineWidth: 1)
+                    )
             }
             .foregroundStyle(Theme.textSecondary)
 
@@ -140,8 +143,11 @@ struct LiveCardioView: View {
                 Text(isPaused ? "Resume" : "Pause")
                     .font(Theme.font(16, .medium))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Capsule().stroke(Theme.hairline, lineWidth: 1))
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Theme.hairline, lineWidth: 1)
+                    )
             }
             .foregroundStyle(Theme.textPrimary)
 
@@ -151,8 +157,11 @@ struct LiveCardioView: View {
                 Text("Finish")
                     .font(Theme.font(16, .semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Capsule().fill(Theme.gold))
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Theme.gold)
+                    )
             }
             .foregroundStyle(.black)
         }

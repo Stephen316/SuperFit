@@ -18,7 +18,7 @@ struct FoodSearchView: View {
                 .navigationTitle("Add to \(meal.rawValue.capitalized)")
                 .themedChrome()
                 .navigationBarTitleDisplayMode(.inline)
-                .themedList()
+                .featureList()
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel") { dismiss() }
@@ -119,7 +119,7 @@ struct LogFoodView: View {
             .navigationTitle("Log food")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .task { await loadPortions() }
             .alert("Already taken today", isPresented: $confirmingDuplicate) {

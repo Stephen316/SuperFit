@@ -62,13 +62,13 @@ struct NumberEntrySheet: View {
                 Button("Cancel") { dismiss() }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: Theme.controlRadius)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Theme.wash))
                     .foregroundStyle(Theme.textSecondary)
                 Button("Set", action: commit)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: Theme.controlRadius)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Theme.gold))
                     .foregroundStyle(.black)
             }
@@ -78,8 +78,8 @@ struct NumberEntrySheet: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius,
-                                   topTrailingRadius: Theme.cardRadius)
+            UnevenRoundedRectangle(topLeadingRadius: 12,
+                                   topTrailingRadius: 12)
                 .fill(Theme.surface))
     }
 

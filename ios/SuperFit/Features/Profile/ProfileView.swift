@@ -68,7 +68,7 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList(bottomPadding: 24)
+            .featureList(bottomPadding: 24)
             .keyboardDoneButton()
         } else {
             ProgressView()

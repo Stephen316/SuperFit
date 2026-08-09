@@ -36,7 +36,10 @@ struct SessionRPEPrompt: View {
                     .font(Theme.font(16, .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Capsule().fill(Theme.gold))
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Theme.gold)
+                    )
                     .foregroundStyle(.black)
             }
             .padding(24)

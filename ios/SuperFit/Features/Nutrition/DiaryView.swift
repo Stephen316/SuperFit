@@ -124,7 +124,7 @@ struct DiaryView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
             .settingsToolbar()
             .sheet(item: $addingTo, onDismiss: loadDiaryData) { slot in
                 FoodSearchView(day: day, meal: slot)

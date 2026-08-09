@@ -47,7 +47,7 @@ struct SupplementsView: View {
             .navigationTitle("Supplements")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
@@ -191,7 +191,7 @@ struct SupplementPickerView: View {
             .navigationTitle(selected?.name ?? "Add supplement")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(selected == nil ? "Cancel" : "Back") {
@@ -392,7 +392,7 @@ struct CustomSupplementView: View {
             .navigationTitle("Custom supplement")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }

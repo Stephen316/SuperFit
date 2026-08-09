@@ -51,9 +51,9 @@ struct HistoryView: View {
 
     var body: some View {
         ZStack {
-            Theme.background
+            FeatureBackground()
             ScrollView {
-                VStack(spacing: 14) {
+                LazyVStack(spacing: 14) {
                     rangePicker
                     energyCard
                     weightCard
@@ -78,7 +78,7 @@ struct HistoryView: View {
     }
 
     private var rangePicker: some View {
-        ThemeSegmentedControl(
+        FeatureTabControl(
             options: HistoryRange.allCases.map { ($0, $0.label) },
             selection: $range)
     }
@@ -252,10 +252,7 @@ struct HistoryView: View {
         .tint(Theme.gold)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var ratePoints: [HistoryPoint] {

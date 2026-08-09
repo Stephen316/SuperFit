@@ -174,7 +174,7 @@ struct NutritionView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
             .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
             .task { loadNutritionData() }
             .onChange(of: day) { _, _ in loadNutritionData() }

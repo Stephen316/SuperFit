@@ -32,7 +32,7 @@ struct AccountView: View {
         .navigationTitle("Account & data")
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
-        .themedList(bottomPadding: 24)
+        .featureList(bottomPadding: 24)
         .environment(\.defaultMinListRowHeight, 34)
         .listSectionSpacing(12)
         .task {

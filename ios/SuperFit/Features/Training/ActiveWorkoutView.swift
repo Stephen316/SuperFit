@@ -59,7 +59,7 @@ struct ActiveWorkoutView: View {
             .navigationTitle(session.templateName ?? "Workout")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -450,7 +450,7 @@ struct ExercisePickerView: View {
             .navigationTitle("Add exercise")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
                 .withoutGlassBackground()
@@ -545,7 +545,7 @@ struct CustomExerciseView: View {
             .navigationTitle("New exercise")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
