@@ -12,6 +12,15 @@ import SwiftUI
 /// that cannot work.
 enum SupabaseConfig {
 
+    /// Opt into the auth behavior that will become the next major SDK default.
+    /// SuperFit does not treat the emitted initial session as authentication —
+    /// `restore()` awaits `auth.session`, which refreshes an expired token or
+    /// throws before changing app state — so emitting the cached value cannot
+    /// admit a user with an expired session.
+    static let clientOptions = SupabaseClientOptions(
+        auth: .init(emitLocalSessionAsInitialSession: true)
+    )
+
     /// Built from a bare host, because xcconfig cannot hold a URL.
     ///
     /// `//` opens a comment in an xcconfig file, so `SUPABASE_URL =
@@ -140,7 +149,11 @@ final class SupabaseAccount {
 
     init() {
         if let url = SupabaseConfig.url, let key = SupabaseConfig.anonKey {
-            client = SupabaseClient(supabaseURL: url, supabaseKey: key)
+            client = SupabaseClient(
+                supabaseURL: url,
+                supabaseKey: key,
+                options: SupabaseConfig.clientOptions
+            )
         } else {
             client = nil
         }
