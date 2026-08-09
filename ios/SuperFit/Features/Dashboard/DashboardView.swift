@@ -30,6 +30,7 @@ struct DashboardView: View {
     @State private var nutrition: [NutritionLog] = []
     @State private var estimates: [MetabolicEstimateRecord] = []
     @State private var recoveries: [RecoveryScoreRecord] = []
+    @State private var strains: [StrainRecord] = []
     @State private var energy: [DailyEnergy] = []
     @State private var sleep: [SleepData] = []
     @State private var vitals: [DailyVitals] = []
@@ -100,6 +101,35 @@ struct DashboardView: View {
         let d = bounds
         return recoveries.first { d.contains($0.date) }
     }
+    private var todayStrain: StrainRecord? {
+        let d = bounds
+        return strains.first { d.contains($0.date) }
+    }
+
+    /// Live energy level from everything already loaded plus the clock. Computed
+    /// in the view rather than stored: a battery drains through the day, so a
+    /// value frozen at the last sync would be stale by the afternoon.
+    private var energyLevel: EnergyEngine.Result? {
+        let frac: Double = {
+            guard isToday else { return 1 } // a past day is "spent"
+            let cal = Calendar.current
+            let wake = lastSleep?.wakeTime
+                ?? cal.date(bySettingHour: 7, minute: 0, second: 0, of: .now)
+                ?? .now
+            return min(max(Date.now.timeIntervalSince(wake) / (16 * 3600), 0), 1)
+        }()
+        let recovery = (todayRecovery?.dataCompleteness ?? 0) > 0 ? todayRecovery?.score : nil
+        let strain = (todayStrain?.dataCompleteness ?? 0) > 0 ? todayStrain?.strain : nil
+        let inputs = EnergyEngine.Inputs(
+            recoveryScore: recovery,
+            strain: strain,
+            activeEnergyKcal: todayEnergy.map(\.activeEnergyKcal),
+            steps: todayEnergy.map(\.steps),
+            intakeKcal: dayTotals.kcal > 0 ? dayTotals.kcal : nil,
+            targetKcal: macros?.kcal,
+            dayFraction: frac)
+        return EnergyEngine().evaluate(inputs)
+    }
     private var todayEnergy: DailyEnergy? {
         let d = bounds
         return energy.first { d.contains($0.date) }
@@ -166,12 +196,13 @@ struct DashboardView: View {
                             recoverySection
                             burnedCard
                             consumedCard
-                            activitySleepCard
+                            energyCard
                             macrosCard
                             stepsCard
                             nextMealCard
                             weightCard
                             restingHRCard
+                            activitySleepCard
                         }
                         .padding(.horizontal, 20)      // dashboard-content, pad 20
                         // bottom-spacer is 40 in the frame; the tab bar's own 72
@@ -266,6 +297,11 @@ struct DashboardView: View {
             predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
             sortBy: [SortDescriptor(\.date, order: .reverse)])
         recoveries = (try? context.fetch(recoveryQuery)) ?? []
+
+        let strainQuery = FetchDescriptor<StrainRecord>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        strains = (try? context.fetch(strainQuery)) ?? []
 
         let energyQuery = FetchDescriptor<DailyEnergy>(
             predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
@@ -449,48 +485,91 @@ struct DashboardView: View {
 
     // MARK: - Cards
 
-    /// recovery-section: 110pt gauge container, 12pt gap, then the two labels 2 apart.
+    /// recovery-section: three gauges across — Recovery (how ready), Strain (how
+    /// hard today was) and Sleep (efficiency), the triad Bevel and WHOOP show.
     ///
-    /// The ring is the Health-backed element on this screen: no sleep or heart
-    /// data means no score, and it says so rather than drawing a zero.
+    /// All are Health-backed: no sleep or heart data means no recovery score, no
+    /// heart-rate-carrying workout means no strain, and unknown time-in-bed means
+    /// no efficiency — each says so rather than drawing a zero. The setup-help link
+    /// appears only when none has data and no watch is connected, so a set-up user
+    /// on a plain rest day isn't nagged.
     private var recoverySection: some View {
         let recovery = todayRecovery
-        let hasData = (recovery?.dataCompleteness ?? 0) > 0
-        let score = recovery?.score ?? 0
-        let needsWatch = !hasData && !watchConnected
-        return VStack(spacing: 12) {
-            ZStack {
-                // 94pt frame with a 6pt stroke gives a 100pt outer and 88pt inner
-                // ring — the frame's innerRadius of 0.88.
-                Circle()
-                    .stroke(Theme.wash, lineWidth: 6)
-                    .frame(width: 94, height: 94)
-                if hasData {
-                    Circle()
-                        .trim(from: 0, to: score / 100)
-                        .stroke(Theme.gold, style: .init(lineWidth: 6, lineCap: .butt))
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 94, height: 94)
-                }
-                Text(hasData ? "\(Int(score))" : "–")
-                    .font(Theme.text(32, .heavy))
-                    .foregroundStyle(Theme.textPrimary)
-            }
-            .frame(width: 110, height: 110)
-            VStack(spacing: 2) {
-                Text("Recovery")
-                    .font(Theme.text(18, .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(hasData ? (recovery?.recommendationRaw ?? "—") : "No data yet")
-                    .font(Theme.text(13, .medium))
-                    .foregroundStyle(hasData ? Theme.gold : Theme.textSecondary)
+        let recoveryHasData = (recovery?.dataCompleteness ?? 0) > 0
+        let strain = todayStrain
+        let strainHasData = (strain?.dataCompleteness ?? 0) > 0
+        let sleepEfficiency = lastSleep?.efficiency
+        let sleepHasData = sleepEfficiency != nil
+        let sleepPercent = ((sleepEfficiency ?? 0) * 100).rounded()
+        let needsWatch = !recoveryHasData && !strainHasData && !sleepHasData && !watchConnected
+        return VStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                metricGauge(
+                    title: "Recovery",
+                    value: recovery?.score ?? 0,
+                    hasData: recoveryHasData,
+                    subtitle: recoveryHasData ? (recovery?.recommendationRaw ?? "—") : "No data yet",
+                    tint: Theme.gold)
+                metricGauge(
+                    title: "Strain",
+                    value: strain?.strain ?? 0,
+                    hasData: strainHasData,
+                    subtitle: strainHasData ? strainSubtitle(strain) : "No data yet",
+                    tint: Theme.strain)
+                metricGauge(
+                    title: "Sleep",
+                    value: sleepPercent,
+                    hasData: sleepHasData,
+                    subtitle: sleepHasData
+                        ? SleepEfficiencyBand(roundedPercent: sleepPercent).rawValue
+                        : "No data yet",
+                    tint: Theme.sleep)
             }
             if needsWatch {
                 Button { showingWatchHelp = true } label: { WatchHelpLabel() }
                     .buttonStyle(.plain)
-                    .padding(.top, 2)
             }
         }
+    }
+
+    private func strainSubtitle(_ strain: StrainRecord?) -> String {
+        let band = strain?.bandRaw ?? ""
+        return band.isEmpty ? "—" : band
+    }
+
+    /// One ring gauge — a 0…100 value over a wash track, a title and a subtitle.
+    /// Shared by the paired Recovery and Strain gauges so they read as one unit.
+    private func metricGauge(title: String, value: Double, hasData: Bool,
+                             subtitle: String, tint: Color) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .stroke(Theme.wash, lineWidth: 5)
+                    .frame(width: 76, height: 76)
+                if hasData {
+                    Circle()
+                        .trim(from: 0, to: min(max(value / 100, 0), 1))
+                        .stroke(tint, style: .init(lineWidth: 5, lineCap: .butt))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 76, height: 76)
+                }
+                Text(hasData ? "\(Int(value))" : "–")
+                    .font(Theme.text(24, .heavy))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .frame(width: 84, height: 84)
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(Theme.text(15, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(subtitle)
+                    .font(Theme.text(11, .medium))
+                    .foregroundStyle(hasData ? tint : Theme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// calories-burned-card: pad 20, gap 8, value and suffix on one baseline.
@@ -529,6 +608,46 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    /// energy-card: text on the left, a charge-coloured battery on the right.
+    /// The level reads from recovery, exertion, the clock and fuelling — and from
+    /// phone steps and the diary alone when there's no watch, so it's rarely blank.
+    private var energyCard: some View {
+        let energy = energyLevel
+        let hasData = energy != nil
+        let level = energy?.level ?? 0
+        let colour = energyColour(level)
+        return ThemeCard(padding: 20) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    cardLabel("Energy")
+                    if hasData {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("\(Int(level))%")
+                                .font(Theme.text(28, .bold))
+                                .foregroundStyle(Theme.textPrimary)
+                            Text(energy?.band.rawValue ?? "")
+                                .font(Theme.text(14, .medium))
+                                .foregroundStyle(Theme.gold)
+                        }
+                    } else {
+                        Text("No data yet")
+                            .font(Theme.text(16))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                Spacer(minLength: 12)
+                BatteryView(fraction: level / 100, hasData: hasData, tint: colour)
+            }
+        }
+    }
+
+    /// Red when drained through amber to green when full — a continuous hue ramp,
+    /// so the colour tracks the charge rather than snapping between bands.
+    private func energyColour(_ level: Double) -> Color {
+        let t = min(max(level / 100, 0), 1)
+        return Color(hue: 0.33 * t, saturation: 0.72, brightness: 0.88)
     }
 
     /// activity-sleep-card: 18 vertical padding, a 44pt hairline between columns.

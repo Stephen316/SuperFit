@@ -10,6 +10,7 @@ enum AppSchema {
         WorkoutTemplate.self, WorkoutTemplateItem.self,
         SleepData.self, DailyVitals.self,
         RecoveryScoreRecord.self, MetabolicEstimateRecord.self,
+        StrainRecord.self,
         CyclicalPatternRecord.self,
         Supplement.self, SupplementEntry.self
     ]

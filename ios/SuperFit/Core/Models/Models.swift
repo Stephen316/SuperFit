@@ -675,6 +675,25 @@ final class RecoveryScoreRecord {
     }
 }
 
+/// Daily cardiovascular strain, the exertion sibling of the recovery score.
+/// Derived from workouts by `StrainEngine` and rebuilt on each aggregation pass,
+/// so like `RecoveryScoreRecord` it is not archived — a restore recomputes it.
+@Model
+final class StrainRecord {
+    var date: Date = Date()
+    var strain: Double = 0            // 0…100
+    var rawTrimp: Double = 0
+    var bandRaw: String = ""
+    /// Fraction of the day's workouts that carried heart rate. 0 means no
+    /// heart-rate-carrying workout, so the strain is "no data", not a real zero.
+    var dataCompleteness: Double = 0
+
+    init(date: Date, strain: Double, rawTrimp: Double, bandRaw: String, dataCompleteness: Double) {
+        self.date = date; self.strain = strain; self.rawTrimp = rawTrimp
+        self.bandRaw = bandRaw; self.dataCompleteness = dataCompleteness
+    }
+}
+
 /// Internal flag: a recurring multi-week rhythm found in a recovery marker.
 /// Stays on-device like everything else; it exists so the baseline can be
 /// levelled, and so the detection is inspectable rather than invisible magic.
