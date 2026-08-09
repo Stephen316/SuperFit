@@ -6,6 +6,7 @@
   "description": "Garmin Health API backend for SuperFit — supplies the HRV and staged sleep that Garmin Connect withholds from Apple Health.",
   "scripts": {
     "dev": "vercel dev",
+    "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "deploy": "vercel --prod"
   },

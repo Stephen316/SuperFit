@@ -12,6 +12,8 @@ export const config = {
   /** Guards POST /garmin/webhook; Garmin does not sign pushes. */
   webhookSecret: env('WEBHOOK_SECRET'),
   devSeedEnabled: env('DEV_SEED_ENABLED') === 'true',
+  /** A separate credential for the deliberately non-production seed route. */
+  devSeedSecret: env('DEV_SEED_SECRET'),
   garmin: {
     clientId: env('GARMIN_CLIENT_ID'),
     clientSecret: env('GARMIN_CLIENT_SECRET'),

@@ -162,39 +162,6 @@ struct ThemeCard<Content: View>: View {
     }
 }
 
-/// Label above a value, centred — the card layout used throughout the design.
-struct StatBlock: View {
-    let title: String
-    let value: String
-    var suffix: String?
-    var caption: String?
-    var valueSize: CGFloat = 34
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Text(title)
-                .font(Theme.font(15))
-                .foregroundStyle(Theme.textPrimary)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(Theme.font(valueSize))
-                    .foregroundStyle(Theme.textPrimary)
-                if let suffix {
-                    Text(suffix)
-                        .font(Theme.font(17))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-            }
-            if let caption {
-                Text(caption)
-                    .font(Theme.font(14))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
 extension View {
     /// Drops a `List`/`Form` onto the backdrop: clears the system grouped
     /// background, restyles rows as translucent surfaces, and leaves room for
@@ -207,31 +174,5 @@ extension View {
             .safeAreaPadding(.bottom, bottomPadding)
             .toolbarBackground(.hidden, for: .navigationBar)
             .font(Theme.font(16))
-    }
-}
-
-/// Applies the gradient backdrop and hides the system list/scroll chrome.
-struct ThemedScreen<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        ZStack {
-            Theme.background
-            ScrollView {
-                VStack(spacing: 14) {
-                    content
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .padding(.bottom, 120)   // clears the floating tab bar
-            }
-            .scrollIndicators(.hidden)
-        }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        // Was `.hidden`, which on iOS 26 leaves the bar as Liquid Glass floating
-        // over the gradient. Opaque and themed, matching every other screen.
-        .themedChrome()
     }
 }

@@ -47,6 +47,7 @@ struct DashboardView: View {
     @State private var showingRestingHR = false
     @State private var showingSettings = false
     @State private var showingWatchHelp = false
+    @State private var syncFailure: String?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -236,6 +237,13 @@ struct DashboardView: View {
             .sheet(item: $addingTo, onDismiss: loadDashboardData) { slot in
                 FoodSearchView(day: day, meal: slot)
             }
+            .alert("Refresh incomplete", isPresented: Binding(
+                get: { syncFailure != nil },
+                set: { if !$0 { syncFailure = nil } })) {
+                Button("OK", role: .cancel) { syncFailure = nil }
+            } message: {
+                Text(syncFailure ?? "")
+            }
             .task {
                 // Repair legacy derived values before the first read, without
                 // waiting for Health authorization or a network-backed source.
@@ -256,6 +264,7 @@ struct DashboardView: View {
         defer { syncing = false }
         let aggregation = AggregationService(context: context)
         let changes = await SyncCoordinator(context: context).syncAll()
+        syncFailure = changes.failureMessage
         aggregation.runAll(refreshWeightTrend: changes.weightTrendNeedsRefresh)
         loadDashboardData()
     }
@@ -264,94 +273,20 @@ struct DashboardView: View {
     /// navigation: an old selected day is OR'd into the one-year streak window,
     /// and the last weight before that day is fetched separately for carry-forward.
     private func loadDashboardData() {
-        let cal = Calendar.current
-        let selected = DayBounds(day, calendar: cal)
-        let dayStart = selected.start
-        let dayEnd = selected.end
-        let streakStart = cal.date(byAdding: .day, value: -365,
-                                   to: cal.startOfDay(for: .now)) ?? dayStart
-
-        let logQuery = FetchDescriptor<NutritionLog>(predicate: #Predicate {
-            $0.date >= streakStart || ($0.date >= dayStart && $0.date < dayEnd)
-        })
-        nutrition = (try? context.fetch(logQuery)) ?? []
-
-        let metricQuery = FetchDescriptor<BodyMetrics>(
-            predicate: #Predicate {
-                $0.date >= streakStart || ($0.date >= dayStart && $0.date < dayEnd)
-            },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        var loadedMetrics = (try? context.fetch(metricQuery)) ?? []
-
-        func appendMetric(_ row: BodyMetrics?) {
-            guard let row, !loadedMetrics.contains(where: { $0 === row }) else { return }
-            loadedMetrics.append(row)
+        do {
+            let loaded = try DashboardDataLoader.load(context: context, day: day)
+            metrics = loaded.metrics
+            nutrition = loaded.nutrition
+            estimates = loaded.estimates
+            recoveries = loaded.recoveries
+            strains = loaded.strains
+            energy = loaded.energy
+            sleep = loaded.sleep
+            vitals = loaded.vitals
+            workouts = loaded.workouts
+        } catch {
+            syncFailure = "Loading dashboard: \(error.localizedDescription)"
         }
-        var latestQuery = FetchDescriptor<BodyMetrics>(
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        latestQuery.fetchLimit = 1
-        appendMetric((try? context.fetch(latestQuery))?.first)
-
-        var carriedQuery = FetchDescriptor<BodyMetrics>(
-            predicate: #Predicate { $0.date < dayEnd },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        carriedQuery.fetchLimit = 1
-        appendMetric((try? context.fetch(carriedQuery))?.first)
-        metrics = loadedMetrics.sorted { $0.date > $1.date }
-
-        var estimateQuery = FetchDescriptor<MetabolicEstimateRecord>(
-            predicate: #Predicate { $0.windowDays == 30 },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        estimateQuery.fetchLimit = 1
-        estimates = (try? context.fetch(estimateQuery)) ?? []
-
-        let recoveryQuery = FetchDescriptor<RecoveryScoreRecord>(
-            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        recoveries = (try? context.fetch(recoveryQuery)) ?? []
-
-        let strainQuery = FetchDescriptor<StrainRecord>(
-            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        strains = (try? context.fetch(strainQuery)) ?? []
-
-        let energyQuery = FetchDescriptor<DailyEnergy>(
-            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        energy = (try? context.fetch(energyQuery)) ?? []
-
-        let sleepQuery = FetchDescriptor<SleepData>(
-            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        var loadedSleep = (try? context.fetch(sleepQuery)) ?? []
-        var watchSleepQuery = FetchDescriptor<SleepData>(
-            predicate: #Predicate { $0.asleepMinutes > 0 },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        watchSleepQuery.fetchLimit = 1
-        if let proof = (try? context.fetch(watchSleepQuery))?.first,
-           !loadedSleep.contains(where: { $0 === proof }) {
-            loadedSleep.append(proof)
-        }
-        sleep = loadedSleep
-
-        let vitalQuery = FetchDescriptor<DailyVitals>(
-            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        var loadedVitals = (try? context.fetch(vitalQuery)) ?? []
-        var watchVitalQuery = FetchDescriptor<DailyVitals>(
-            predicate: #Predicate { $0.restingHR != nil || $0.hrvSDNN != nil },
-            sortBy: [SortDescriptor(\.date, order: .reverse)])
-        watchVitalQuery.fetchLimit = 1
-        if let proof = (try? context.fetch(watchVitalQuery))?.first,
-           !loadedVitals.contains(where: { $0 === proof }) {
-            loadedVitals.append(proof)
-        }
-        vitals = loadedVitals
-
-        let workoutQuery = FetchDescriptor<WorkoutRecord>(
-            predicate: #Predicate { $0.startedAt >= dayStart && $0.startedAt < dayEnd },
-            sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        workouts = (try? context.fetch(workoutQuery)) ?? []
     }
 
     // MARK: - Header

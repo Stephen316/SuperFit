@@ -37,6 +37,7 @@ export interface Store {
 }
 
 const PENDING_TTL_S = 600;
+const LEGACY_SCAN_PAGE_SIZE = 100;
 
 function inDailyRange(day: string, start: Date, end: Date): boolean {
   return day >= ymd(start) && day <= ymd(end);
@@ -112,10 +113,13 @@ class InMemoryStore implements Store {
 }
 
 /**
- * Upstash Redis (HTTP) store — the serverless-friendly default. Daily records
- * and workouts live in per-user hashes so a webhook can upsert one field and a
- * range read pulls the hash and filters in memory. `@upstash/redis` is imported
- * lazily so the in-memory path has no dependency on it.
+ * Upstash Redis (HTTP) store — the serverless-friendly default. Records live in
+ * individual keys with sorted-set date indexes, so a range read scales with the
+ * requested interval instead of the user's lifetime history.
+ *
+ * Earlier releases used per-user hashes. The first operation for each data type
+ * migrates that hash idempotently, then removes it. A failed partial migration is
+ * safe to retry because the destination keys and index members are stable.
  */
 class UpstashStore implements Store {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,6 +131,89 @@ class UpstashStore implements Store {
       this.clientPromise = import('@upstash/redis').then((m) => m.Redis.fromEnv());
     }
     return this.clientPromise;
+  }
+
+  private dailyIndex(userId: string) {
+    return `daily-index:${userId}`;
+  }
+  private dailyItem(userId: string, day: string) {
+    return `daily-item:${userId}:${day}`;
+  }
+  private workoutIndex(userId: string) {
+    return `wo-index:${userId}`;
+  }
+  private workoutItem(userId: string, id: string) {
+    return `wo-item:${userId}:${id}`;
+  }
+  private migrationMarker(kind: 'daily' | 'wo', userId: string) {
+    return `migrated:${kind}:${userId}`;
+  }
+
+  private async ensureDailyMigrated(userId: string): Promise<void> {
+    const r = await this.client();
+    const marker = this.migrationMarker('daily', userId);
+    if (await r.get(marker)) return;
+
+    const legacyKey = `daily:${userId}`;
+    let cursor = '0';
+    do {
+      const [nextCursor, entries] = await r.hscan(legacyKey, cursor, {
+        count: LEGACY_SCAN_PAGE_SIZE,
+      }) as [string, unknown[]];
+      if (entries.length) {
+        const pipeline = r.pipeline();
+        for (let index = 0; index + 1 < entries.length; index += 2) {
+          const day = String(entries[index]);
+          const value = entries[index + 1];
+          const record = typeof value === 'string' ? value : JSON.stringify(value);
+          pipeline.set(this.dailyItem(userId, day), record);
+          pipeline.zadd(this.dailyIndex(userId), { score: dayScore(day), member: day });
+        }
+        await pipeline.exec();
+      }
+      cursor = nextCursor;
+    } while (cursor !== '0');
+
+    const completion = r.pipeline();
+    completion.set(marker, '1');
+    completion.del(legacyKey);
+    await completion.exec();
+  }
+
+  private async ensureWorkoutsMigrated(userId: string): Promise<void> {
+    const r = await this.client();
+    const marker = this.migrationMarker('wo', userId);
+    if (await r.get(marker)) return;
+
+    const legacyKey = `wo:${userId}`;
+    let cursor = '0';
+    do {
+      const [nextCursor, entries] = await r.hscan(legacyKey, cursor, {
+        count: LEGACY_SCAN_PAGE_SIZE,
+      }) as [string, unknown[]];
+      if (entries.length) {
+        const pipeline = r.pipeline();
+        for (let index = 0; index + 1 < entries.length; index += 2) {
+          const id = String(entries[index]);
+          const value = entries[index + 1];
+          const workout = typeof value === 'string'
+            ? JSON.parse(value) as WorkoutDTO
+            : value as WorkoutDTO;
+          pipeline.set(this.workoutItem(userId, id), JSON.stringify(workout));
+          pipeline.zadd(this.workoutIndex(userId), {
+            score: new Date(workout.startTime).getTime(),
+            member: id,
+          });
+        }
+        await pipeline.exec();
+      }
+      cursor = nextCursor;
+    } while (cursor !== '0');
+
+    const completion = r.pipeline();
+    completion.set(marker, '1');
+    completion.del(legacyKey);
+    await completion.exec();
   }
 
   async putPending(state: string, p: Pending) {
@@ -162,34 +249,66 @@ class UpstashStore implements Store {
     return (await r.get(`user:${garminUserId}`)) as string | null;
   }
   async getDaily(userId: string, day: string) {
+    await this.ensureDailyMigrated(userId);
     const r = await this.client();
-    const raw = await r.hget(`daily:${userId}`, day);
+    const raw = await r.get(this.dailyItem(userId, day));
     return raw ? (typeof raw === 'string' ? (JSON.parse(raw) as RecoveryDTO) : (raw as RecoveryDTO)) : null;
   }
   async putDaily(userId: string, rec: RecoveryDTO) {
+    await this.ensureDailyMigrated(userId);
     const r = await this.client();
-    await r.hset(`daily:${userId}`, { [rec.date]: JSON.stringify(rec) });
+    const pipeline = r.pipeline();
+    pipeline.set(this.dailyItem(userId, rec.date), JSON.stringify(rec));
+    pipeline.zadd(this.dailyIndex(userId), { score: dayScore(rec.date), member: rec.date });
+    await pipeline.exec();
   }
   async getDailyRange(userId: string, start: Date, end: Date) {
+    await this.ensureDailyMigrated(userId);
     const r = await this.client();
-    const all = ((await r.hgetall(`daily:${userId}`)) ?? {}) as Record<string, unknown>;
-    return Object.values(all)
-      .map((v) => (typeof v === 'string' ? (JSON.parse(v) as RecoveryDTO) : (v as RecoveryDTO)))
-      .filter((rec) => inDailyRange(rec.date, start, end))
+    const days = await r.zrange(this.dailyIndex(userId), dayScore(ymd(start)), dayScore(ymd(end)), {
+      byScore: true,
+    }) as string[];
+    if (!days.length) return [];
+    const values = await r.mget(...days.map((day) => this.dailyItem(userId, day))) as unknown[];
+    return values
+      .filter((value): value is NonNullable<typeof value> => value != null)
+      .map((value) => typeof value === 'string'
+        ? JSON.parse(value) as RecoveryDTO
+        : value as RecoveryDTO)
       .sort((a, b) => a.date.localeCompare(b.date));
   }
   async putWorkout(userId: string, w: WorkoutDTO) {
+    await this.ensureWorkoutsMigrated(userId);
     const r = await this.client();
-    await r.hset(`wo:${userId}`, { [w.id]: JSON.stringify(w) });
+    const pipeline = r.pipeline();
+    pipeline.set(this.workoutItem(userId, w.id), JSON.stringify(w));
+    pipeline.zadd(this.workoutIndex(userId), {
+      score: new Date(w.startTime).getTime(),
+      member: w.id,
+    });
+    await pipeline.exec();
   }
   async getWorkoutRange(userId: string, start: Date, end: Date) {
+    await this.ensureWorkoutsMigrated(userId);
     const r = await this.client();
-    const all = ((await r.hgetall(`wo:${userId}`)) ?? {}) as Record<string, unknown>;
-    return Object.values(all)
-      .map((v) => (typeof v === 'string' ? (JSON.parse(v) as WorkoutDTO) : (v as WorkoutDTO)))
-      .filter((w) => inWorkoutRange(w, start, end))
+    const ids = await r.zrange(this.workoutIndex(userId), start.getTime(), end.getTime(), {
+      byScore: true,
+    }) as string[];
+    if (!ids.length) return [];
+    const values = await r.mget(...ids.map((id) => this.workoutItem(userId, id))) as unknown[];
+    return values
+      .filter((value): value is NonNullable<typeof value> => value != null)
+      .map((value) => typeof value === 'string'
+        ? JSON.parse(value) as WorkoutDTO
+        : value as WorkoutDTO)
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }
+}
+
+function dayScore(day: string): number {
+  const value = Date.parse(`${day}T00:00:00Z`);
+  if (!Number.isFinite(value)) throw new Error(`Invalid recovery date: ${day}`);
+  return value;
 }
 
 let cached: Store | null = null;
@@ -197,6 +316,10 @@ let cached: Store | null = null;
 /** One store per process. Upstash when configured, in-memory otherwise. */
 export function getStore(): Store {
   if (!cached) {
+    const production = process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production';
+    if (production && !process.env.UPSTASH_REDIS_REST_URL) {
+      throw new Error('UPSTASH_REDIS_REST_URL is required in production');
+    }
     cached = process.env.UPSTASH_REDIS_REST_URL ? new UpstashStore() : new InMemoryStore();
   }
   return cached;

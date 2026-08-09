@@ -20,6 +20,7 @@ struct TrainingView: View {
     @State private var leastTrainedFirst = false
     @State private var liveActivity: WorkoutActivity?
     @State private var detailWorkout: WorkoutRecord?
+    @State private var persistenceFailure: String?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     init() {
@@ -193,7 +194,7 @@ struct TrainingView: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 context.delete(session)
-                try? context.save()
+                saveChanges()
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -374,7 +375,7 @@ struct TrainingView: View {
                         .onDelete { offsets in
                             let shown = Array(displayedWorkouts.prefix(30))
                             for i in offsets { context.delete(shown[i]) }
-                            try? context.save()
+                            saveChanges()
                         }
                     }
                 }
@@ -408,8 +409,15 @@ struct TrainingView: View {
                     onStartLive: { liveActivity = $0 },
                     onImport: { sample in
                         WorkoutSyncService(context: context).apply([sample])
-                        try? context.save()
+                        saveChanges()
                     })
+            }
+            .alert("Couldn't save training data", isPresented: Binding(
+                get: { persistenceFailure != nil },
+                set: { if !$0 { persistenceFailure = nil } })) {
+                Button("OK", role: .cancel) { persistenceFailure = nil }
+            } message: {
+                Text(persistenceFailure ?? "")
             }
         }
     }
@@ -609,11 +617,19 @@ struct TrainingView: View {
     }
 
     private func start(template: WorkoutTemplate?) {
-        let repeated = template.map {
-            TrainingRecords.repeatedPlan(templateName: $0.name,
-                                         exerciseIDs: $0.orderedExerciseIDs,
-                                         sessions: repeatCandidates(for: $0))
-        } ?? []
+        let repeated: [TrainingRecords.PlannedSet]
+        do {
+            repeated = try template.map {
+                TrainingRecords.repeatedPlan(
+                    templateName: $0.name,
+                    exerciseIDs: $0.orderedExerciseIDs,
+                    sessions: try TrainingSessionRepository.repeatCandidates(for: $0,
+                                                                              context: context))
+            } ?? []
+        } catch {
+            persistenceFailure = "Loading saved workout: \(error.localizedDescription)"
+            return
+        }
         let session = TrainingSession(templateName: template?.name)
         context.insert(session)
         for planned in repeated {
@@ -628,105 +644,17 @@ struct TrainingView: View {
             entry.session = session
             context.insert(entry)
         }
-        try? context.save()
-        activeSession = session
+        if saveChanges() { activeSession = session }
     }
 
-    /// Recent sessions are enough for every chart on this tab, but repeat
-    /// prefill promises the latest matching workout even if it was months ago.
-    /// Query that template on demand; fall back to the full history only for a
-    /// legacy template whose original session predates template-name tagging.
-    private func repeatCandidates(for template: WorkoutTemplate) -> [TrainingSession] {
-        let name = template.name
-        let namedQuery = FetchDescriptor<TrainingSession>(
-            predicate: #Predicate { $0.templateName == name },
-            sortBy: [SortDescriptor(\TrainingSession.startedAt, order: .reverse)])
-        let named = (try? context.fetch(namedQuery)) ?? []
-        if named.contains(where: Self.hasCompletedWork) { return named }
-        return (try? context.fetch(FetchDescriptor<TrainingSession>())) ?? []
-    }
-}
-
-struct WorkoutRow: View {
-    let workout: WorkoutRecord
-    let units: UnitSystem
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: workout.activity.symbolName)
-                .foregroundStyle(Theme.gold)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(workout.activity.displayName)
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text(workout.startedAt, format: .dateTime.month().day())
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Text(summary)
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+    @discardableResult
+    private func saveChanges() -> Bool {
+        do {
+            try context.save()
+            return true
+        } catch {
+            persistenceFailure = error.localizedDescription
+            return false
         }
-        .padding(.vertical, 2)
-    }
-
-    private var summary: String {
-        var parts = ["\(Int(workout.durationSeconds / 60)) min"]
-        if workout.activity.metrics.contains(.distance),
-           let metres = workout.distanceMetres, metres > 0 {
-            parts.append(units == .metric
-                         ? String(format: "%.2f km", metres / 1000)
-                         : String(format: "%.2f mi", metres / 1609.344))
-        }
-        if workout.activeEnergyKcal > 0 {
-            parts.append("\(Int(workout.activeEnergyKcal)) kcal")
-        }
-        if let hr = workout.avgHeartRate { parts.append("\(Int(hr)) bpm") }
-        return parts.joined(separator: " · ")
-    }
-}
-
-struct SessionRow: View {
-    let session: TrainingSession
-    let exercises: [Exercise]
-    /// Off where a date header already covers the row, in which case the row
-    /// shows the *time* instead — which is the part still worth knowing when
-    /// a day holds two sessions.
-    var showsDate = true
-
-    @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
-
-    private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
-    /// Completed working sets — what the row's count and tonnage reflect, so a
-    /// planned-but-unticked set doesn't inflate the summary.
-    private var workingSets: [SetEntry] {
-        (session.sets ?? []).filter { !$0.isWarmup && $0.completedAt != nil }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(session.templateName ?? "Workout").font(.subheadline.weight(.medium))
-                Spacer()
-                Text(session.startedAt, format: showsDate
-                     ? .dateTime.month().day()
-                     : .dateTime.hour().minute())
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Text(summary)
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var summary: String {
-        let tonnage = workingSets.reduce(0) { $0 + $1.volumeKg }
-        let names = Set(workingSets.compactMap { set in
-            exercises.first { $0.id == set.exerciseID }?.name
-        })
-        let list = names.prefix(3).joined(separator: ", ")
-        return "\(workingSets.count) sets · \(Int(units.displayWeight(tonnage))) \(units.weightUnit) total"
-            + (list.isEmpty ? "" : " · \(list)")
     }
 }

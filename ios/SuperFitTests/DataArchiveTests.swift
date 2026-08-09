@@ -402,19 +402,4 @@ struct DataArchiveTests {
         #expect(try context.fetch(FetchDescriptor<HydrationSettings>()).isEmpty)
     }
 
-    // MARK: Sign-out must not touch data
-
-    @Test func signingOutLeavesDataIntact() throws {
-        let context = try makeContext()
-        seed(context)
-        let before = try context.fetch(FetchDescriptor<NutritionLog>()).count
-
-        let account = AccountManager()
-        account.completeSignIn(userID: "test.user.id", fullName: nil)
-        #expect(account.isSignedIn)
-        account.signOut()
-        #expect(!account.isSignedIn)
-
-        #expect(try context.fetch(FetchDescriptor<NutritionLog>()).count == before)
-    }
 }

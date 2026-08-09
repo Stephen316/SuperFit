@@ -1,5 +1,5 @@
 import { config, redirectUri } from './config';
-import { shortHash } from './http';
+import { garminUserId } from './garminIdentity';
 
 export interface GarminTokens {
   accessToken: string;
@@ -68,20 +68,14 @@ export async function refreshTokens(refreshToken: string): Promise<GarminTokens>
 }
 
 async function fetchUserId(accessToken: string): Promise<string> {
-  if (!config.garmin.userIdUrl) return shortHash(accessToken);
-  try {
-    const resp = await fetch(config.garmin.userIdUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!resp.ok) return shortHash(accessToken);
-    const json = (await resp.json()) as Record<string, unknown>;
-    const id = json.userId ?? json.userAccessToken;
-    return id ? String(id) : shortHash(accessToken);
-  } catch {
-    // Never fail linking over the id lookup — a hash keeps the account usable,
-    // and webhooks that carry the real id will still resolve once it is stored.
-    return shortHash(accessToken);
+  if (!config.garmin.userIdUrl) throw new Error('GARMIN_USER_ID_URL is not configured');
+  const resp = await fetch(config.garmin.userIdUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!resp.ok) {
+    throw new Error(`Garmin user-id lookup failed: ${resp.status} ${await safeText(resp)}`);
   }
+  return garminUserId((await resp.json()) as Record<string, unknown>);
 }
 
 async function safeText(resp: Response): Promise<string> {

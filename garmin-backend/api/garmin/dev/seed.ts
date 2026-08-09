@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { config } from '../../../lib/config';
 import { getStore } from '../../../lib/store';
-import { str, toGarminISO } from '../../../lib/http';
+import { randomToken, str, toGarminISO } from '../../../lib/http';
+import { matchesConfiguredSecret } from '../../../lib/security';
 import type { RecoveryDTO, WorkoutDTO } from '../../../lib/types';
 
 /**
@@ -16,15 +17,21 @@ import type { RecoveryDTO, WorkoutDTO } from '../../../lib/types';
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!config.devSeedEnabled) return res.status(404).end();
+  if (!config.devSeedSecret) {
+    return res.status(503).json({ error: 'DEV_SEED_SECRET is not configured' });
+  }
+  if (!matchesConfiguredSecret(config.devSeedSecret, str(req.query.secret))) {
+    return res.status(401).end();
+  }
 
   const store = getStore();
-  const token = str(req.query.token) || 'dev-token';
+  const token = randomToken();
   const garminUserId = 'dev-user';
   const days = Math.min(Number(str(req.query.days) ?? 28) || 28, 120);
 
   await store.putSession(token, {
     garminUserId,
-    accessToken: 'dev-access',
+    accessToken: randomToken(),
     createdAt: Date.now(),
   });
   await store.linkUser(garminUserId, token);

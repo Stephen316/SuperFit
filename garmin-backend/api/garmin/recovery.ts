@@ -16,7 +16,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const session = await getStore().getSession(token);
   if (!session) return res.status(401).json({ error: 'unknown or revoked token' });
 
-  const { start, end } = parseRange(req);
+  let start: Date;
+  let end: Date;
+  try {
+    ({ start, end } = parseRange(req));
+  } catch (error) {
+    return res.status(400).json({ error: (error as Error).message });
+  }
   const records = await getStore().getDailyRange(session.garminUserId, start, end);
-  res.status(200).json(records);
+  return res.status(200).json(records);
 }

@@ -29,6 +29,22 @@ private struct StubRecovery: RecoveryProvider {
     func recoveryMetrics(in range: DateInterval) async throws -> [RecoveryMetrics] { [] }
 }
 
+private enum ExpectedSyncError: Error { case failed }
+
+private struct FailingHealth: HealthProvider {
+    var isAvailable = true
+    func requestAuthorization() async throws { throw ExpectedSyncError.failed }
+    func bodyMass(in range: DateInterval) async throws -> [BodyMassSample] { throw ExpectedSyncError.failed }
+    func bodyFatPercentage(in range: DateInterval) async throws -> [SampleValue] { throw ExpectedSyncError.failed }
+    func leanBodyMass(in range: DateInterval) async throws -> [SampleValue] { throw ExpectedSyncError.failed }
+    func dailyActivity(in range: DateInterval) async throws -> [DailyActivity] { throw ExpectedSyncError.failed }
+    func workouts(in range: DateInterval) async throws -> [WorkoutSample] { throw ExpectedSyncError.failed }
+    func sleep(in range: DateInterval) async throws -> [SleepSample] { throw ExpectedSyncError.failed }
+    func restingHeartRate(in range: DateInterval) async throws -> [SampleValue] { throw ExpectedSyncError.failed }
+    func hrv(in range: DateInterval) async throws -> [SampleValue] { throw ExpectedSyncError.failed }
+    func vo2Max(in range: DateInterval) async throws -> [SampleValue] { throw ExpectedSyncError.failed }
+}
+
 @MainActor
 struct SyncCoordinatorTests {
 
@@ -44,6 +60,18 @@ struct SyncCoordinatorTests {
     }
 
     private let cal = Calendar(identifier: .gregorian)
+
+    @Test func sourceFailuresAreReturnedInsteadOfLookingLikeEmptyHealthData() async throws {
+        let context = try makeContext()
+        let result = await SyncCoordinator(health: FailingHealth(),
+                                           garmin: StubRecovery(),
+                                           context: context).syncAll()
+
+        #expect(!result.hasChanges)
+        #expect(result.failures.count == 8)
+        #expect(result.failureMessage?.contains("Body weight") == true)
+        #expect(result.failureMessage?.contains("Health access") == true)
+    }
 
     /// Several readings on one day are one day's weight, not several rows.
     ///

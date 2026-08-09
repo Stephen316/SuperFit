@@ -18,6 +18,7 @@ struct ActiveWorkoutView: View {
     @State private var showingTemplateLimit = false
     @State private var showingRPE = false
     @State private var continueAfterRPE = false
+    @State private var persistenceFailure: String?
 
     private var plannedExercises: [Exercise] {
         guard let name = session.templateName,
@@ -46,7 +47,8 @@ struct ActiveWorkoutView: View {
                 }
                 ForEach(exerciseSections) { exercise in
                     ExerciseSection(session: session, exercise: exercise,
-                                    onSetCompleted: startRest)
+                                    onSetCompleted: startRest,
+                                    onSaveFailure: { persistenceFailure = $0 })
                 }
                 Section {
                     Button {
@@ -84,7 +86,7 @@ struct ActiveWorkoutView: View {
             }) {
                 SessionRPEPrompt { rating in
                     session.sessionRPE = rating
-                    try? context.save()
+                    guard saveChanges() else { return }
                     continueAfterRPE = true
                     showingRPE = false
                 }
@@ -108,8 +110,7 @@ struct ActiveWorkoutView: View {
             .alert("Saved workout limit reached", isPresented: $showingTemplateLimit) {
                 Button("Manage saved workouts") {
                     discardIfEmpty()
-                    try? context.save()
-                    dismiss()
+                    if saveChanges() { dismiss() }
                 }
                 Button("Keep editing", role: .cancel) {}
             } message: {
@@ -126,6 +127,13 @@ struct ActiveWorkoutView: View {
             } message: {
                 Text("Tick a set as you finish it to log it. Nothing here counts as "
                      + "trained yet, so this workout won't be saved.")
+            }
+            .alert("Couldn't save workout", isPresented: Binding(
+                get: { persistenceFailure != nil },
+                set: { if !$0 { persistenceFailure = nil } })) {
+                Button("OK", role: .cancel) { persistenceFailure = nil }
+            } message: {
+                Text(persistenceFailure ?? "")
             }
         }
     }
@@ -171,8 +179,7 @@ struct ActiveWorkoutView: View {
         context.insert(template)
         setItems(on: template)
         discardIfEmpty()
-        try? context.save()
-        dismiss()
+        if saveChanges() { dismiss() }
     }
 
     private func overwriteTemplate() {
@@ -181,8 +188,7 @@ struct ActiveWorkoutView: View {
         for item in existing.items ?? [] { context.delete(item) }
         setItems(on: existing)
         discardIfEmpty()
-        try? context.save()
-        dismiss()
+        if saveChanges() { dismiss() }
     }
 
     /// After saving the plan, bin the session itself if nothing was completed —
@@ -194,8 +200,7 @@ struct ActiveWorkoutView: View {
 
     private func discard() {
         context.delete(session)
-        try? context.save()
-        dismiss()
+        if saveChanges() { dismiss() }
     }
 
     private func setItems(on template: WorkoutTemplate) {
@@ -215,7 +220,7 @@ struct ActiveWorkoutView: View {
                              reps: previous?.reps ?? SetRow.defaultReps)
         entry.session = session
         context.insert(entry)
-        try? context.save()
+        saveChanges()
     }
 
     private func finish() {
@@ -227,8 +232,7 @@ struct ActiveWorkoutView: View {
         }
         guard session.endedAt == nil else { dismiss(); return }
         session.endedAt = .now
-        try? context.save()
-        showingRPE = true
+        if saveChanges() { showingRPE = true }
     }
 
     private func continueAfterEffortRating() {
@@ -240,12 +244,24 @@ struct ActiveWorkoutView: View {
             dismiss()
         }
     }
+
+    @discardableResult
+    private func saveChanges() -> Bool {
+        do {
+            try context.save()
+            return true
+        } catch {
+            persistenceFailure = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct ExerciseSection: View {
     let session: TrainingSession
     let exercise: Exercise
     let onSetCompleted: (Int) -> Void
+    let onSaveFailure: (String) -> Void
 
     @Environment(\.modelContext) private var context
 
@@ -256,11 +272,12 @@ private struct ExerciseSection: View {
     var body: some View {
         Section(exercise.name) {
             ForEach(sets) { set in
-                SetRow(set: set, onCompleted: onSetCompleted)
+                SetRow(set: set, onCompleted: onSetCompleted,
+                       onSaveFailure: onSaveFailure)
             }
             .onDelete { offsets in
                 for i in offsets { context.delete(sets[i]) }
-                try? context.save()
+                saveChanges()
             }
             Button {
                 let entry = SetEntry(order: ((session.sets ?? []).map(\.order).max() ?? 0) + 1,
@@ -269,17 +286,23 @@ private struct ExerciseSection: View {
                                      reps: sets.last?.reps ?? SetRow.defaultReps)
                 entry.session = session
                 context.insert(entry)
-                try? context.save()
+                saveChanges()
             } label: {
                 Label("Add set", systemImage: "plus").font(.subheadline)
             }
         }
+    }
+
+    private func saveChanges() {
+        do { try context.save() }
+        catch { onSaveFailure(error.localizedDescription) }
     }
 }
 
 private struct SetRow: View {
     @Bindable var set: SetEntry
     let onCompleted: (Int) -> Void
+    let onSaveFailure: (String) -> Void
 
     @Environment(\.modelContext) private var context
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
@@ -305,7 +328,10 @@ private struct SetRow: View {
             cell("\(set.reps)", unit: "reps") { editing = .reps }
 
             Picker("RIR", selection: Binding(get: { set.rir ?? -1 },
-                                             set: { set.rir = $0 < 0 ? nil : $0 })) {
+                                             set: {
+                                                 set.rir = $0 < 0 ? nil : $0
+                                                 saveChanges()
+                                             })) {
                 Text("RIR").tag(-1)
                 ForEach(0...5, id: \.self) { Text("\($0)").tag($0) }
             }
@@ -315,8 +341,7 @@ private struct SetRow: View {
             Button {
                 let done = set.completedAt != nil
                 set.completedAt = done ? nil : .now
-                try? context.save()
-                if !done { onCompleted(defaultRest) }
+                if saveChanges(), !done { onCompleted(defaultRest) }
             } label: {
                 Image(systemName: set.completedAt != nil ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(set.completedAt != nil ? .green : .secondary)
@@ -331,13 +356,13 @@ private struct SetRow: View {
                     // Blank sets it back to "—"; a typed 0 is kept. Both are the
                     // user's choice, which is the whole point of the "—" default.
                     set.weightKg = value.map { units.storeWeight($0).clamped(to: 0...500) }
-                    try? context.save()
+                    saveChanges()
                 }
             case .reps:
                 NumberEntrySheet(title: "Reps", unit: "reps", allowsDecimal: false) { value in
                     // Blank restores the default rather than leaving reps empty.
                     set.reps = value.map { Int($0.clamped(to: 0...100)) } ?? Self.defaultReps
-                    try? context.save()
+                    saveChanges()
                 }
             }
         }
@@ -383,6 +408,17 @@ private struct SetRow: View {
                 .strokeBorder(Theme.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+
+    @discardableResult
+    private func saveChanges() -> Bool {
+        do {
+            try context.save()
+            return true
+        } catch {
+            onSaveFailure(error.localizedDescription)
+            return false
+        }
     }
 }
 
@@ -503,6 +539,7 @@ struct CustomExerciseView: View {
     @State private var name = ""
     @State private var category = ExerciseCategory.barbell
     @State private var scores: [MuscleGroup: Int] = [:]
+    @State private var persistenceFailure: String?
 
     private var isValid: Bool {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
@@ -555,6 +592,13 @@ struct CustomExerciseView: View {
                 }
                 .withoutGlassBackground()
             }
+            .alert("Couldn't save exercise", isPresented: Binding(
+                get: { persistenceFailure != nil },
+                set: { if !$0 { persistenceFailure = nil } })) {
+                Button("OK", role: .cancel) { persistenceFailure = nil }
+            } message: {
+                Text(persistenceFailure ?? "")
+            }
         }
     }
 
@@ -563,8 +607,12 @@ struct CustomExerciseView: View {
         let exercise = Exercise(name: name.trimmingCharacters(in: .whitespaces),
                                 category: category, tension: tension, isCustom: true)
         context.insert(exercise)
-        try? context.save()
-        dismiss()
-        onCreated(exercise)
+        do {
+            try context.save()
+            dismiss()
+            onCreated(exercise)
+        } catch {
+            persistenceFailure = error.localizedDescription
+        }
     }
 }

@@ -13,11 +13,26 @@ export function bearer(req: VercelRequest): string | undefined {
   return match ? match[1] : undefined;
 }
 
-/** The `start`/`end` window, defaulting to the last 90 days as the app does. */
-export function parseRange(req: VercelRequest): { start: Date; end: Date } {
-  const now = Date.now();
+export const MAX_RANGE_DAYS = 366;
+
+/**
+ * The requested window, defaulting to 90 days and capped at one year. A bounded
+ * interval keeps accidental or hostile requests from materialising a lifetime
+ * of records, and validation turns malformed dates into a useful 400 response.
+ */
+export function parseRange(
+  req: VercelRequest,
+  now = Date.now(),
+): { start: Date; end: Date } {
   const start = new Date(str(req.query.start) ?? new Date(now - 90 * 86_400_000).toISOString());
   const end = new Date(str(req.query.end) ?? new Date(now).toISOString());
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    throw new RangeError('start and end must be valid ISO-8601 dates');
+  }
+  if (end < start) throw new RangeError('end must not be earlier than start');
+  if (end.getTime() - start.getTime() > MAX_RANGE_DAYS * 86_400_000) {
+    throw new RangeError(`date range must not exceed ${MAX_RANGE_DAYS} days`);
+  }
   return { start, end };
 }
 
@@ -39,7 +54,3 @@ export const randomToken = (bytes = 32): string => randomBytes(bytes).toString('
 /** PKCE S256 challenge for a verifier. */
 export const pkceChallenge = (verifier: string): string =>
   createHash('sha256').update(verifier).digest('base64url');
-
-/** Stable short id from a secret, a fallback when no Garmin user-id is available. */
-export const shortHash = (input: string): string =>
-  createHash('sha256').update(input).digest('base64url').slice(0, 22);

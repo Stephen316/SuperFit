@@ -8,10 +8,32 @@ struct SyncChanges: Sendable, Equatable {
     var sleep = false
     var vitals = false
     var garmin = false
+    var failures: [String] = []
 
     var weightTrendNeedsRefresh: Bool { bodyMass }
     var hasChanges: Bool {
         bodyMass || composition || activity || sleep || vitals || garmin
+    }
+
+    var failureMessage: String? {
+        guard !failures.isEmpty else { return nil }
+        return "Some health data could not be refreshed:\n" + failures.joined(separator: "\n")
+    }
+}
+
+private struct SyncOutcome<Value: Sendable>: Sendable {
+    let value: Value?
+    let failure: String?
+}
+
+private func syncOutcome<Value: Sendable>(
+    _ label: String,
+    operation: @Sendable () async throws -> Value
+) async -> SyncOutcome<Value> {
+    do {
+        return SyncOutcome(value: try await operation(), failure: nil)
+    } catch {
+        return SyncOutcome(value: nil, failure: "\(label): \(error.localizedDescription)")
     }
 }
 
@@ -39,34 +61,60 @@ final class SyncCoordinator {
         guard health.isAvailable else { return SyncChanges() }
         let range = DateInterval(start: .now.addingTimeInterval(-Double(days) * 86_400), end: .now)
         let storedRange = DateInterval(start: cal.startOfDay(for: range.start), end: range.end)
-        try? await health.requestAuthorization()
-
-        async let mass = try? health.bodyMass(in: range)
-        async let bodyFat = try? health.bodyFatPercentage(in: range)
-        async let leanMass = try? health.leanBodyMass(in: range)
-        async let activity = try? health.dailyActivity(in: range)
-        async let sleep = try? health.sleep(in: range)
-        async let rhr = try? health.restingHeartRate(in: range)
-        async let hrv = try? health.hrv(in: range)
-
         var changes = SyncChanges()
-        changes.bodyMass = upsertBodyMass(await mass ?? [], in: storedRange)
-        changes.composition = upsertComposition(bodyFat: await bodyFat ?? [],
-                                                leanMass: await leanMass ?? [],
+        do {
+            try await health.requestAuthorization()
+        } catch {
+            changes.failures.append("Health access: \(error.localizedDescription)")
+        }
+
+        async let mass = syncOutcome("Body weight") { try await health.bodyMass(in: range) }
+        async let bodyFat = syncOutcome("Body fat") { try await health.bodyFatPercentage(in: range) }
+        async let leanMass = syncOutcome("Lean mass") { try await health.leanBodyMass(in: range) }
+        async let activity = syncOutcome("Activity") { try await health.dailyActivity(in: range) }
+        async let sleep = syncOutcome("Sleep") { try await health.sleep(in: range) }
+        async let rhr = syncOutcome("Resting heart rate") { try await health.restingHeartRate(in: range) }
+        async let hrv = syncOutcome("Heart-rate variability") { try await health.hrv(in: range) }
+
+        let massResult = await mass
+        let fatResult = await bodyFat
+        let leanResult = await leanMass
+        let activityResult = await activity
+        let sleepResult = await sleep
+        let rhrResult = await rhr
+        let hrvResult = await hrv
+        changes.failures.append(contentsOf: [massResult.failure, fatResult.failure,
+                                              leanResult.failure, activityResult.failure,
+                                              sleepResult.failure, rhrResult.failure,
+                                              hrvResult.failure].compactMap { $0 })
+
+        changes.bodyMass = upsertBodyMass(massResult.value ?? [], in: storedRange)
+        changes.composition = upsertComposition(bodyFat: fatResult.value ?? [],
+                                                leanMass: leanResult.value ?? [],
                                                 in: storedRange)
-        changes.activity = upsertActivity(await activity ?? [], in: storedRange)
-        changes.sleep = upsertSleep(await sleep ?? [], in: storedRange)
-        changes.vitals = upsertVitals(rhr: await rhr ?? [], hrv: await hrv ?? [],
+        changes.activity = upsertActivity(activityResult.value ?? [], in: storedRange)
+        changes.sleep = upsertSleep(sleepResult.value ?? [], in: storedRange)
+        changes.vitals = upsertVitals(rhr: rhrResult.value ?? [], hrv: hrvResult.value ?? [],
                                       in: storedRange)
 
         // Garmin last so its HRV / staged sleep overwrite HealthKit's — Garmin
         // Connect doesn't export those to Apple Health, so its values are the
         // only real readings when a Garmin watch is the wearable.
-        if await garmin.isLinked,
-           let metrics = try? await garmin.recoveryMetrics(in: range) {
-            changes.garmin = applyGarmin(metrics, in: storedRange)
+        if await garmin.isLinked {
+            do {
+                changes.garmin = applyGarmin(try await garmin.recoveryMetrics(in: range),
+                                             in: storedRange)
+            } catch {
+                changes.failures.append("Garmin recovery: \(error.localizedDescription)")
+            }
         }
-        if changes.hasChanges { try? context.save() }
+        if changes.hasChanges {
+            do {
+                try context.save()
+            } catch {
+                changes.failures.append("Saving imported health data: \(error.localizedDescription)")
+            }
+        }
         return changes
     }
 

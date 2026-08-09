@@ -12,7 +12,7 @@
 | **5.6** | Micronutrients: seed rebuilt with 14 micros/markers · goal- and training-adjusted reference intakes · nutrition breakdown view with coverage reporting and 7-day averaging · food search moved from bundled seed to USDA FDC API (key in Keychain) | **done** |
 | **5.7** | Supplements: 51-item catalog with per-serving nutrients · every-day entries that carry forward · skip/stop without losing history · custom supplements · contributes to macros, micronutrients and the TDEE energy balance · food-like items (bars, shakes, gainers) also searchable from the food diary | **done** |
 | **5.8** | USDA portion data: household measures ("1 medium", "1 cup, sliced") imported and cached · log in portions, grams or ounces · defaults follow the unit setting | **done** |
-| **5.9** | Account and backup: Sign in with Apple · iCloud sync status surfaced · JSON export/import with merge or replace · sign-out preserves data, erase is separate and confirmed | **done** |
+| **5.9** | Account and backup: Supabase account · automatic cloud backup · JSON export/import with merge or replace · sign-out preserves local data, erase is separate and confirmed | **done** |
 | **5.10** | Body composition: sync body fat and lean mass from Apple Health · optional measured body-fat entry · Katch-McArdle basal when lean mass is known, Mifflin otherwise | **done** |
 | **5.11** | Historical trends: energy balance (TDEE vs intake, gap shaded) · weight with a rate-of-change disclosure against the guardrails · lean mass, recovery, HRV/RHR, sleep, weekly volume per muscle, e1RM per lift · protein adherence from tapping the protein target · 30d/90d/6m/1y ranges | **done** |
 | **5.12** | Saved meals: builder that persists as ingredients are added, each searched through the shared food search · label entry per serving or per 100 g · "My foods" filter · swipe-to-delete foods and meals from search | **done** |
@@ -74,9 +74,8 @@ Core/Services/WorkoutSyncService.swift       workouts into SwiftData, Garmin enr
 Core/Health/WatchWorkoutMonitor.swift        live session mirroring + finished observer
 Core/Services/SyncCoordinator.swift          HealthKit → SwiftData day-keyed upserts
 Core/Services/AggregationService.swift       trend fill, TDEE records, recovery score
-Core/UI/Units.swift                          metric/imperial + keyboard dismiss
+UI/Units.swift                               metric/imperial + keyboard dismiss
 Core/History/HistorySeries.swift             chart series, TDEE backfill, rolling means
-Core/Account/AccountManager.swift            Sign in with Apple, credential in Keychain
 Core/Account/DataArchive.swift               export/import, merge or replace
 Features/Dashboard/DashboardView.swift       cards + settings gear + trends
 Features/History/HistoryView.swift           every trend, 30d-1y ranges

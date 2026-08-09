@@ -19,6 +19,7 @@ struct WeightView: View {
     @State private var confirmingDelete: BodyMetrics?
     @State private var confirmingEdit: PendingEdit?
     @State private var syncing = false
+    @State private var storageFailure: String?
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
@@ -255,6 +256,13 @@ struct WeightView: View {
             } message: {
                 Text(rejected ?? "")
             }
+            .alert("Couldn't save", isPresented: Binding(
+                get: { storageFailure != nil },
+                set: { if !$0 { storageFailure = nil } })) {
+                Button("OK", role: .cancel) { storageFailure = nil }
+            } message: {
+                Text(storageFailure ?? "")
+            }
             .fullScreenCover(isPresented: $loggingWeight) {
                 NumberEntrySheet(title: "Weigh-in", unit: units.weightUnit,
                                  allowsDecimal: true, onCommit: addWeight)
@@ -283,7 +291,7 @@ struct WeightView: View {
         }
         context.insert(BodyMetrics(date: .now, weightKg: kg, source: .manual))
         recomputeTrend()
-        try? context.save()
+        guard saveChanges() else { return }
         loadRecentMetrics()
     }
 
@@ -341,14 +349,14 @@ struct WeightView: View {
         // rebuilt — otherwise the correction shows in the list while every
         // estimate keeps using the old number.
         recomputeTrend()
-        try? context.save()
+        guard saveChanges() else { return }
         loadRecentMetrics()
     }
 
     private func applyDelete(_ row: BodyMetrics) {
         context.delete(row)
         recomputeTrend()
-        try? context.save()
+        guard saveChanges() else { return }
         loadRecentMetrics()
     }
 
@@ -360,9 +368,21 @@ struct WeightView: View {
         syncing = true
         defer { syncing = false }
         let changes = await SyncCoordinator(context: context).syncAll(days: 365)
+        storageFailure = changes.failureMessage
         AggregationService(context: context)
             .runAll(refreshWeightTrend: changes.weightTrendNeedsRefresh)
         loadRecentMetrics()
+    }
+
+    @discardableResult
+    private func saveChanges() -> Bool {
+        do {
+            try context.save()
+            return true
+        } catch {
+            storageFailure = error.localizedDescription
+            return false
+        }
     }
 
     /// Loads exactly the history this screen can display: every reading on the

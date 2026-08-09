@@ -17,7 +17,7 @@ Node + TypeScript, deployed as serverless functions (Vercel by default).
 | `GET /garmin/recovery?start=&end=` | Daily HRV, resting HR, body battery, staged sleep. Bearer token. |
 | `GET /garmin/workouts?start=&end=` | Activities for enrichment. Bearer token. |
 | `POST /garmin/webhook?secret=` | Garmin pushes new summaries here; upserted by date. |
-| `GET /garmin/dev/seed` | Test data, gated behind `DEV_SEED_ENABLED`. No Garmin needed. |
+| `GET /garmin/dev/seed?secret=` | Test data, gated behind `DEV_SEED_ENABLED` and `DEV_SEED_SECRET`. |
 
 ## Before you build: Garmin Health API access
 
@@ -52,9 +52,9 @@ values.
 
 Serverless functions are stateless, so production **requires** a datastore:
 create a free [Upstash Redis](https://upstash.com) database and set
-`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`. Without them the server
-falls back to an in-memory store that only survives within a single process —
-fine for `vercel dev` and the seed test, useless in production.
+`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`. Without them a production
+deployment fails loudly rather than appearing to save sessions in process
+memory. Local `vercel dev` still uses the in-memory store.
 
 ## Point the app at it
 
@@ -71,7 +71,7 @@ You don't need Garmin approval to prove the app↔backend contract works:
 
 ```bash
 cd garmin-backend
-DEV_SEED_ENABLED=true npm run dev        # vercel dev, on http://localhost:3000
+DEV_SEED_ENABLED=true DEV_SEED_SECRET=local-only npm run dev
 ```
 
 Point the app's Backend field at your machine (a tunnel such as `ngrok http 3000`
@@ -79,14 +79,16 @@ gives an https URL the app will accept), then open this on the device to link an
 seed 28 days of realistic data in one step:
 
 ```
-https://YOUR-TUNNEL/garmin/dev/seed?redirect=1
+https://YOUR-TUNNEL/garmin/dev/seed?secret=local-only&redirect=1
 ```
 
 Pull-to-refresh and the Recovery ring, resting HR and sleep stages populate from
-the seeded data. Or inspect the raw contract:
+the seeded data. To inspect the raw contract, call the seed route without
+`redirect=1`, copy its random `sessionToken`, then use that token:
 
 ```bash
-curl -H "Authorization: Bearer dev-token" \
+curl "https://YOUR-TUNNEL/garmin/dev/seed?secret=local-only"
+curl -H "Authorization: Bearer PASTE_SESSION_TOKEN" \
   "https://YOUR-TUNNEL/garmin/recovery?start=2026-07-01T00:00:00Z&end=2026-08-08T00:00:00Z"
 ```
 
@@ -118,6 +120,8 @@ lib/
   config.ts         env-driven configuration
   types.ts          the exact wire shapes SuperFit decodes
   http.ts           auth/date helpers (incl. the no-millis ISO rule)
+  security.ts       fail-closed shared-secret validation
+  garminIdentity.ts strict Garmin webhook identity parsing
   store.ts          Store interface + in-memory + Upstash
   oauth.ts          Garmin token exchange / refresh
   transform.ts      Garmin summaries → SuperFit DTOs (upsert by date)

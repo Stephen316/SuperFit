@@ -115,12 +115,6 @@ enum SupabaseConfig {
 
 /// The signed-in Supabase user, and the ways to become one.
 ///
-/// This sits alongside `AccountManager` rather than replacing it. That type
-/// tracks the local Sign in with Apple credential and its reasoning still holds
-/// for identifying a person to their own device. What it could never do is give
-/// the data somewhere to live off the device — CloudKit is disabled here because
-/// a free Apple team cannot sign the entitlement — which is the gap this fills.
-///
 /// Three ways in, because the answer to "how do I get my data onto a new phone"
 /// should never be "you can't, you used the other button". Email and password is
 /// the one that works everywhere with no Apple Developer membership and no
