@@ -159,12 +159,19 @@ struct CloudAccountSection: View {
     private var signedIn: some View {
         Group {
             Section {
-                LabeledContent("Cloud account") {
+                HStack(spacing: 12) {
+                    Text("Cloud account")
+                    Spacer(minLength: 12)
                     Label(emailLabel, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
+                .compactSettingsRow()
 
-                LabeledContent("Latest backup") {
+                HStack(spacing: 12) {
+                    Text("Latest backup")
+                    Spacer(minLength: 12)
                     switch backup.summaryStatus {
                     case .idle, .loading:
                         ProgressView()
@@ -180,6 +187,7 @@ struct CloudAccountSection: View {
                             .foregroundStyle(.orange)
                     }
                 }
+                .compactSettingsRow()
 
                 if backup.summaryStatus == .failed {
                     Button("Check for a backup again") {
