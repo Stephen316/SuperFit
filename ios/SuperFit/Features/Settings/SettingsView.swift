@@ -116,18 +116,18 @@ struct SettingsView: View {
             ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Label {
+                        HStack(spacing: 8) {
+                            Image(systemName: "ruler")
+                                .foregroundStyle(Theme.gold)
                             Text("Measurement units")
                                 .font(Theme.font(16, .semibold))
                                 .foregroundStyle(Theme.textPrimary)
-                        } icon: {
-                            Image(systemName: "ruler")
-                                .foregroundStyle(Theme.gold)
+                            Spacer()
+                            SettingsInfoButton(
+                                title: "Measurement units",
+                                message: "Metric uses kg and cm; imperial uses lb and ft/in."
+                            )
                         }
-
-                        Text("Metric uses kg and cm; imperial uses lb and ft/in.")
-                            .font(Theme.font(13))
-                            .foregroundStyle(Theme.textSecondary)
                     }
 
                     ThemeSegmentedControl(
@@ -138,41 +138,36 @@ struct SettingsView: View {
                     Divider()
                         .overlay(Theme.divider)
 
-                    Picker(selection: $foodRegionRaw) {
-                        Text(FoodRegionSetting.automaticLabel())
-                            .tag(FoodRegionSetting.automatic)
-                        ForEach(FoodRegion.all) { region in
-                            Text(region.displayName).tag(region.code)
+                    HStack(spacing: 8) {
+                        Image(systemName: "globe.europe.africa")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.gold)
+                            .frame(width: 24)
+
+                        Text("Food search region")
+                            .font(Theme.font(16, .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        SettingsInfoButton(
+                            title: "Food search region",
+                            message: "Ranks products from this region first, then nearby regions, then everywhere else. Nothing is hidden; choose where you usually buy food."
+                        )
+
+                        Spacer(minLength: 8)
+
+                        Picker("Food search region", selection: $foodRegionRaw) {
+                            Text(FoodRegionSetting.automaticLabel())
+                                .tag(FoodRegionSetting.automatic)
+                            ForEach(FoodRegion.all) { region in
+                                Text(region.displayName).tag(region.code)
+                            }
                         }
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "globe.europe.africa")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.gold)
-                                .frame(width: 24)
-
-                            Text("Food search region")
-                                .font(Theme.font(16, .semibold))
-                                .foregroundStyle(Theme.textPrimary)
-
-                            Spacer(minLength: 8)
-
-                            Text(foodRegionName)
-                                .font(Theme.font(13, .medium))
-                                .foregroundStyle(Theme.gold)
-                                .lineLimit(1)
-                        }
-                        .contentShape(Rectangle())
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .tint(Theme.gold)
+                        .accessibilityLabel("Food search region")
+                        .accessibilityValue(foodRegionName)
                     }
-                    .pickerStyle(.menu)
-                    .tint(Theme.gold)
-                    .accessibilityLabel("Food search region")
-                    .accessibilityValue(foodRegionName)
-
-                    Text("Ranks products from this region first, then nearby regions, then everywhere else. Nothing is hidden; choose where you usually buy food.")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
 
                     Divider()
                         .overlay(Theme.divider)
@@ -262,21 +257,11 @@ private struct PrivacyAboutView: View {
 
                     SettingsSection(title: "Acknowledgements") {
                         ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
-                            VStack(alignment: .leading, spacing: 16) {
-                                AboutInformationRow(
-                                    icon: "figure.strengthtraining.traditional",
-                                    title: "Muscle diagram",
-                                    detail: "Anatomy artwork adapted from react-muscle-highlighter, used under the MIT licence."
-                                )
-
-                                SettingsDivider(inset: 0)
-
-                                AboutInformationRow(
-                                    icon: "fork.knife",
-                                    title: "Food data",
-                                    detail: "Food search uses USDA FoodData Central and Open Food Facts. Open Food Facts data is available under the Open Database License."
-                                )
-                            }
+                            AboutInformationRow(
+                                icon: "fork.knife",
+                                title: "Food data",
+                                detail: "Food search uses USDA FoodData Central and Open Food Facts. Open Food Facts data is available under the Open Database License."
+                            )
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -370,7 +355,6 @@ private struct SettingsNavigationRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -443,15 +427,14 @@ private struct ReminderToggle: View {
                 .frame(width: 24)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Daily logging reminders")
-                    .font(Theme.font(16, .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text("Morning weigh-in and breakfast, lunch at 2pm, workout at 4pm and dinner at 6pm.")
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Daily logging reminders")
+                .font(Theme.font(16, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+
+            SettingsInfoButton(
+                title: "Daily logging reminders",
+                message: "Morning weigh-in and breakfast, lunch at 2pm, workout at 4pm and dinner at 6pm."
+            )
 
             Spacer(minLength: 8)
 

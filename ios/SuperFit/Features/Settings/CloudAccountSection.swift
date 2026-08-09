@@ -64,9 +64,10 @@ struct CloudAccountSection: View {
             Label("Unavailable in this build", systemImage: "icloud.slash")
                 .foregroundStyle(Theme.textSecondary)
         } header: {
-            Text("Cloud backup")
-        } footer: {
-            Text("You can still save normally on this device and create portable backup files below.")
+            SettingsSectionHeader(
+                title: "Cloud backup",
+                information: "You can still save normally on this device and create portable backup files below."
+            )
         }
     }
 
@@ -134,9 +135,10 @@ struct CloudAccountSection: View {
                 ProgressView("Working…")
             }
         } header: {
-            Text("Cloud backup")
-        } footer: {
-            Text("Optional. A cloud account stores a manual backup of supported history. It is not live sync, and saved meals and standalone cardio workouts are not included.")
+            SettingsSectionHeader(
+                title: "Cloud backup",
+                information: "Optional. A cloud account stores a manual backup of supported history. It is not live sync, and saved meals and standalone cardio workouts are not included."
+            )
         }
     }
 
@@ -195,9 +197,10 @@ struct CloudAccountSection: View {
 
                 backupStatus
             } header: {
-                Text("Cloud backup")
-            } footer: {
-                Text("This is a manual snapshot, not live sync. It includes the same supported history as a backup file; saved meals and standalone cardio workouts are not included.")
+                SettingsSectionHeader(
+                    title: "Cloud backup",
+                    information: "This is a manual snapshot, not live sync. It includes the same supported history as a backup file; saved meals and standalone cardio workouts are not included."
+                )
             }
 
             Section {
@@ -211,9 +214,10 @@ struct CloudAccountSection: View {
                 }
                 .disabled(isWorking || !backupSummaryReady || backup.remote == nil)
             } header: {
-                Text("Cloud account controls")
-            } footer: {
-                Text("Signing out keeps the backup. Deleting the backup keeps both this device's data and your account.")
+                SettingsSectionHeader(
+                    title: "Cloud account controls",
+                    information: "Signing out keeps the backup. Deleting the backup keeps both this device's data and your account."
+                )
             }
         }
     }

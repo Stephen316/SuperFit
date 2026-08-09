@@ -44,9 +44,10 @@ struct ConnectedServicesView: View {
                      destination: URL(string: "https://fdc.nal.usda.gov/api-key-signup.html")!)
                     .font(Theme.font(13))
             } header: {
-                Text("Food search")
-            } footer: {
-                Text("A free USDA key adds more generic and branded foods. Without one, search still uses Open Food Facts and foods you've logged before.")
+                SettingsSectionHeader(
+                    title: "Food search",
+                    information: "A free USDA key adds more generic and branded foods. Without one, search still uses Open Food Facts and foods you've logged before."
+                )
             }
 
             Section {
@@ -95,11 +96,12 @@ struct ConnectedServicesView: View {
                     }
                 }
             } header: {
-                Text("Garmin")
-            } footer: {
-                Text(isLinked
-                     ? "Garmin adds HRV and detailed sleep that Garmin Connect does not share with Apple Health."
-                     : "Garmin can fill gaps in recovery data. It requires a separately hosted SuperFit server, configured under Server settings.")
+                SettingsSectionHeader(
+                    title: "Garmin",
+                    information: isLinked
+                        ? "Garmin adds HRV and detailed sleep that Garmin Connect does not share with Apple Health."
+                        : "Garmin can fill gaps in recovery data. It requires a separately hosted SuperFit server, configured under Server settings."
+                )
             }
         }
         .navigationTitle("Connected services")

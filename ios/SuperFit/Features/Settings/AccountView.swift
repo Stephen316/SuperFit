@@ -102,11 +102,12 @@ struct AccountView: View {
                 }
             }
         } header: {
-            Text("Automatic storage")
-        } footer: {
-            Text(AppSchema.isEphemeral
-                 ? "Storage is unavailable, so changes made during this session will be lost. Export a backup before closing SuperFit."
-                 : "Your data is saved automatically on this device. iCloud sync is not enabled in this build; use a backup below when moving to another device.")
+            SettingsSectionHeader(
+                title: "Automatic storage",
+                information: AppSchema.isEphemeral
+                    ? "Storage is unavailable, so changes made during this session will be lost. Export a backup before closing SuperFit."
+                    : "Your data is saved automatically on this device. iCloud sync is not enabled in this build; use a backup below when moving to another device."
+            )
         }
     }
 
@@ -128,9 +129,10 @@ struct AccountView: View {
                 Label("Restore backup file", systemImage: "square.and.arrow.down")
             }
         } header: {
-            Text("Backup file")
-        } footer: {
-            Text("Includes your profile, measurements, food diary, strength training, sleep, vitals, supplements and energy history. Saved meals and standalone cardio workouts are not included.")
+            SettingsSectionHeader(
+                title: "Backup file",
+                information: "Includes your profile, measurements, food diary, strength training, sleep, vitals, supplements and energy history. Saved meals and standalone cardio workouts are not included."
+            )
         }
     }
 
@@ -140,9 +142,10 @@ struct AccountView: View {
                 Label("Erase fitness data", systemImage: "trash")
             }
         } header: {
-            Text("Data controls")
-        } footer: {
-            Text("This removes your logs and resets your profile. It does not sign you out or delete your cloud backup.")
+            SettingsSectionHeader(
+                title: "Data controls",
+                information: "This removes your logs and resets your profile. It does not sign you out or delete your cloud backup."
+            )
         }
     }
 
