@@ -27,6 +27,13 @@ struct WorkoutLapSample: Sendable, Codable, Equatable {
     var avgHeartRate: Double?
 }
 
+/// Average heart rate for one measured minute of a workout. Minute buckets
+/// preserve interval changes that a single session average smooths away.
+struct HeartRateSegment: Sendable, Codable, Equatable {
+    let durationMinutes: Double
+    let avgHeartRate: Double
+}
+
 /// A finished workout with everything the source recorded.
 ///
 /// Every metric past the first four is optional, and stays `nil` when the source
@@ -51,6 +58,7 @@ struct WorkoutSample: Sendable {
     var swimStrokeCount: Double?
     var swimStrokeStyle: String?
     var laps: [WorkoutLapSample] = []
+    var heartRateSegments: [HeartRateSegment] = []
     /// Device or app that recorded it — "Apple Watch", "Garmin Connect".
     var sourceName: String?
 

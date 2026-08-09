@@ -16,6 +16,8 @@ struct ActiveWorkoutView: View {
     @State private var confirmingOverwrite = false
     @State private var confirmingDiscard = false
     @State private var showingTemplateLimit = false
+    @State private var showingRPE = false
+    @State private var continueAfterRPE = false
 
     private var plannedExercises: [Exercise] {
         guard let name = session.templateName,
@@ -74,6 +76,19 @@ struct ActiveWorkoutView: View {
                 ExercisePickerView { exercise in
                     addSet(for: exercise)
                 }
+            }
+            .sheet(isPresented: $showingRPE, onDismiss: {
+                guard continueAfterRPE else { return }
+                continueAfterRPE = false
+                continueAfterEffortRating()
+            }) {
+                SessionRPEPrompt { rating in
+                    session.sessionRPE = rating
+                    try? context.save()
+                    continueAfterRPE = true
+                    showingRPE = false
+                }
+                .presentationDetents([.height(410)])
             }
             .alert("Save as workout", isPresented: $savingTemplate) {
                 TextField("Name", text: $templateName)
@@ -210,11 +225,15 @@ struct ActiveWorkoutView: View {
             confirmingDiscard = true
             return
         }
-        let firstFinish = session.endedAt == nil
-        if firstFinish { session.endedAt = .now }
+        guard session.endedAt == nil else { dismiss(); return }
+        session.endedAt = .now
         try? context.save()
+        showingRPE = true
+    }
+
+    private func continueAfterEffortRating() {
         // Offer template save only when finishing a non-template session with sets.
-        if firstFinish, session.templateName == nil, !performedExerciseIDs.isEmpty {
+        if session.templateName == nil, !performedExerciseIDs.isEmpty {
             templateName = ""
             savingTemplate = true
         } else {

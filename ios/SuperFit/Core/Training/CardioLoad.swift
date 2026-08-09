@@ -7,6 +7,7 @@ struct CardioRecord: Sendable {
     /// nil when the source recorded no heart rate. Not defaulted to anything:
     /// an unknown intensity is what makes the load unknown.
     let avgHeartRate: Double?
+    var heartRateSegments: [HeartRateSegment] = []
 }
 
 /// Training load and ACWR for cardio, kept separate from lifting.
@@ -46,13 +47,29 @@ struct CardioLoadAnalyzer: Sendable {
     /// Load for one session, or nil when intensity is unknown.
     static func trimp(_ record: CardioRecord, restingHR: Double, maxHR: Double,
                       isFemale: Bool) -> Double? {
-        guard let avg = record.avgHeartRate, record.durationMinutes > 0 else { return nil }
+        guard record.durationMinutes > 0 else { return nil }
         let reserve = maxHR - restingHR
         guard reserve > 0 else { return nil }
-        let ratio = min(max((avg - restingHR) / reserve, 0), 1)
         let a = isFemale ? femaleA : maleA
         let b = isFemale ? femaleB : maleB
-        return record.durationMinutes * ratio * a * Foundation.exp(b * ratio)
+
+        func load(minutes: Double, heartRate: Double) -> Double {
+            let ratio = min(max((heartRate - restingHR) / reserve, 0), 1)
+            return minutes * ratio * a * Foundation.exp(b * ratio)
+        }
+
+        if !record.heartRateSegments.isEmpty {
+            var remaining = record.durationMinutes
+            let total = record.heartRateSegments.reduce(into: 0.0) { result, segment in
+                let minutes = min(max(segment.durationMinutes, 0), remaining)
+                guard minutes > 0 else { return }
+                result += load(minutes: minutes, heartRate: segment.avgHeartRate)
+                remaining -= minutes
+            }
+            return total > 0 ? total : nil
+        }
+        guard let avg = record.avgHeartRate else { return nil }
+        return load(minutes: record.durationMinutes, heartRate: avg)
     }
 
     struct Result: Sendable, Equatable {

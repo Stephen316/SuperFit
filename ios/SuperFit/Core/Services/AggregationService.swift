@@ -291,9 +291,9 @@ final class AggregationService {
 
     // MARK: - Strain
 
-    /// Today's cardiovascular strain from workouts. Needs a resting-HR reading to
-    /// scale intensity, so it degrades to "no data" without one — the same watch
-    /// dependency as recovery. Strength is included; strain is total exertion.
+    /// Today's total workout strain. Heart-rate sessions use minute TRIMP;
+    /// unrated strength and phone-only sessions fall back through RPE and logged
+    /// set effort, so a missing watch no longer erases work the user recorded.
     func upsertTodayStrain() {
         let today = cal.startOfDay(for: .now)
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first else { return }
@@ -301,23 +301,36 @@ final class AggregationService {
         let vitals = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
         let restingHR = vitals.sorted { $0.date > $1.date }.compactMap(\.restingHR).first
 
-        var result: StrainEngine.Result?
-        if let restingHR {
-            let windowStart = cal.date(byAdding: .day, value: -StrainEngine.referenceWindowDays,
-                                       to: today) ?? today
-            let query = FetchDescriptor<WorkoutRecord>(
-                predicate: #Predicate { $0.startedAt >= windowStart })
-            let records = ((try? context.fetch(query)) ?? []).map {
-                CardioRecord(date: $0.startedAt,
-                             durationMinutes: $0.durationSeconds / 60,
-                             avgHeartRate: $0.avgHeartRate)
-            }
-            result = StrainEngine().evaluate(records: records, on: today,
+        let windowStart = cal.date(byAdding: .day, value: -StrainEngine.referenceWindowDays,
+                                   to: today) ?? today
+        let workoutQuery = FetchDescriptor<WorkoutRecord>(
+            predicate: #Predicate { $0.startedAt >= windowStart })
+        var inputs = ((try? context.fetch(workoutQuery)) ?? []).map {
+            StrainWorkout(date: $0.startedAt,
+                          durationMinutes: $0.durationSeconds / 60,
+                          avgHeartRate: $0.avgHeartRate,
+                          heartRateSegments: $0.heartRateSegments,
+                          sessionRPE: $0.sessionRPE)
+        }
+
+        let sessionQuery = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.startedAt >= windowStart })
+        inputs += ((try? context.fetch(sessionQuery)) ?? []).compactMap { session in
+            guard let endedAt = session.endedAt, endedAt > session.startedAt else { return nil }
+            let sets = (session.sets ?? []).filter {
+                $0.completedAt != nil && !$0.isWarmup && $0.reps > 0
+            }.map { StrainStrengthSet(reps: $0.reps, rir: $0.rir) }
+            return StrainWorkout(date: session.startedAt,
+                                 durationMinutes: endedAt.timeIntervalSince(session.startedAt) / 60,
+                                 sessionRPE: session.sessionRPE,
+                                 strengthSets: sets)
+        }
+
+        let result = StrainEngine().evaluate(workouts: inputs, on: today,
                                              restingHR: restingHR,
                                              age: Double(profile.ageYears),
                                              isFemale: profile.sex == .female,
                                              calendar: cal)
-        }
 
         let bounds = DayBounds(today, calendar: cal)
         let dayEnd = bounds.end

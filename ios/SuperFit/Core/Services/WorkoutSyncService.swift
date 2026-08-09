@@ -113,6 +113,9 @@ final class WorkoutSyncService {
         record.swimStrokeStyle = sample.swimStrokeStyle
         record.sourceName = sample.sourceName
         if !sample.laps.isEmpty { record.laps = sample.laps }
+        if !sample.heartRateSegments.isEmpty {
+            record.heartRateSegments = sample.heartRateSegments
+        }
     }
 
     /// Fills Garmin-only fields onto workouts already imported from HealthKit,

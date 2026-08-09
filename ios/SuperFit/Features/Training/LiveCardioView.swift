@@ -21,6 +21,7 @@ struct LiveCardioView: View {
     @State private var pausedTotal: TimeInterval = 0
     @State private var pauseStartedAt: Date?
     @State private var showingDiscard = false
+    @State private var showingRPE = false
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -57,6 +58,12 @@ struct LiveCardioView: View {
             Button("Keep going", role: .cancel) {}
         } message: {
             Text("Nothing will be saved.")
+        }
+        .sheet(isPresented: $showingRPE) {
+            SessionRPEPrompt { rating in
+                saveFinishedWorkout(rpe: rating)
+            }
+            .presentationDetents([.height(410)])
         }
     }
 
@@ -168,11 +175,21 @@ struct LiveCardioView: View {
 
     private func finish() {
         location.stop()
+        if isPaused, let pauseStartedAt {
+            pausedTotal += Date.now.timeIntervalSince(pauseStartedAt)
+        }
+        elapsed = max(Date.now.timeIntervalSince(startedAt) - pausedTotal, 0)
+        isPaused = true
+        showingRPE = true
+    }
+
+    private func saveFinishedWorkout(rpe: Int?) {
         let record = WorkoutRecord(startedAt: startedAt,
                                    endedAt: startedAt.addingTimeInterval(max(elapsed, 0)),
                                    activity: activity,
                                    source: .liveSession)
         record.sourceName = "iPhone"
+        record.sessionRPE = rpe
         // Only record distance when a fix actually arrived. No fix means the
         // distance is unknown, and storing 0 would make it look measured.
         if tracksDistance, location.hasFix, location.distanceMetres > 0 {
@@ -180,6 +197,7 @@ struct LiveCardioView: View {
         }
         context.insert(record)
         try? context.save()
+        showingRPE = false
         dismiss()
     }
 

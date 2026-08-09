@@ -312,33 +312,39 @@ cardio yet to validate against. It stands as its own number until there is.
 
 ### Daily strain (`StrainEngine`)
 
-The exertion counterpart to recovery, on a 0–100 scale, in the spirit of WHOOP's
-strain and Bevel's exertion. Recovery answers "how ready are you"; strain answers
-"how hard was today". It shares the ACWR's currency — **Banister TRIMP** — so the
-two agree: a day that reads hard here is the same load the ACWR counts.
+The exertion counterpart to recovery, on a 0–100 scale. Recovery answers "how
+ready are you"; strain answers "how hard was today". It uses the strongest signal
+available **once per workout**, in this order:
 
-Two deliberate differences from the ACWR. **Strength counts.** ACWR excludes
-lifting to keep cardio load one unit; strain is total cardiovascular exertion, and
-an hour under a heavy bar elevates heart rate much as a jog does — so any workout
-carrying heart rate contributes. And it is a **single day's sum**, not a ratio.
+1. **Minute-level Banister TRIMP.** Every measured minute is scored separately,
+   preserving intervals that a session-average heart rate smooths away. Older and
+   Garmin records without the series retain the session-average fallback.
+2. **Session RPE × duration.** A user rating from 1–10 supplies internal load for
+   phone-only cardio and lifting without useful heart rate.
+3. **Completed set effort.** If RPE is skipped, working sets are weighted by reps
+   and reps-in-reserve. This is explicitly an estimate rather than a validated
+   physiological measurement; missing RIR assumes 2, a neutral working-set value.
 
-**Normalisation.** The day's raw TRIMP is expressed against a reference that is the
-larger of a fixed anchor — **300 TRIMP**, a genuinely demanding day, roughly two
-hours at 75% heart-rate reserve — and your own hardest day in a trailing 42-day
-window. The anchor keeps ordinary training off the ceiling: a hard hour (~167
-TRIMP) reads ~56%, "Moderate", not maximal. The personal peak keeps a high-volume
-athlete's normal day from pegging at 100, because their own hard days raise the
-scale. So 100% means "a day as hard as your hardest recent day, or a
-physiologically maximal one" — reached rarely, not an easy ceiling.
+Heart-rate load and fallback effort remain separate currencies. TRIMP uses a
+**300** anchor. RPE uses **600** (one hour at RPE 10); twenty hard-set equivalents
+map to the same fallback anchor. Each is divided by its own reference before the
+normalised shares are combined, so raw TRIMP is never added to arbitrary set
+units.
+
+**Personal normalisation.** Once there are at least ten measured training days in
+the trailing 42 days, each reference can rise to that load family's 95th
+percentile. A percentile is robust to one freak event where the previous maximum
+made every later day look artificially easy. Before ten days, the fixed anchors
+prevent sparse data from personalising the scale prematurely.
 
 Bands (on the rounded value, so the label agrees with the number): `<34` Light,
 `<67` Moderate, `<90` Hard, else All out.
 
 **Workout-based, and honest about it.** With no all-day heart rate it cannot see a
-rest day's background exertion, so a day with no heart-rate-carrying workout
-reports **no data**, not a zero — the same rule the rest of the app follows. It
-also needs a resting-HR reading to scale intensity, so it carries the same watch
-dependency as recovery. Folding in all-day heart rate is the natural upgrade.
+rest day's background exertion, so a day without a scorable workout reports **no
+data**, not a zero. Resting heart rate is required for TRIMP, but RPE and logged
+strength can still be scored when that watch-derived input is absent. Data
+completeness reflects minute-HR coverage or a complete fallback signal.
 
 ### Recommendation bands
 ```

@@ -548,6 +548,11 @@ final class WorkoutRecord {
     /// Laps as JSON — a handful of values per lap, only ever read as a whole,
     /// and a relationship would add a CloudKit-synced table for no query benefit.
     var lapsJSON: Data?
+    /// Minute-level heart rate as compact JSON. Imported workouts without a
+    /// time series continue to use their session average.
+    var heartRateSegmentsJSON: Data?
+    /// 0 means the user has not rated the session; valid ratings are 1...10.
+    var perceivedExertion: Int = 0
     var notes: String?
 
     init(startedAt: Date = .now, endedAt: Date = .now,
@@ -573,6 +578,22 @@ final class WorkoutRecord {
         set { lapsJSON = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
     }
 
+    var heartRateSegments: [HeartRateSegment] {
+        get {
+            heartRateSegmentsJSON.flatMap {
+                try? JSONDecoder().decode([HeartRateSegment].self, from: $0)
+            } ?? []
+        }
+        set {
+            heartRateSegmentsJSON = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    var sessionRPE: Int? {
+        get { (1...10).contains(perceivedExertion) ? perceivedExertion : nil }
+        set { perceivedExertion = min(max(newValue ?? 0, 0), 10) }
+    }
+
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
 
     /// Metres per second, or nil when the activity carries no distance. Guarded
@@ -590,11 +611,19 @@ final class TrainingSession {
     var endedAt: Date?
     var templateName: String?
     var bodyweightSnapshotKg: Double?
+    /// 0 means unrated; valid session-RPE ratings are 1...10.
+    var perceivedExertion: Int = 0
     @Relationship(deleteRule: .cascade) var sets: [SetEntry]? = []
 
     init(startedAt: Date = .now, templateName: String? = nil) {
         self.startedAt = startedAt
         self.templateName = templateName
+    }
+
+
+    var sessionRPE: Int? {
+        get { (1...10).contains(perceivedExertion) ? perceivedExertion : nil }
+        set { perceivedExertion = min(max(newValue ?? 0, 0), 10) }
     }
 }
 

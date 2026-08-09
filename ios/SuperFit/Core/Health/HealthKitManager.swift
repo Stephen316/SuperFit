@@ -180,6 +180,7 @@ actor HealthKitManager: HealthProvider {
             s.avgHeartRate = hr.average
             s.maxHeartRate = hr.maximum
             s.minHeartRate = hr.minimum
+            s.heartRateSegments = hr.segments
         }
 
         // Cadence as a rate can't be summed, so derive it from step count over
@@ -219,25 +220,46 @@ actor HealthKitManager: HealthProvider {
         }
     }
 
-    /// Average, max and min heart rate over an interval.
+    /// Average, max and min heart rate over an interval, plus minute buckets for
+    /// load calculations. Pulling the samples once is cheaper than a statistics
+    /// query followed by a second query for the time series.
     ///
     /// `HKStatisticsQuery` with `.discreteAverage` does this server-side rather
     /// than pulling every beat sample across the whole workout.
     private func heartRateStatistics(
         in range: DateInterval
-    ) async throws -> (average: Double?, maximum: Double?, minimum: Double?) {
+    ) async throws -> (average: Double?, maximum: Double?, minimum: Double?,
+                       segments: [HeartRateSegment]) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
             throw HealthError.unsupportedType
         }
         let predicate = HKQuery.predicateForSamples(withStart: range.start, end: range.end)
         return try await withCheckedThrowingContinuation { cont in
-            let q = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate,
-                                      options: [.discreteAverage, .discreteMax, .discreteMin]) { _, stats, error in
+            let q = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit,
+                                  sortDescriptors: [.init(key: HKSampleSortIdentifierStartDate,
+                                                          ascending: true)]) { _, raw, error in
                 if let error { cont.resume(throwing: error); return }
                 let unit = HKUnit.count().unitDivided(by: .minute())
-                cont.resume(returning: (stats?.averageQuantity()?.doubleValue(for: unit),
-                                        stats?.maximumQuantity()?.doubleValue(for: unit),
-                                        stats?.minimumQuantity()?.doubleValue(for: unit)))
+                let samples = (raw as? [HKQuantitySample]) ?? []
+                let values = samples.map { $0.quantity.doubleValue(for: unit) }
+                guard !values.isEmpty else {
+                    cont.resume(returning: (nil, nil, nil, []))
+                    return
+                }
+                let calendar = Calendar(identifier: .gregorian)
+                let buckets = Dictionary(grouping: samples) {
+                    calendar.dateInterval(of: .minute, for: $0.startDate)?.start ?? $0.startDate
+                }
+                let segments = buckets.keys.sorted().compactMap { minute -> HeartRateSegment? in
+                    guard let bucket = buckets[minute], !bucket.isEmpty else { return nil }
+                    let average = bucket.reduce(0.0) {
+                        $0 + $1.quantity.doubleValue(for: unit)
+                    } / Double(bucket.count)
+                    return HeartRateSegment(durationMinutes: 1, avgHeartRate: average)
+                }
+                cont.resume(returning: (values.reduce(0, +) / Double(values.count),
+                                        values.max(), values.min(), segments))
             }
             store.execute(q)
         }

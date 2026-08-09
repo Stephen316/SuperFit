@@ -21,6 +21,7 @@ struct WorkoutDetailView: View {
         NavigationStack {
             List {
                 summarySection
+                effortSection
                 if !detailRows.isEmpty {
                     Section("Detail") {
                         ForEach(detailRows, id: \.label) { row in
@@ -39,6 +40,24 @@ struct WorkoutDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
             }
+        }
+    }
+
+    private var effortSection: some View {
+        Section {
+            Picker("Session effort", selection: Binding(
+                get: { workout.sessionRPE ?? 0 },
+                set: { value in
+                    workout.sessionRPE = value == 0 ? nil : value
+                    try? context.save()
+                })) {
+                Text("Not rated").tag(0)
+                ForEach(1...10, id: \.self) { value in
+                    Text("\(value) / 10").tag(value)
+                }
+            }
+        } footer: {
+            Text("Rate how hard the whole session felt. This fills strain when heart-rate data is unavailable.")
         }
     }
 

@@ -1,38 +1,38 @@
 import Foundation
 
-/// Daily cardiovascular strain on a 0–100 scale — the exertion counterpart to
-/// the recovery score, in the spirit of WHOOP's strain and Bevel's exertion.
+/// One completed working set, reduced to the inputs that affect session effort.
+struct StrainStrengthSet: Sendable, Equatable {
+    let reps: Int
+    let rir: Int?
+}
+
+/// A workout-shaped value input for `StrainEngine`. Imported cardio and locally
+/// logged lifting both map here without coupling the pure engine to SwiftData.
+struct StrainWorkout: Sendable {
+    let date: Date
+    let durationMinutes: Double
+    var avgHeartRate: Double?
+    var heartRateSegments: [HeartRateSegment] = []
+    var sessionRPE: Int?
+    var strengthSets: [StrainStrengthSet] = []
+}
+
+/// Daily workout strain on a 0–100 scale.
 ///
-/// **Same currency as the cardio ACWR, a different question.** Both are built on
-/// Banister TRIMP (`CardioLoadAnalyzer.trimp`). ACWR asks whether load is ramping
-/// too fast across weeks; strain asks how hard *today* was. Sharing TRIMP keeps
-/// them consistent — a day that reads "hard" here is the same load the ACWR counts.
-///
-/// **Strength counts here, unlike the ACWR.** ACWR excludes lifting to keep
-/// "cardio load" one unit; strain is total cardiovascular exertion, and an hour
-/// under a heavy bar elevates heart rate much as an easy jog does. Any workout
-/// carrying heart rate contributes; the engine is deliberately activity-agnostic.
-///
-/// **Normalised so most days sit mid-range.** The day's raw TRIMP is expressed
-/// against a fixed physiological anchor — a genuinely demanding day — floored up
-/// by your own recent peak. So an ordinary session lands well below 100, and only
-/// a maximal day approaches it; a routinely high-volume athlete's own peak raises
-/// the scale so their normal day isn't pegged. 100% is "a day as hard as your
-/// hardest recent day, or a physiologically maximal one" — not an easy ceiling.
-///
-/// Workout-based: with no all-day heart rate it cannot speak to a rest day's
-/// background exertion, so a day with no heart-rate-carrying workout reports no
-/// data rather than an invented zero. See docs/ALGORITHMS.md §3.
+/// The engine uses the strongest available internal-load signal once per
+/// workout: minute-level Banister TRIMP, then session RPE (duration × RPE), then
+/// a completed-set/RIR estimate for lifting. This ordering prevents heart rate
+/// and RPE from double-counting one session while allowing phone-only cardio and
+/// strength sessions to contribute. Each load family is normalised separately;
+/// unlike units are never added before normalisation.
 struct StrainEngine: Sendable {
-
-    /// A demanding day's TRIMP — roughly two hours at ~75% heart-rate reserve, or
-    /// one hour near maximal. The 100% point for anyone whose recent peak hasn't
-    /// exceeded it, which keeps ordinary training off the ceiling. See ALGORITHMS.
+    /// Approximately a demanding cardiovascular day.
     static let referenceAnchorTrimp = 300.0
-
-    /// Trailing window the personal peak is taken over. Six weeks tracks a
-    /// changing base without one big day setting the scale for months.
+    /// One hard hour at RPE 10. Set-derived effort is converted to this scale.
+    static let referenceAnchorEffort = 600.0
     static let referenceWindowDays = 42
+    /// Avoid personalising a scale from a handful of isolated sessions.
+    static let minimumReferenceDays = 10
 
     enum Band: String, Sendable {
         case light = "Light"
@@ -42,52 +42,129 @@ struct StrainEngine: Sendable {
     }
 
     struct Result: Sendable, Equatable {
-        let strain: Double            // 0…100, rounded
-        let rawTrimp: Double          // the day's summed TRIMP
-        let reference: Double         // the scale the day was measured against
+        let strain: Double
+        let rawTrimp: Double
+        let rawEffort: Double
+        let aerobicReference: Double
+        let effortReference: Double
         let band: Band
-        /// Fraction of the day's workouts that carried heart rate; a present
-        /// result always has some coverage (no-coverage days return nil).
+        /// Average signal coverage across today's sessions. Minute HR gaps lower
+        /// coverage; a valid RPE or completed strength log provides full coverage.
         let dataCompleteness: Double
     }
 
-    /// `records` should span at least the reference window ending at `day`.
-    /// Returns nil when the day has no heart-rate-carrying workout to measure.
-    func evaluate(records: [CardioRecord], on day: Date = .now,
-                  restingHR: Double, age: Double, isFemale: Bool,
+    func evaluate(workouts: [StrainWorkout], on day: Date = .now,
+                  restingHR: Double?, age: Double, isFemale: Bool,
                   calendar: Calendar = .current) -> Result? {
         let maxHR = CardioLoadAnalyzer.estimatedMaxHeartRate(age: age)
-        let dayBounds = DayBounds(day, calendar: calendar)
+        let bounds = DayBounds(day, calendar: calendar)
+        let windowStart = calendar.date(byAdding: .day, value: -Self.referenceWindowDays,
+                                        to: bounds.start) ?? bounds.start
 
-        let todays = records.filter { dayBounds.contains($0.date) }
-        guard !todays.isEmpty else { return nil }
-        let todayLoads = todays.compactMap {
-            CardioLoadAnalyzer.trimp($0, restingHR: restingHR, maxHR: maxHR, isFemale: isFemale)
+        var aerobicByDay: [Date: Double] = [:]
+        var effortByDay: [Date: Double] = [:]
+        var todayCoverage: [Double] = []
+
+        for workout in workouts
+        where workout.date >= windowStart && workout.date < bounds.end {
+            let dayKey = calendar.startOfDay(for: workout.date)
+            let cardio = CardioRecord(date: workout.date,
+                                      durationMinutes: workout.durationMinutes,
+                                      avgHeartRate: workout.avgHeartRate,
+                                      heartRateSegments: workout.heartRateSegments)
+            if let restingHR,
+               let trimp = CardioLoadAnalyzer.trimp(cardio, restingHR: restingHR,
+                                                    maxHR: maxHR, isFemale: isFemale) {
+                aerobicByDay[dayKey, default: 0] += trimp
+                if bounds.contains(workout.date) {
+                    todayCoverage.append(heartRateCoverage(for: workout))
+                }
+                continue
+            }
+
+            if let effort = Self.fallbackEffort(for: workout) {
+                effortByDay[dayKey, default: 0] += effort
+                if bounds.contains(workout.date) { todayCoverage.append(1) }
+            } else if bounds.contains(workout.date) {
+                todayCoverage.append(0)
+            }
         }
-        guard !todayLoads.isEmpty else { return nil } // workouts logged, none with HR
-        let rawTrimp = todayLoads.reduce(0, +)
-        let completeness = Double(todayLoads.count) / Double(todays.count)
 
-        // Reference: the hardest day's TRIMP in the trailing window (today
-        // included), floored by the anchor.
-        let windowStart = calendar.date(byAdding: .day, value: -Self.referenceWindowDays, to: day) ?? day
-        var dailyTotals: [Date: Double] = [:]
-        for record in records where record.date > windowStart && record.date <= dayBounds.end {
-            guard let load = CardioLoadAnalyzer.trimp(record, restingHR: restingHR,
-                                                      maxHR: maxHR, isFemale: isFemale)
-            else { continue }
-            dailyTotals[calendar.startOfDay(for: record.date), default: 0] += load
-        }
-        let peak = dailyTotals.values.max() ?? rawTrimp
-        let reference = max(peak, Self.referenceAnchorTrimp)
+        let todayKey = bounds.start
+        let rawTrimp = aerobicByDay[todayKey] ?? 0
+        let rawEffort = effortByDay[todayKey] ?? 0
+        guard rawTrimp > 0 || rawEffort > 0 else { return nil }
 
-        let strain = (min(rawTrimp / reference, 1) * 100).rounded()
-        return Result(strain: strain, rawTrimp: rawTrimp, reference: reference,
+        let aerobicReference = reference(for: Array(aerobicByDay.values),
+                                         anchor: Self.referenceAnchorTrimp)
+        let effortReference = reference(for: Array(effortByDay.values),
+                                        anchor: Self.referenceAnchorEffort)
+        // Normalised components can be combined because each is now a share of
+        // a demanding personal day, not raw TRIMP plus arbitrary set units.
+        let normalised = rawTrimp / aerobicReference + rawEffort / effortReference
+        let strain = (min(normalised, 1) * 100).rounded()
+        let completeness = todayCoverage.isEmpty
+            ? 0
+            : todayCoverage.reduce(0, +) / Double(todayCoverage.count)
+        return Result(strain: strain, rawTrimp: rawTrimp, rawEffort: rawEffort,
+                      aerobicReference: aerobicReference, effortReference: effortReference,
                       band: band(for: strain), dataCompleteness: completeness)
     }
 
-    /// Bands the rounded value, so the label agrees with the number on screen —
-    /// the same rule `RecoveryEngine` follows.
+    /// Compatibility entry point for cardio-only callers and older tests.
+    func evaluate(records: [CardioRecord], on day: Date = .now,
+                  restingHR: Double, age: Double, isFemale: Bool,
+                  calendar: Calendar = .current) -> Result? {
+        evaluate(workouts: records.map {
+            StrainWorkout(date: $0.date, durationMinutes: $0.durationMinutes,
+                          avgHeartRate: $0.avgHeartRate,
+                          heartRateSegments: $0.heartRateSegments)
+        }, on: day, restingHR: restingHR, age: age, isFemale: isFemale,
+        calendar: calendar)
+    }
+
+    /// RPE is preferred because it measures the person's internal response.
+    /// When absent, completed working sets are estimated from reps and proximity
+    /// to failure. Twenty hard-set equivalents map to the 600-point anchor.
+    static func fallbackEffort(for workout: StrainWorkout) -> Double? {
+        if let rpe = workout.sessionRPE, (1...10).contains(rpe),
+           workout.durationMinutes > 0 {
+            return workout.durationMinutes * Double(rpe)
+        }
+        guard !workout.strengthSets.isEmpty else { return nil }
+        let units = workout.strengthSets.reduce(0.0) { total, set in
+            guard set.reps > 0 else { return total }
+            let repFactor = min(max(Double(set.reps) / 8, 0.5), 1.5)
+            let proximity = 1 / (1 + 0.25 * Double(max(set.rir ?? 2, 0)))
+            return total + repFactor * proximity
+        }
+        return units > 0 ? units * 30 : nil
+    }
+
+    private func heartRateCoverage(for workout: StrainWorkout) -> Double {
+        guard workout.durationMinutes > 0 else { return 0 }
+        guard !workout.heartRateSegments.isEmpty else {
+            return workout.avgHeartRate == nil ? 0 : 1
+        }
+        let measured = workout.heartRateSegments.reduce(0) {
+            $0 + max($1.durationMinutes, 0)
+        }
+        return min(measured / workout.durationMinutes, 1)
+    }
+
+    /// Personal scale uses a robust 95th percentile rather than a single peak.
+    /// The fixed anchor remains until enough distinct training days exist.
+    private func reference(for dailyLoads: [Double], anchor: Double) -> Double {
+        let loads = dailyLoads.filter { $0 > 0 }.sorted()
+        guard loads.count >= Self.minimumReferenceDays else { return anchor }
+        let position = 0.95 * Double(loads.count - 1)
+        let lower = Int(position.rounded(.down))
+        let upper = Int(position.rounded(.up))
+        let fraction = position - Double(lower)
+        let percentile = loads[lower] + (loads[upper] - loads[lower]) * fraction
+        return max(anchor, percentile)
+    }
+
     private func band(for strain: Double) -> Band {
         switch strain {
         case ..<34: return .light

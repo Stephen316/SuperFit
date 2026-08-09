@@ -40,6 +40,9 @@ struct DataArchive: Codable, Sendable {
     var bodyMetrics: [BodyMetricDTO] = []
     var foods: [FoodDTO] = []
     var nutritionLogs: [NutritionLogDTO] = []
+    /// Optionals keep version-1 archives written before hydration readable.
+    var hydration: [HydrationDTO]?
+    var hydrationGoalMl: Double?
     var exercises: [ExerciseDTO] = []
     var sessions: [SessionDTO] = []
     var templates: [TemplateDTO] = []
@@ -83,6 +86,10 @@ struct DataArchive: Codable, Sendable {
         var meal: String
     }
 
+    struct HydrationDTO: Codable, Sendable {
+        var date: Date, millilitres: Double
+    }
+
     struct ExerciseDTO: Codable, Sendable {
         var id: UUID, name: String, category: String
         var tension: [String], bodyweightFraction: Double, isCustom: Bool
@@ -99,6 +106,8 @@ struct DataArchive: Codable, Sendable {
 
     struct SessionDTO: Codable, Sendable {
         var id: UUID, startedAt: Date, endedAt: Date?, templateName: String?
+        /// Optional keeps backups created before session effort was introduced readable.
+        var perceivedExertion: Int?
         var sets: [SetDTO]
 
         struct SetDTO: Codable, Sendable {
@@ -166,6 +175,8 @@ enum DataArchiveService {
                                     sex: p.sexRaw, goal: p.goalRaw, activity: p.activityRaw,
                                     proteinPerKgOverride: p.proteinPerKgOverride)
         }
+        archive.hydrationGoalMl = fetch(context)
+            .map { (settings: HydrationSettings) in settings.dailyGoalMl }.first
         archive.bodyMetrics = fetch(context).map { (m: BodyMetrics) in
             .init(date: m.date, weightKg: m.weightKg, bodyFatPct: m.bodyFatPct,
                   leanMassKg: m.leanMassKg, source: m.sourceRaw)
@@ -186,6 +197,9 @@ enum DataArchiveService {
                   carbs: l.carbsG, fat: l.fatG, fibre: l.fibreG,
                   micros: l.microsRaw, meal: l.mealRaw)
         }
+        archive.hydration = fetch(context).map { (h: HydrationLog) in
+            .init(date: h.date, millilitres: h.millilitres)
+        }
         archive.exercises = fetch(context).map { (e: Exercise) in
             .init(id: e.id, name: e.name, category: e.categoryRaw, tension: e.tensionRaw,
                   bodyweightFraction: e.bodyweightFraction, isCustom: e.isCustom,
@@ -193,7 +207,7 @@ enum DataArchiveService {
         }
         archive.sessions = fetch(context).map { (s: TrainingSession) in
             .init(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt,
-                  templateName: s.templateName,
+                  templateName: s.templateName, perceivedExertion: s.sessionRPE,
                   sets: (s.sets ?? []).sorted { $0.order < $1.order }.map {
                       .init(order: $0.order, exerciseID: $0.exerciseID, weightKg: $0.weightKg ?? 0,
                             reps: $0.reps, rir: $0.rir, isWarmup: $0.isWarmup,
@@ -286,6 +300,15 @@ enum DataArchiveService {
             context.insert(UserProfile())
         }
 
+        if let archivedGoal = archive.hydrationGoalMl {
+            let settings: [HydrationSettings] = fetch(context)
+            if mode == .replace || settings.isEmpty {
+                let row = settings.first ?? HydrationSettings()
+                if settings.isEmpty { context.insert(row) }
+                row.dailyGoalMl = min(max(archivedGoal, 250), 10_000)
+            }
+        }
+
         // Day-keyed rows dedupe by day; everything else by identity. Merging a
         // backup must never double a day's weight or a training session.
         var existingWeightDays = Set(fetch(context).map { (m: BodyMetrics) in cal.startOfDay(for: m.date) })
@@ -342,6 +365,19 @@ enum DataArchiveService {
             result.added += 1
         }
 
+        var existingHydrationDays = Set(fetch(context).map { (h: HydrationLog) in
+            cal.startOfDay(for: h.date)
+        })
+        for h in archive.hydration ?? [] {
+            let day = cal.startOfDay(for: h.date)
+            guard existingHydrationDays.insert(day).inserted else {
+                result.skipped += 1
+                continue
+            }
+            context.insert(HydrationLog(date: day, millilitres: max(0, h.millilitres)))
+            result.added += 1
+        }
+
         let existingExercises: [Exercise] = fetch(context)
         var exercisesByID = Dictionary(existingExercises.map { ($0.id, $0) },
                                        uniquingKeysWith: { first, _ in first })
@@ -377,6 +413,7 @@ enum DataArchiveService {
             session.id = s.id
             session.startedAt = s.startedAt
             session.endedAt = s.endedAt
+            session.sessionRPE = s.perceivedExertion
             context.insert(session)
             for set in s.sets {
                 guard let archivedExerciseID = set.exerciseID else { continue }

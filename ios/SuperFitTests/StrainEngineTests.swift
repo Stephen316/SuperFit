@@ -7,7 +7,7 @@ import Foundation
 /// stay silent when it has nothing to measure rather than invent a zero.
 ///
 /// Expected values are derived from `CardioLoadAnalyzer.trimp` in-test, so these
-/// pin the normalisation (anchor, personal peak, clamping, coverage) rather than
+/// pin the normalisation (anchors, robust personal scale, clamping, coverage) rather than
 /// a brittle constant that would drift if the TRIMP coefficients ever changed.
 struct StrainEngineTests {
     let cal = Calendar(identifier: .gregorian)
@@ -73,13 +73,20 @@ struct StrainEngineTests {
         #expect((result?.strain ?? 100) < 34)
     }
 
-    @Test("A high personal peak lowers today's percentage — the scale is yours")
-    func personalPeak() {
-        let peakDay = rec(-30, minutes: 240, ratio: 0.9)
+    @Test("One exceptional day does not redefine the personal scale")
+    func oneOutlierDoesNotPersonalise() {
+        let peakDay = rec(-30, minutes: 400, ratio: 0.9)
         let today = rec(0, minutes: 60, ratio: 0.85)
         let result = eval([peakDay, today])
-        #expect(result?.strain == pct(trimp(today), over: trimp(peakDay)))
-        // Lower than the same session reads against the anchor for a lighter base.
+        #expect(result?.strain == pct(trimp(today), over: StrainEngine.referenceAnchorTrimp))
+    }
+
+    @Test("Enough high-load days raise the scale using the personal 95th percentile")
+    func robustPersonalReference() {
+        let history = (-12 ... -1).map { rec($0, minutes: 260, ratio: 0.9) }
+        let today = rec(0, minutes: 60, ratio: 0.85)
+        let result = eval(history + [today])
+        #expect((result?.aerobicReference ?? 0) > StrainEngine.referenceAnchorTrimp)
         #expect((result?.strain ?? 100) < pct(trimp(today), over: StrainEngine.referenceAnchorTrimp))
     }
 
@@ -100,5 +107,53 @@ struct StrainEngineTests {
         let result = eval([measured, unmeasured])
         #expect(result?.dataCompleteness == 0.5)
         #expect(result?.strain == pct(trimp(measured), over: StrainEngine.referenceAnchorTrimp))
+    }
+
+    @Test("Minute heart rate preserves hard intervals hidden by the session average")
+    func minuteSegmentsPreserveIntervals() {
+        let average = rec(0, minutes: 60, ratio: 0.6)
+        let segments = CardioRecord(
+            date: at(0), durationMinutes: 60, avgHeartRate: hr(0.6),
+            heartRateSegments: [
+                .init(durationMinutes: 30, avgHeartRate: hr(0.3)),
+                .init(durationMinutes: 30, avgHeartRate: hr(0.9))
+            ])
+        #expect(trimp(segments) > trimp(average))
+    }
+
+    @Test("Session RPE scores a phone workout without heart rate")
+    func rpeFallback() {
+        let workout = StrainWorkout(date: at(0), durationMinutes: 60,
+                                    sessionRPE: 8)
+        let result = StrainEngine().evaluate(workouts: [workout], on: day,
+                                             restingHR: nil, age: age,
+                                             isFemale: false, calendar: cal)
+        #expect(result?.rawEffort == 480)
+        #expect(result?.strain == 80)
+        #expect(result?.dataCompleteness == 1)
+    }
+
+    @Test("Completed strength sets provide a fallback when RPE is skipped")
+    func strengthSetFallback() {
+        let workout = StrainWorkout(
+            date: at(0), durationMinutes: 45,
+            strengthSets: Array(repeating: .init(reps: 8, rir: 1), count: 10))
+        let result = StrainEngine().evaluate(workouts: [workout], on: day,
+                                             restingHR: nil, age: age,
+                                             isFemale: false, calendar: cal)
+        #expect((result?.rawEffort ?? 0) > 0)
+        #expect((result?.strain ?? 0) > 0)
+    }
+
+    @Test("Heart rate is primary and RPE does not double-count the same workout")
+    func noDoubleCount() {
+        let cardio = rec(0, minutes: 60, ratio: 0.75)
+        let workout = StrainWorkout(date: cardio.date, durationMinutes: cardio.durationMinutes,
+                                    avgHeartRate: cardio.avgHeartRate, sessionRPE: 10)
+        let result = StrainEngine().evaluate(workouts: [workout], on: day,
+                                             restingHR: restingHR, age: age,
+                                             isFemale: false, calendar: cal)
+        #expect(result?.rawEffort == 0)
+        #expect(result?.rawTrimp == trimp(cardio))
     }
 }
