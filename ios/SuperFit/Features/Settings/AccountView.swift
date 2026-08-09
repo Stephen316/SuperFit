@@ -94,7 +94,9 @@ struct AccountView: View {
 
     private var storageSection: some View {
         Section {
-            LabeledContent("On-device storage") {
+            HStack(spacing: 12) {
+                Text("On-device storage")
+                Spacer()
                 if AppSchema.isEphemeral {
                     Label("Unavailable", systemImage: "xmark.icloud")
                         .foregroundStyle(.red)
