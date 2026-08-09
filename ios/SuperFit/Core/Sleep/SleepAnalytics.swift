@@ -24,6 +24,36 @@ struct SleepSummary: Sendable {
     let nights: Int
 }
 
+/// One night's overall sleep quality, on the same 0…100 scale as the dashboard
+/// recovery and strain gauges.
+struct OverallSleepScore: Sendable, Equatable {
+    let score: Double
+    let durationScore: Double
+    let efficiencyScore: Double?
+    let remScore: Double?
+    let deepScore: Double?
+    /// Share of the normal component weight backed by measured data.
+    let dataCompleteness: Double
+
+    var band: OverallSleepBand { OverallSleepBand(roundedScore: score) }
+}
+
+enum OverallSleepBand: String, Sendable, CaseIterable {
+    case poor = "Poor"
+    case fair = "Fair"
+    case good = "Good"
+    case excellent = "Excellent"
+
+    init(roundedScore score: Double) {
+        switch score {
+        case ..<60: self = .poor
+        case ..<75: self = .fair
+        case ..<90: self = .good
+        default: self = .excellent
+        }
+    }
+}
+
 /// Correlation between sleep duration and next-morning recovery markers.
 struct SleepImpact: Sendable {
     let longNightHRV: Double
@@ -41,6 +71,52 @@ struct SleepImpact: Sendable {
 struct SleepAnalytics: Sendable {
 
     static let defaultNeedMinutes = 480
+
+    /// Bevel-style overall score using the contributors SuperFit can read
+    /// reliably from Apple Health:
+    ///
+    /// - duration against sleep need: 50%
+    /// - efficiency (time asleep / time in bed): 20%
+    /// - REM share against 20% of sleep: 15%
+    /// - deep share against 13% of sleep: 15%
+    ///
+    /// Heart-rate dip and interruption count are not available in SuperFit's
+    /// current stored sleep model, so they are not guessed. Missing efficiency
+    /// or stage data drops out and the measured weights renormalize to 100%.
+    /// This lets phone-only sleep remain useful without treating absent watch
+    /// data as a bad night.
+    func overallScore(for night: SleepNight,
+                      needMinutes: Int = defaultNeedMinutes) -> OverallSleepScore? {
+        guard night.asleepMinutes > 0, needMinutes > 0 else { return nil }
+
+        let duration = min(Double(night.asleepMinutes) / Double(needMinutes), 1)
+        var parts: [(weight: Double, value: Double)] = [(0.50, duration)]
+
+        let efficiency = night.efficiency?.clamped(to: 0...1)
+        if let efficiency { parts.append((0.20, efficiency)) }
+
+        var rem: Double?
+        var deep: Double?
+        if night.hasStages {
+            let total = Double(night.asleepMinutes)
+            let remValue = min((Double(night.remMinutes) / total) / 0.20, 1).clamped(to: 0...1)
+            let deepValue = min((Double(night.deepMinutes) / total) / 0.13, 1).clamped(to: 0...1)
+            rem = remValue
+            deep = deepValue
+            parts.append((0.15, remValue))
+            parts.append((0.15, deepValue))
+        }
+
+        let availableWeight = parts.reduce(0) { $0 + $1.weight }
+        let score = (parts.reduce(0) { $0 + $1.weight * $1.value }
+                     / availableWeight * 100).rounded()
+        return OverallSleepScore(score: score,
+                                 durationScore: (duration * 100).rounded(),
+                                 efficiencyScore: efficiency.map { ($0 * 100).rounded() },
+                                 remScore: rem.map { ($0 * 100).rounded() },
+                                 deepScore: deep.map { ($0 * 100).rounded() },
+                                 dataCompleteness: availableWeight)
+    }
 
     func summary(_ nights: [SleepNight], needMinutes: Int = defaultNeedMinutes) -> SleepSummary? {
         let slept = nights.filter { $0.asleepMinutes > 0 }

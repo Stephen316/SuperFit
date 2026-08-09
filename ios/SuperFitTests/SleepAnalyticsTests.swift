@@ -6,17 +6,59 @@ private let cal = Calendar(identifier: .gregorian)
 private let day0 = cal.startOfDay(for: Date(timeIntervalSince1970: 1_750_000_000))
 
 private func night(_ dayOffset: Int, asleep: Int, inBed: Int? = nil,
+                   deep: Int = 0, rem: Int = 0, core: Int = 0,
                    bedHour: Int? = nil, bedMinute: Int = 0) -> SleepNight {
     let date = cal.date(byAdding: .day, value: dayOffset, to: day0)!
     let bedtime = bedHour.map {
         cal.date(bySettingHour: $0, minute: bedMinute, second: 0, of: date)!
     }
     return SleepNight(date: date, asleepMinutes: asleep, inBedMinutes: inBed ?? asleep,
-                      deepMinutes: 0, remMinutes: 0, coreMinutes: 0,
+                      deepMinutes: deep, remMinutes: rem, coreMinutes: core,
                       bedtime: bedtime, wakeTime: nil)
 }
 
 struct SleepAnalyticsTests {
+
+    // MARK: Overall score
+
+    @Test func completeExcellentNightScoresOneHundred() throws {
+        let score = try #require(SleepAnalytics().overallScore(
+            for: night(0, asleep: 480, inBed: 480, deep: 63, rem: 96, core: 321)))
+        #expect(score.score == 100)
+        #expect(score.band == .excellent)
+        #expect(score.dataCompleteness == 1)
+    }
+
+    @Test func overallScoreCombinesDurationEfficiencyAndStages() throws {
+        let score = try #require(SleepAnalytics().overallScore(
+            for: night(0, asleep: 360, inBed: 400, deep: 47, rem: 72, core: 241)))
+        // 50% × 75 duration + 20% × 90 efficiency + full REM/deep credit.
+        #expect(score.score == 86)
+        #expect(score.durationScore == 75)
+        #expect(score.efficiencyScore == 90)
+        #expect(score.band == .good)
+    }
+
+    @Test func phoneOnlySleepUsesDurationWithoutInventingMissingQuality() throws {
+        let score = try #require(SleepAnalytics().overallScore(
+            for: night(0, asleep: 360, inBed: 0)))
+        #expect(score.score == 75)
+        #expect(score.efficiencyScore == nil)
+        #expect(score.remScore == nil)
+        #expect(score.deepScore == nil)
+        #expect(score.dataCompleteness == 0.5)
+    }
+
+    @Test func overallScoreNeedsActualSleep() {
+        #expect(SleepAnalytics().overallScore(for: night(0, asleep: 0)) == nil)
+    }
+
+    @Test func overallBandsUseTheRoundedDisplayedScore() {
+        #expect(OverallSleepBand(roundedScore: 59) == .poor)
+        #expect(OverallSleepBand(roundedScore: 60) == .fair)
+        #expect(OverallSleepBand(roundedScore: 75) == .good)
+        #expect(OverallSleepBand(roundedScore: 90) == .excellent)
+    }
 
     @Test func summaryAveragesAndDebt() {
         let nights = [night(0, asleep: 420), night(1, asleep: 480), night(2, asleep: 450)]

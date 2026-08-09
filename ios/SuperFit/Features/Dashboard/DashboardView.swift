@@ -138,6 +138,18 @@ struct DashboardView: View {
         let d = bounds
         return sleep.first { d.contains($0.date) }
     }
+    private var latestSleepScore: OverallSleepScore? {
+        guard let row = lastSleep else { return nil }
+        let night = SleepNight(date: row.date,
+                               asleepMinutes: row.asleepMinutes,
+                               inBedMinutes: row.inBedMinutes,
+                               deepMinutes: row.deepMinutes,
+                               remMinutes: row.remMinutes,
+                               coreMinutes: row.coreMinutes,
+                               bedtime: row.bedtime,
+                               wakeTime: row.wakeTime)
+        return SleepAnalytics().overallScore(for: night)
+    }
     private var todayVitals: DailyVitals? {
         let d = bounds
         return vitals.first { d.contains($0.date) }
@@ -486,11 +498,11 @@ struct DashboardView: View {
     // MARK: - Cards
 
     /// recovery-section: three gauges across — Recovery (how ready), Strain (how
-    /// hard today was) and Sleep (efficiency), the triad Bevel and WHOOP show.
+    /// hard today was) and Sleep (overall quality), the triad Bevel and WHOOP show.
     ///
     /// All are Health-backed: no sleep or heart data means no recovery score, no
-    /// heart-rate-carrying workout means no strain, and unknown time-in-bed means
-    /// no efficiency — each says so rather than drawing a zero. The setup-help link
+    /// heart-rate-carrying workout means no strain, and no sleep duration means no
+    /// sleep score — each says so rather than drawing a zero. The setup-help link
     /// appears only when none has data and no watch is connected, so a set-up user
     /// on a plain rest day isn't nagged.
     private var recoverySection: some View {
@@ -498,9 +510,8 @@ struct DashboardView: View {
         let recoveryHasData = (recovery?.dataCompleteness ?? 0) > 0
         let strain = todayStrain
         let strainHasData = (strain?.dataCompleteness ?? 0) > 0
-        let sleepEfficiency = lastSleep?.efficiency
-        let sleepHasData = sleepEfficiency != nil
-        let sleepPercent = ((sleepEfficiency ?? 0) * 100).rounded()
+        let sleepScore = latestSleepScore
+        let sleepHasData = sleepScore != nil
         let needsWatch = !recoveryHasData && !strainHasData && !sleepHasData && !watchConnected
         return VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
@@ -518,10 +529,10 @@ struct DashboardView: View {
                     tint: Theme.strain)
                 metricGauge(
                     title: "Sleep",
-                    value: sleepPercent,
+                    value: sleepScore?.score ?? 0,
                     hasData: sleepHasData,
                     subtitle: sleepHasData
-                        ? SleepEfficiencyBand(roundedPercent: sleepPercent).rawValue
+                        ? (sleepScore?.band.rawValue ?? "—")
                         : "No data yet",
                     tint: Theme.sleep)
             }

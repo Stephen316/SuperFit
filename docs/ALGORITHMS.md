@@ -466,6 +466,29 @@ Sleep is stored per wake-day with duration, stages, and — from `SleepSampleBui
 used for bedtime: they include lying awake reading, which blurs the consistency
 signal.
 
+### Overall sleep score
+
+The dashboard Sleep gauge is a quality score, not the raw sleep-efficiency
+percentage. It uses the Bevel-style contributors SuperFit can actually read from
+Apple Health and publishes its weights instead of presenting a black box:
+
+| component | weight | scoring |
+|---|---:|---|
+| Duration | 50% | `min(time asleep / 8 h need, 1)` |
+| Efficiency | 20% | time asleep / time in bed, clamped to 0…1 |
+| REM | 15% | REM share / 20% target, capped at 1 |
+| Deep | 15% | deep share / 13% target, capped at 1 |
+
+`score = round(100 × Σ(weight × component) / Σ(available weights))`
+
+The REM and deep reference shares are pragmatic adult targets, not diagnostic
+thresholds. More than the target earns no bonus and is not penalised. Heart-rate
+dip and interruption count are contributors in Bevel but are not stored by
+SuperFit, so the app does not fabricate them. Phone-only tracking therefore
+scores duration alone; missing efficiency or stages are removed and the measured
+weights renormalize. Bands use the displayed rounded score: under 60 Poor, 60–74
+Fair, 75–89 Good, and 90–100 Excellent.
+
 - **Debt** is one-directional: `Σ max(0, need − asleep)`. A long Sunday cannot
   repay a short Monday, because sleep loss is not a bank balance.
 - **Consistency** is the SD of bedtime, with times mapped onto an axis centred on
