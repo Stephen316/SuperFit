@@ -362,7 +362,7 @@ struct NutrientBar: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Theme.track)
                     Capsule().fill(tint).frame(width: geo.size.width * fraction)
                 }
             }

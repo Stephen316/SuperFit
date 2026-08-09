@@ -23,6 +23,7 @@ enum AppTab: String, CaseIterable {
 struct RootView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @State private var tab = AppTab.home
     @State private var garmin = GarminProvider()
 
@@ -58,7 +59,7 @@ struct RootView: View {
                     .padding(.top, 4)
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(appearance.colorScheme)
         .onOpenURL { handleDeepLink($0) }
         .task {
             ensureProfile()
@@ -70,6 +71,10 @@ struct RootView: View {
             // that screen is never opened.
             SupplementCatalog.seedIfNeeded(context: context)
         }
+    }
+
+    private var appearance: AppAppearance {
+        AppAppearance(rawValue: appearanceRaw) ?? .dark
     }
 
     private func ensureProfile() {

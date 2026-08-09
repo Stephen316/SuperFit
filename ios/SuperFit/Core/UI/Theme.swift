@@ -1,7 +1,34 @@
 import SwiftUI
+import UIKit
+
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    static let storageKey = "appAppearance"
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
 
 /// Design tokens sampled from the reference design (#164d50).
-/// Dark teal→black gradient, hairline-outlined cards, muted gold accent.
+/// Deep teal backdrop, hairline-outlined cards, muted gold accent.
 enum Theme {
 
     // MARK: Colour
@@ -20,29 +47,26 @@ enum Theme {
     /// distinctly from the gold recovery ring beside it. Kept in the teal family
     /// of the background rather than an unrelated hue — one deliberate companion
     /// to the gold, not an ad-hoc colour.
-    static let strain = Color(hex: 0x4FA3B5)
+    static let strain = Color(light: 0x287689, dark: 0x4FA3B5)
     /// The third gauge accent, for sleep — a calm indigo, the conventional sleep
     /// hue, distinct from the gold recovery and teal strain rings it sits beside.
-    static let sleep = Color(hex: 0x8079C7)
-    static let backgroundTop = Color(hex: 0x0C2627) // frame gradient stop 0
-    static let backgroundBottom = Color.black       // frame gradient stop 1
-    static let surface = Color(hex: 0x0F1D20)       // every card fill
-    static let tabBar = Color(hex: 0x0A181B)        // bottom-navigation
-    static let homeWell = Color(hex: 0x162D33)      // the raised home circle
+    static let sleep = Color(light: 0x625AA7, dark: 0x8079C7)
+    static let backgroundBase = Color(light: 0xFFFFFF, dark: 0x051011)
+    static let surface = Color(light: 0xE4EEEE, dark: 0x0F1D20)
+    static let tabBar = Color(light: 0xD8E5E5, dark: 0x0A181B)
+    static let homeWell = Color(light: 0xC8DADB, dark: 0x162D33)
 
-    static let textPrimary = Color.white
-    static let textSecondary = Color(hex: 0x799195) // every muted label
-    static let hairline = Color(hex: 0x1D3437)
-    static let divider = Color(hex: 0x1D3437)
+    static let textPrimary = Color(light: 0x122426, dark: 0xFFFFFF)
+    static let textSecondary = Color(light: 0x4F676A, dark: 0x799195)
+    static let hairline = Color(light: 0xBED0D1, dark: 0x1D3437)
+    static let divider = hairline
     /// The gauge track and the settings button share this wash.
-    static let wash = Color.white.opacity(0.05)
+    static let wash = Color(light: 0xE7EEEE, dark: 0x1A2729)
+    static let track = Color(light: 0xCADADB, dark: 0x232B2D)
 
-    /// The app's backdrop. Fixed to the screen, so scrolling content moves over
-    /// a still gradient rather than dragging it along.
+    /// The app's adaptive solid backdrop.
     static var background: some View {
-        LinearGradient(colors: [backgroundTop, backgroundBottom],
-                       startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea()
+        backgroundBase.ignoresSafeArea()
     }
 
     // MARK: Type
@@ -86,6 +110,23 @@ extension Color {
                   green: Double((hex >> 8) & 0xFF) / 255,
                   blue: Double(hex & 0xFF) / 255,
                   opacity: 1)
+    }
+
+    init(light: UInt32, dark: UInt32) {
+        self.init(uiColor: UIColor { traits in
+            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 
@@ -155,7 +196,7 @@ struct StatBlock: View {
 }
 
 extension View {
-    /// Drops a `List`/`Form` onto the gradient: clears the system grouped
+    /// Drops a `List`/`Form` onto the backdrop: clears the system grouped
     /// background, restyles rows as translucent surfaces, and leaves room for
     /// the floating tab bar.
     func themedList(bottomPadding: CGFloat = 96) -> some View {
@@ -165,7 +206,6 @@ extension View {
             .tint(Theme.gold)
             .safeAreaPadding(.bottom, bottomPadding)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .font(Theme.font(16))
     }
 }
@@ -193,6 +233,5 @@ struct ThemedScreen<Content: View>: View {
         // Was `.hidden`, which on iOS 26 leaves the bar as Liquid Glass floating
         // over the gradient. Opaque and themed, matching every other screen.
         .themedChrome()
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }

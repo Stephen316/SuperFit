@@ -100,7 +100,7 @@ struct SleepView: View {
                     BarMark(x: .value("Date", n.date, unit: .day),
                             y: .value("Hours", Double(n.asleepMinutes) / 60))
                         .foregroundStyle(n.asleepMinutes >= SleepAnalytics.defaultNeedMinutes
-                                         ? Theme.gold : Color.white.opacity(0.25))
+                                         ? Theme.gold : Theme.textSecondary.opacity(0.6))
                 }
                 RuleMark(y: .value("Need", Double(SleepAnalytics.defaultNeedMinutes) / 60))
                     .lineStyle(.init(lineWidth: 1, dash: [4, 3]))
@@ -134,7 +134,7 @@ struct SleepView: View {
         return Section {
             stageRow("Deep", minutes: deep / staged.count, share: Double(deep) / total, tint: Theme.gold)
             stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: Theme.gold.opacity(0.65))
-            stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Color.white.opacity(0.35))
+            stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Theme.textSecondary)
         } header: {
             Text("Stages — nightly average")
         } footer: {
@@ -219,7 +219,7 @@ struct SleepView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Theme.track)
                     Capsule().fill(tint).frame(width: geo.size.width * share)
                 }
             }

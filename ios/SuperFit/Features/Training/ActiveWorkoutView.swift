@@ -438,7 +438,7 @@ struct ExercisePickerView: View {
                             if exercise.isCustom {
                                 Text("Custom").font(.caption2)
                                     .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color.white.opacity(0.12))
+                                    .background(Theme.track)
                                     .clipShape(RoundedRectangle(cornerRadius: 4))
                             }
                         }

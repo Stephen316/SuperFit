@@ -160,14 +160,13 @@ private struct FeatureListModifier: ViewModifier {
         content
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(Theme.backgroundTop)
+            .background(Theme.backgroundBase)
             .listRowBackground(Theme.surface)
             .listRowSeparatorTint(Theme.hairline)
             .tint(Theme.gold)
             .safeAreaPadding(.bottom, bottomPadding)
             .toolbarBackground(Theme.tabBar, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .font(Theme.text(16))
     }
 }
@@ -198,7 +197,7 @@ extension View {
 
 struct FeatureBackground: View {
     var body: some View {
-        Theme.backgroundTop.ignoresSafeArea()
+        Theme.backgroundBase.ignoresSafeArea()
     }
 }
 

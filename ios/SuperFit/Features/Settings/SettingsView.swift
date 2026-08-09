@@ -16,6 +16,7 @@ extension View {
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
     @AppStorage(FoodRegionSetting.storageKey) private var foodRegionRaw = FoodRegionSetting.automatic
 
@@ -40,7 +41,6 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .themedChrome()
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
@@ -115,6 +115,24 @@ struct SettingsView: View {
         SettingsSection(title: "Preferences") {
             ThemeCard(padding: 16, radius: Theme.cardRadiusCompact) {
                 VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "circle.lefthalf.filled")
+                            .foregroundStyle(Theme.gold)
+                            .frame(width: 24)
+                        Text("Appearance")
+                            .font(Theme.font(16, .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer()
+                    }
+
+                    FeatureTabControl(
+                        options: AppAppearance.allCases.map { ($0.rawValue, $0.title) },
+                        selection: $appearanceRaw
+                    )
+
+                    Divider()
+                        .overlay(Theme.divider)
+
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             Image(systemName: "ruler")
@@ -308,7 +326,6 @@ private struct PrivacyAboutView: View {
         .navigationTitle("Privacy & about")
         .navigationBarTitleDisplayMode(.inline)
         .themedChrome()
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 
     private var deviceStorageDetail: String {

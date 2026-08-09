@@ -318,7 +318,6 @@ struct FoodPickerView: View {
             .navigationTitle("Scan barcode")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
 

@@ -73,7 +73,6 @@ struct HistoryView: View {
         .navigationTitle("Trends")
         .navigationBarTitleDisplayMode(.inline)
         .themedChrome()
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
     }
 
@@ -147,7 +146,7 @@ struct HistoryView: View {
                 if range.showsDailyPoints {
                     ForEach(intake) { p in
                         PointMark(x: .value("Date", p.date), y: .value("Intake", p.value))
-                            .foregroundStyle(Color.white.opacity(0.20))
+                            .foregroundStyle(Theme.textSecondary.opacity(0.55))
                             .symbolSize(12)
                     }
                 }
@@ -216,7 +215,7 @@ struct HistoryView: View {
             content: {
                 ForEach(points) { p in
                     PointMark(x: .value("Date", p.date), y: .value("Weight", p.value))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
                         .symbolSize(14)
                 }
                 ForEach(trend) { p in
@@ -328,7 +327,7 @@ struct HistoryView: View {
                 ForEach(total) { p in
                     LineMark(x: .value("Date", p.date), y: .value("Weight", p.value),
                              series: .value("Series", "Total"))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.75))
                         .interpolationMethod(.monotone)
                 }
                 ForEach(lean) { p in
@@ -363,7 +362,7 @@ struct HistoryView: View {
                     .foregroundStyle(Theme.divider)
                 ForEach(points) { p in
                     PointMark(x: .value("Date", p.date), y: .value("Score", p.value))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
                         .symbolSize(14)
                 }
                 ForEach(mean) { p in
@@ -395,7 +394,7 @@ struct HistoryView: View {
                 ForEach(HistorySeries.rollingMean(rhr)) { p in
                     LineMark(x: .value("Date", p.date), y: .value("RHR", p.value),
                              series: .value("Series", "Resting HR"))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(Theme.textSecondary)
                         .interpolationMethod(.monotone)
                 }
             },

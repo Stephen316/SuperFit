@@ -99,7 +99,7 @@ struct WeightView: View {
                         ForEach(chartData) { m in
                             PointMark(x: .value("Date", m.date),
                                       y: .value("Weight", units.displayWeight(m.weightKg)))
-                                .foregroundStyle(Color.white.opacity(0.30))
+                                .foregroundStyle(Theme.textSecondary.opacity(0.7))
                                 .symbolSize(18)
                             if let t = m.trendWeightKg {
                                 LineMark(x: .value("Date", m.date),

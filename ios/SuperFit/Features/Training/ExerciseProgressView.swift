@@ -60,7 +60,6 @@ struct ExerciseProgressView: View {
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 
     private func chart(for s: LiftProgressSeries) -> some View {
