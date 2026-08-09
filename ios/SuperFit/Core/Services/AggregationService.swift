@@ -56,6 +56,7 @@ final class AggregationService {
         upsertMetabolicEstimates()
         refreshCyclicalPatterns()
         upsertTodayRecovery()
+        upsertTodayStrain()
         try? context.save()
     }
 
@@ -286,6 +287,54 @@ final class AggregationService {
         row.score = result.score
         row.recommendationRaw = result.recommendation.rawValue
         row.dataCompleteness = result.dataCompleteness
+    }
+
+    // MARK: - Strain
+
+    /// Today's cardiovascular strain from workouts. Needs a resting-HR reading to
+    /// scale intensity, so it degrades to "no data" without one — the same watch
+    /// dependency as recovery. Strength is included; strain is total exertion.
+    func upsertTodayStrain() {
+        let today = cal.startOfDay(for: .now)
+        guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first else { return }
+
+        let vitals = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
+        let restingHR = vitals.sorted { $0.date > $1.date }.compactMap(\.restingHR).first
+
+        var result: StrainEngine.Result?
+        if let restingHR {
+            let windowStart = cal.date(byAdding: .day, value: -StrainEngine.referenceWindowDays,
+                                       to: today) ?? today
+            let query = FetchDescriptor<WorkoutRecord>(
+                predicate: #Predicate { $0.startedAt >= windowStart })
+            let records = ((try? context.fetch(query)) ?? []).map {
+                CardioRecord(date: $0.startedAt,
+                             durationMinutes: $0.durationSeconds / 60,
+                             avgHeartRate: $0.avgHeartRate)
+            }
+            result = StrainEngine().evaluate(records: records, on: today,
+                                             restingHR: restingHR,
+                                             age: Double(profile.ageYears),
+                                             isFemale: profile.sex == .female,
+                                             calendar: cal)
+        }
+
+        let bounds = DayBounds(today, calendar: cal)
+        let dayEnd = bounds.end
+        let query = FetchDescriptor<StrainRecord>(
+            predicate: #Predicate { $0.date >= today && $0.date < dayEnd })
+        let existing = (try? context.fetch(query)) ?? []
+        let row = existing.first { bounds.contains($0.date) }
+            ?? {
+                let r = StrainRecord(date: today, strain: 0, rawTrimp: 0,
+                                     bandRaw: "", dataCompleteness: 0)
+                context.insert(r)
+                return r
+            }()
+        row.strain = result?.strain ?? 0
+        row.rawTrimp = result?.rawTrimp ?? 0
+        row.bandRaw = result?.band.rawValue ?? ""
+        row.dataCompleteness = result?.dataCompleteness ?? 0
     }
 
     func recoveryInputs(for day: Date) -> RecoveryInputs {

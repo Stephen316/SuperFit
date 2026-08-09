@@ -16,6 +16,14 @@ enum Theme {
     /// selected tab look like a different shade of wrong next to everything else.
     /// One wins, and it's the one on the icon you look at most.
     static let gold = Color(hex: 0xC3A920)
+    /// A second, cooler accent used only for the strain gauge, so effort reads
+    /// distinctly from the gold recovery ring beside it. Kept in the teal family
+    /// of the background rather than an unrelated hue — one deliberate companion
+    /// to the gold, not an ad-hoc colour.
+    static let strain = Color(hex: 0x4FA3B5)
+    /// The third gauge accent, for sleep — a calm indigo, the conventional sleep
+    /// hue, distinct from the gold recovery and teal strain rings it sits beside.
+    static let sleep = Color(hex: 0x8079C7)
     static let backgroundTop = Color(hex: 0x0C2627) // frame gradient stop 0
     static let backgroundBottom = Color.black       // frame gradient stop 1
     static let surface = Color(hex: 0x0F1D20)       // every card fill
