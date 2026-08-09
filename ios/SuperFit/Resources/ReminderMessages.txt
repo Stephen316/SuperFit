@@ -13,7 +13,7 @@ title=Lunch check-in
 Don't make me angry, log your lunch!
 Your afternoon runs better on good food, or any food.
 You know what time it is.
-Was it yum?
+Was it yum? You better tell me.
 
 [workout]
 title=Time to train
