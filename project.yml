@@ -14,6 +14,10 @@ name: SuperFit
 options:
   bundleIdPrefix: com.stephenh
   createIntermediateGroups: true
+  # Keeps Xcode's recommended-settings state in the generated project. Without
+  # this, XcodeGen writes an old LastUpgradeCheck and Xcode 26 offers the same
+  # one-time migration every time the project is regenerated.
+  xcodeVersion: "26.6"
   # iOS 17 is a hard floor, not a preference: @Observable, safeAreaPadding and
   # scrollContentBackground are all 17-only. Below it the app will not compile.
   deploymentTarget:
@@ -21,6 +25,8 @@ options:
 
 settings:
   base:
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
     SWIFT_STRICT_CONCURRENCY: complete
     # SE-0418. Without it every `#Predicate` on a @Model type warns that its
     # key path literal isn't Sendable — `KeyPath<Food, UUID>` can't be, because
