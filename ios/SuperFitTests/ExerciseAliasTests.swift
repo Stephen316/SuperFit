@@ -67,6 +67,42 @@ struct ExerciseAliasTests {
         #expect(Set(names).count == names.count)
     }
 
+    @Test func theCatalogueIncludesExpandedMachineFamilies() {
+        let names = Set(ExerciseLibrary.catalog.map(\.name))
+        let expected = [
+            "Incline Machine Chest Press", "Neutral-Grip Machine Chest Press",
+            "Machine High Row", "Machine Low Row", "Neutral-Grip Machine Row",
+            "Plate-Loaded Pulldown", "V-Squat Machine", "Reverse Hack Squat",
+            "Kneeling Leg Curl", "Machine Glute Kickback", "Machine Crunch",
+        ]
+        for name in expected { #expect(names.contains(name), "missing \(name)") }
+
+        #expect(exercise("Incline Machine Chest Press")
+            .matches("incline chest press machine"))
+        #expect(exercise("Neutral-Grip Machine Chest Press")
+            .matches("neutral grip chest press machine"))
+    }
+
+    /// Machine names are not cosmetic duplicates when the movement path changes.
+    /// The incline path biases clavicular pec, a neutral press remains chest-led
+    /// with more elbow-extension demand, and an elbows-out row shifts credit from
+    /// lats toward scapular retractors and rear delts.
+    @Test func expandedMachineTensionMapsReflectMovementPath() {
+        let incline = entry("Incline Machine Chest Press").tension
+        #expect(incline[.upperChest] == 5)
+        #expect(incline[.chest] == 3)
+
+        let neutralPress = entry("Neutral-Grip Machine Chest Press").tension
+        #expect(neutralPress[.chest] == 5)
+        #expect(neutralPress[.tricepsLong] == 4)
+
+        let neutralRow = entry("Neutral-Grip Machine Row").tension
+        let wideRow = entry("Wide-Grip Machine Row").tension
+        #expect(neutralRow[.lats] == 5)
+        #expect(wideRow[.rhomboids] == 5)
+        #expect(wideRow[.rearDelts] == 4)
+    }
+
     /// An alias pointing at two different lifts would make one of them
     /// unreachable by that term, which is worse than having no alias.
     @Test func noAliasIsSharedByTwoExercises() {

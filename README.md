@@ -17,7 +17,7 @@ what you eat and what the scale does over rolling 7/14/30-day windows.
   to the calorie target, with a hard floor at basal metabolic rate.
 - **Micronutrients** — 14 vitamins, minerals, and health markers against reference
   intakes adjusted for sex, age, goal, and training volume.
-- **Training** — 132-exercise catalog with 1–5 muscle-tension scores across 37
+- **Training** — 195-exercise catalog with 1–5 muscle-tension scores across 37
   muscle groups, e1RM progression, custom exercises, and reusable saved workouts.
   Aliases are searchable but never shown, so one lift keeps one name and a year of
   logs stays comparable.
