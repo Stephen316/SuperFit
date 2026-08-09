@@ -139,6 +139,24 @@ struct TrainingView: View {
         }
     }
 
+    /// Watch strength records are retained for heart rate, but their overlapping
+    /// phone session is the single row the user sees.
+    private var displayedWorkouts: [WorkoutRecord] {
+        let completed = sessions.compactMap { session -> DateInterval? in
+            guard Self.hasCompletedWork(session), let end = session.endedAt,
+                  end > session.startedAt else { return nil }
+            return DateInterval(start: session.startedAt, end: end)
+        }
+        let strengthIndices = workouts.indices.filter {
+            workouts[$0].activity.isStrength && workouts[$0].durationSeconds > 0
+        }
+        let matched = Set(WorkoutTimeMatcher.matches(
+            workouts: strengthIndices.map {
+                DateInterval(start: workouts[$0].startedAt, end: workouts[$0].endedAt)
+            }, sessions: completed).keys.map { strengthIndices[$0] })
+        return workouts.enumerated().compactMap { matched.contains($0.offset) ? nil : $0.element }
+    }
+
     /// The seven days before today, newest first, grouped by day.
     ///
     /// Today is excluded because it has its own section — carrying it in both
@@ -321,16 +339,16 @@ struct TrainingView: View {
                     }
                 }
 
-                if !workouts.isEmpty {
+                if !displayedWorkouts.isEmpty {
                     Section("Activities") {
-                        ForEach(workouts.prefix(30)) { workout in
+                        ForEach(displayedWorkouts.prefix(30)) { workout in
                             Button { detailWorkout = workout } label: {
                                 WorkoutRow(workout: workout, units: units)
                             }
                             .buttonStyle(.plain)
                         }
                         .onDelete { offsets in
-                            let shown = Array(workouts.prefix(30))
+                            let shown = Array(displayedWorkouts.prefix(30))
                             for i in offsets { context.delete(shown[i]) }
                             try? context.save()
                         }
@@ -396,9 +414,9 @@ struct TrainingView: View {
                     }
                 }
             }
-        } else if !watch.todaysWorkouts.isEmpty {
+        } else if !unimportedWatchWorkouts.isEmpty {
             Section("Today from Apple Watch") {
-                ForEach(watch.todaysWorkouts, id: \.externalID) { w in
+                ForEach(unimportedWatchWorkouts, id: \.externalID) { w in
                     HStack {
                         Image(systemName: w.activity.symbolName)
                         Text(w.activity.displayName)

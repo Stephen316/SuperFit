@@ -33,6 +33,9 @@ struct StrainEngine: Sendable {
     static let referenceWindowDays = 42
     /// Avoid personalising a scale from a handful of isolated sessions.
     static let minimumReferenceDays = 10
+    /// Below half-session coverage, complete RPE/set data is the more reliable
+    /// representation of the workout than a few isolated watch minutes.
+    static let minimumHeartRateCoverage = 0.5
 
     enum Band: String, Sendable {
         case light = "Light"
@@ -75,10 +78,15 @@ struct StrainEngine: Sendable {
             if let restingHR,
                let trimp = CardioLoadAnalyzer.trimp(cardio, restingHR: restingHR,
                                                     maxHR: maxHR, isFemale: isFemale) {
-                aerobicByDay[dayKey, default: 0] += trimp
-                if bounds.contains(workout.date) {
-                    todayCoverage.append(heartRateCoverage(for: workout))
+                let coverage = heartRateCoverage(for: workout)
+                let fallback = Self.fallbackEffort(for: workout)
+                if coverage >= Self.minimumHeartRateCoverage || fallback == nil {
+                    aerobicByDay[dayKey, default: 0] += trimp
+                    if bounds.contains(workout.date) { todayCoverage.append(coverage) }
+                    continue
                 }
+                effortByDay[dayKey, default: 0] += fallback ?? 0
+                if bounds.contains(workout.date) { todayCoverage.append(1) }
                 continue
             }
 

@@ -325,6 +325,20 @@ available **once per workout**, in this order:
    and reps-in-reserve. This is explicitly an estimate rather than a validated
    physiological measurement; missing RIR assumes 2, a neutral working-set value.
 
+Watch and SuperFit recordings are reconciled when at least half of the shorter
+recording overlaps in time. Cardio becomes one stored workout carrying the phone's
+RPE/location and the watch's heart-rate metrics. For strength, the set-by-set
+session and watch record remain separately stored but form one strain input: sets,
+RIR and RPE come from SuperFit while heart rate comes from the watch. Each recording
+can match only once, preventing one long watch session from absorbing two workouts.
+
+Minute heart rate must cover at least **50%** of the merged workout to outrank a
+complete RPE or set-based fallback. This prevents a single isolated watch minute
+from turning an otherwise fully logged hard session into near-zero strain.
+Heart-rate samples are restricted to those HealthKit associates with that workout;
+third-party workouts that omit the association fall back to the same source and
+device within the workout's time range, never every overlapping HR stream.
+
 Heart-rate load and fallback effort remain separate currencies. TRIMP uses a
 **300** anchor. RPE uses **600** (one hour at RPE 10); twenty hard-set equivalents
 map to the same fallback anchor. Each is divided by its own reference before the
@@ -467,10 +481,14 @@ the user knows the score is partial.
 
 ## 4. Sleep Analytics
 
-Sleep is stored per wake-day with duration, stages, and — from `SleepSampleBuilder`
-— the clock bounds of the *asleep* segments. In-bed bounds are deliberately not
-used for bedtime: they include lying awake reading, which blurs the consistency
-signal.
+Sleep is stored per wake-day with duration, stages, and the clock bounds of the
+*asleep* segments. Intervals separated by less than three hours form one night,
+including stages either side of midnight. Overlapping phone, watch and third-party
+intervals are unioned rather than summed, preventing one eight-hour night becoming
+sixteen hours. Stage composition comes from the source with the richest staged
+coverage so conflicting source classifications are not mixed. In-bed bounds are
+deliberately not used for bedtime: they include lying awake reading, which blurs
+the consistency signal.
 
 ### Overall sleep score
 

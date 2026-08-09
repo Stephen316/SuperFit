@@ -8,6 +8,7 @@ private struct StubHealth: HealthProvider {
     var isAvailable = true
     var mass: [BodyMassSample] = []
     var activity: [DailyActivity] = []
+    var sleepValues: [SleepSample] = []
     var rhr: [SampleValue] = []
     var hrvValues: [SampleValue] = []
 
@@ -17,7 +18,7 @@ private struct StubHealth: HealthProvider {
     func leanBodyMass(in range: DateInterval) async throws -> [SampleValue] { [] }
     func dailyActivity(in range: DateInterval) async throws -> [DailyActivity] { activity }
     func workouts(in range: DateInterval) async throws -> [WorkoutSample] { [] }
-    func sleep(in range: DateInterval) async throws -> [SleepSample] { [] }
+    func sleep(in range: DateInterval) async throws -> [SleepSample] { sleepValues }
     func restingHeartRate(in range: DateInterval) async throws -> [SampleValue] { rhr }
     func hrv(in range: DateInterval) async throws -> [SampleValue] { hrvValues }
     func vo2Max(in range: DateInterval) async throws -> [SampleValue] { [] }
@@ -105,6 +106,23 @@ struct SyncCoordinatorTests {
         #expect(!second.hasChanges)
     }
 
+    @Test func laterLowerWeightCorrectsTheStoredDay() async throws {
+        let context = try makeContext()
+        let time = Date.now.addingTimeInterval(-3600)
+        await SyncCoordinator(
+            health: StubHealth(mass: [BodyMassSample(date: time, kg: 82)]),
+            garmin: StubRecovery(), context: context).syncAll()
+
+        let correction = await SyncCoordinator(
+            health: StubHealth(mass: [BodyMassSample(date: time.addingTimeInterval(900), kg: 80)]),
+            garmin: StubRecovery(), context: context).syncAll()
+
+        let stored: [BodyMetrics] = rows(context)
+        #expect(stored.count == 1)
+        #expect(stored.first?.weightKg == 80)
+        #expect(correction.weightTrendNeedsRefresh)
+    }
+
     /// Two rows already sharing a day used to trap `Dictionary(uniqueKeysWithValues:)`
     /// and crash the sync outright. Nothing in the schema prevents the duplicate —
     /// a CloudKit merge between two devices produces it — so the sync has to cope.
@@ -116,21 +134,32 @@ struct SyncCoordinatorTests {
         for _ in 0..<2 {
             context.insert(DailyEnergy(date: day))
             context.insert(DailyVitals(date: day))
+            let sleep = SleepData(date: day)
+            sleep.asleepMinutes = 300
+            context.insert(sleep)
         }
         try context.save()
 
         let health = StubHealth(
             activity: [DailyActivity(day: day, activeEnergyKcal: 500, basalEnergyKcal: 1600,
                                      steps: 9000, distanceKm: 7, flightsClimbed: 4)],
+            sleepValues: [SleepSample(day: day, inBedMinutes: 500, asleepMinutes: 450,
+                                      deepMinutes: 80, remMinutes: 100, coreMinutes: 270)],
             rhr: [SampleValue(date: day, value: 52)],
             hrvValues: [SampleValue(date: day, value: 70)])
 
         await SyncCoordinator(health: health, garmin: StubRecovery(),
                               context: context).syncAll()
 
-        // Survived, and wrote into one of the existing rows rather than adding more.
-        #expect((rows(context) as [DailyEnergy]).count == 2)
-        #expect((rows(context) as [DailyEnergy]).contains { $0.steps == 9000 })
-        #expect((rows(context) as [DailyVitals]).contains { $0.restingHR == 52 })
+        // Survived and physically consolidated every same-day model.
+        let energy: [DailyEnergy] = rows(context)
+        let vitals: [DailyVitals] = rows(context)
+        let sleep: [SleepData] = rows(context)
+        #expect(energy.count == 1)
+        #expect(energy.first?.steps == 9000)
+        #expect(vitals.count == 1)
+        #expect(vitals.first?.restingHR == 52)
+        #expect(sleep.count == 1)
+        #expect(sleep.first?.asleepMinutes == 450)
     }
 }

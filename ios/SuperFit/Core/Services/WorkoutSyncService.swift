@@ -71,13 +71,30 @@ final class WorkoutSyncService {
 
         let decisions = WorkoutImporter.decide(
             samples: samples,
-            existingExternalIDs: Set(byExternalID.keys),
-            loggedStrengthSessions: loggedStrengthSessions(in: range))
+            existingExternalIDs: Set(byExternalID.keys))
 
         var inserted = 0
+        var claimedDeviceRecords: Set<UUID> = []
         for (sample, decision) in zip(samples, decisions) {
+            // A cardio session tracked in SuperFit and the Watch copy written to
+            // HealthKit carry different IDs. Join them by activity and shared
+            // time, retaining one row with phone RPE/location plus Watch HR.
+            if !sample.activity.isStrength,
+               let device = matchingDeviceRecord(for: sample, in: existing,
+                                                  excluding: claimedDeviceRecords) {
+                if let imported = byExternalID[decision.externalID], imported !== device {
+                    if device.sessionRPE == nil { device.sessionRPE = imported.sessionRPE }
+                    context.delete(imported)
+                }
+                merge(sample, intoDeviceRecord: device)
+                device.externalID = decision.externalID
+                byExternalID[decision.externalID] = device
+                claimedDeviceRecords.insert(device.id)
+                continue
+            }
+
             switch decision.action {
-            case .skipLoggedStrength, .skipDuplicateInBatch:
+            case .skipDuplicateInBatch:
                 continue
             case .update:
                 if let record = byExternalID[decision.externalID] {
@@ -94,6 +111,44 @@ final class WorkoutSyncService {
             }
         }
         return inserted
+    }
+
+    private func matchingDeviceRecord(for sample: WorkoutSample,
+                                      in records: [WorkoutRecord],
+                                      excluding claimed: Set<UUID>) -> WorkoutRecord? {
+        guard sample.end > sample.start else { return nil }
+        let candidates = records.filter {
+            $0.source == .liveSession && $0.activity == sample.activity
+                && $0.durationSeconds > 0 && !claimed.contains($0.id)
+        }
+        let match = WorkoutTimeMatcher.matches(
+            workouts: [DateInterval(start: sample.start, end: sample.end)],
+            sessions: candidates.map { DateInterval(start: $0.startedAt, end: $0.endedAt) })
+        guard let index = match[0] else { return nil }
+        return candidates[index]
+    }
+
+    private func merge(_ sample: WorkoutSample, intoDeviceRecord record: WorkoutRecord) {
+        let start = min(record.startedAt, sample.start)
+        let end = max(record.endedAt, sample.end)
+        let activeEnergy = record.activeEnergyKcal
+        let totalEnergy = record.totalEnergyKcal
+        let distance = record.distanceMetres
+        let elevation = record.elevationGainMetres
+        let cadence = record.avgCadence
+        let power = record.avgPowerWatts
+        let source = sample.sourceName ?? "Apple Watch"
+
+        write(sample, into: record)
+        record.startedAt = start
+        record.endedAt = end
+        if record.activeEnergyKcal <= 0 { record.activeEnergyKcal = activeEnergy }
+        record.totalEnergyKcal = record.totalEnergyKcal ?? totalEnergy
+        record.distanceMetres = record.distanceMetres ?? distance
+        record.elevationGainMetres = record.elevationGainMetres ?? elevation
+        record.avgCadence = record.avgCadence ?? cadence
+        record.avgPowerWatts = record.avgPowerWatts ?? power
+        record.sourceName = "iPhone + \(source)"
     }
 
     private func write(_ sample: WorkoutSample, into record: WorkoutRecord) {
@@ -164,17 +219,4 @@ final class WorkoutSyncService {
         }))) ?? []
     }
 
-    /// Intervals of gym sessions logged in the app, so the watch's parallel
-    /// strength block doesn't import as a second workout.
-    private func loggedStrengthSessions(in range: DateInterval) -> [DateInterval] {
-        let earliestEnd = range.start
-        let latestStart = range.end
-        let sessions = (try? context.fetch(FetchDescriptor<TrainingSession>(predicate: #Predicate {
-            $0.startedAt <= latestStart && ($0.endedAt ?? $0.startedAt) >= earliestEnd
-        }))) ?? []
-        return sessions.compactMap { session in
-            guard let end = session.endedAt, end > session.startedAt else { return nil }
-            return DateInterval(start: session.startedAt, end: end)
-        }
-    }
 }

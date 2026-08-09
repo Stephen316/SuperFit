@@ -175,8 +175,7 @@ actor HealthKitManager: HealthProvider {
         s.swimStrokeStyle = (meta[HKMetadataKeySwimmingStrokeStyle] as? Int)
             .flatMap(strokeStyleName)
 
-        if let hr = try? await heartRateStatistics(in: DateInterval(start: workout.startDate,
-                                                                   end: workout.endDate)) {
+        if let hr = try? await heartRateStatistics(for: workout) {
             s.avgHeartRate = hr.average
             s.maxHeartRate = hr.maximum
             s.minHeartRate = hr.minimum
@@ -221,45 +220,62 @@ actor HealthKitManager: HealthProvider {
     }
 
     /// Average, max and min heart rate over an interval, plus minute buckets for
-    /// load calculations. Pulling the samples once is cheaper than a statistics
-    /// query followed by a second query for the time series.
-    ///
-    /// `HKStatisticsQuery` with `.discreteAverage` does this server-side rather
-    /// than pulling every beat sample across the whole workout.
+    /// load calculations. The workout-association predicate is essential: a
+    /// time-only query mixes concurrent streams from other devices and apps.
     private func heartRateStatistics(
-        in range: DateInterval
+        for workout: HKWorkout
     ) async throws -> (average: Double?, maximum: Double?, minimum: Double?,
                        segments: [HeartRateSegment]) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
             throw HealthError.unsupportedType
         }
-        let predicate = HKQuery.predicateForSamples(withStart: range.start, end: range.end)
+        let time = HKQuery.predicateForSamples(withStart: workout.startDate, end: workout.endDate)
+        let associated = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            time, HKQuery.predicateForObjects(from: workout)
+        ])
+        var samples = try await heartRateSamples(type: type, predicate: associated)
+
+        // Some third-party stores do not attach their HR samples to the workout.
+        // Fall back only to the workout's own source/device, never every stream
+        // that happened to overlap in time.
+        if samples.isEmpty {
+            var predicates: [NSPredicate] = [
+                time, HKQuery.predicateForObjects(from: workout.sourceRevision.source)
+            ]
+            if let device = workout.device {
+                predicates.append(HKQuery.predicateForObjects(from: Set([device])))
+            }
+            samples = try await heartRateSamples(
+                type: type,
+                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates))
+        }
+
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let values = samples.map { $0.quantity.doubleValue(for: unit) }
+        guard !values.isEmpty else { return (nil, nil, nil, []) }
+        let calendar = Calendar(identifier: .gregorian)
+        let buckets = Dictionary(grouping: samples) {
+            calendar.dateInterval(of: .minute, for: $0.startDate)?.start ?? $0.startDate
+        }
+        let segments = buckets.keys.sorted().compactMap { minute -> HeartRateSegment? in
+            guard let bucket = buckets[minute], !bucket.isEmpty else { return nil }
+            let average = bucket.reduce(0.0) {
+                $0 + $1.quantity.doubleValue(for: unit)
+            } / Double(bucket.count)
+            return HeartRateSegment(durationMinutes: 1, avgHeartRate: average)
+        }
+        return (values.reduce(0, +) / Double(values.count), values.max(), values.min(), segments)
+    }
+
+    private func heartRateSamples(type: HKQuantityType,
+                                  predicate: NSPredicate) async throws -> [HKQuantitySample] {
         return try await withCheckedThrowingContinuation { cont in
             let q = HKSampleQuery(sampleType: type, predicate: predicate,
                                   limit: HKObjectQueryNoLimit,
                                   sortDescriptors: [.init(key: HKSampleSortIdentifierStartDate,
                                                           ascending: true)]) { _, raw, error in
                 if let error { cont.resume(throwing: error); return }
-                let unit = HKUnit.count().unitDivided(by: .minute())
-                let samples = (raw as? [HKQuantitySample]) ?? []
-                let values = samples.map { $0.quantity.doubleValue(for: unit) }
-                guard !values.isEmpty else {
-                    cont.resume(returning: (nil, nil, nil, []))
-                    return
-                }
-                let calendar = Calendar(identifier: .gregorian)
-                let buckets = Dictionary(grouping: samples) {
-                    calendar.dateInterval(of: .minute, for: $0.startDate)?.start ?? $0.startDate
-                }
-                let segments = buckets.keys.sorted().compactMap { minute -> HeartRateSegment? in
-                    guard let bucket = buckets[minute], !bucket.isEmpty else { return nil }
-                    let average = bucket.reduce(0.0) {
-                        $0 + $1.quantity.doubleValue(for: unit)
-                    } / Double(bucket.count)
-                    return HeartRateSegment(durationMinutes: 1, avgHeartRate: average)
-                }
-                cont.resume(returning: (values.reduce(0, +) / Double(values.count),
-                                        values.max(), values.min(), segments))
+                cont.resume(returning: (raw as? [HKQuantitySample]) ?? [])
             }
             store.execute(q)
         }
@@ -281,15 +297,23 @@ actor HealthKitManager: HealthProvider {
             store.execute(q)
         }
 
-        let cal = Calendar(identifier: .gregorian)
-        var byDay: [Date: SleepSampleBuilder] = [:]
-        for s in samples {
-            let day = cal.startOfDay(for: s.endDate)
-            let minutes = Int(s.endDate.timeIntervalSince(s.startDate) / 60)
-            byDay[day, default: SleepSampleBuilder()].add(value: s.value, minutes: minutes,
-                                                          start: s.startDate, end: s.endDate)
+        let intervals = samples.compactMap { sample -> SleepStageInterval? in
+            let stage: SleepStageKind
+            switch HKCategoryValueSleepAnalysis(rawValue: sample.value) {
+            case .inBed: stage = .inBed
+            case .asleepDeep: stage = .deep
+            case .asleepREM: stage = .rem
+            case .asleepCore: stage = .core
+            case .asleepUnspecified, .asleep: stage = .asleepUnspecified
+            default: return nil
+            }
+            let device = sample.device?.localIdentifier ?? sample.device?.name ?? "unknown-device"
+            let source = sample.sourceRevision.source.bundleIdentifier
+            return SleepStageInterval(start: sample.startDate, end: sample.endDate,
+                                      stage: stage, sourceID: "\(source)|\(device)")
         }
-        return byDay.map { $0.value.build(day: $0.key) }.sorted { $0.day < $1.day }
+        return SleepIntervalReconciler.reconcile(
+            intervals, calendar: Calendar(identifier: .gregorian))
     }
 
     // MARK: - Query helpers
@@ -336,36 +360,6 @@ actor HealthKitManager: HealthProvider {
         }
     }
 }
-
-private struct SleepSampleBuilder {
-    var inBed = 0, asleep = 0, deep = 0, rem = 0, core = 0
-    /// Bounds of the asleep segments only — `inBed` brackets the night more
-    /// loosely (reading, lying awake) and would blur bedtime consistency.
-    var firstAsleep: Date?
-    var lastAsleep: Date?
-
-    mutating func add(value: Int, minutes: Int, start: Date, end: Date) {
-        switch HKCategoryValueSleepAnalysis(rawValue: value) {
-        case .inBed:
-            inBed += minutes
-            return
-        case .asleepDeep: deep += minutes; asleep += minutes
-        case .asleepREM: rem += minutes; asleep += minutes
-        case .asleepCore: core += minutes; asleep += minutes
-        case .asleepUnspecified, .asleep: asleep += minutes
-        default: return
-        }
-        firstAsleep = min(start, firstAsleep ?? start)
-        lastAsleep = max(end, lastAsleep ?? end)
-    }
-
-    func build(day: Date) -> SleepSample {
-        SleepSample(day: day, inBedMinutes: max(inBed, asleep),
-                    asleepMinutes: asleep, deepMinutes: deep, remMinutes: rem, coreMinutes: core,
-                    bedtime: firstAsleep, wakeTime: lastAsleep)
-    }
-}
-
 
 #else
 

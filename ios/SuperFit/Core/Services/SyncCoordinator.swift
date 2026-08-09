@@ -143,11 +143,34 @@ final class SyncCoordinator {
         let query = FetchDescriptor<BodyMetrics>(
             predicate: #Predicate { $0.date >= start && $0.date <= end })
         let rows = (try? context.fetch(query)) ?? []
-        var existing = Set(rows.map { cal.startOfDay(for: $0.date) })
         var changed = false
-        for s in samples.sorted(by: { $0.kg < $1.kg })
-        where existing.insert(cal.startOfDay(for: s.date)).inserted {
-            context.insert(BodyMetrics(date: s.date, weightKg: s.kg, source: .healthKit))
+        var byDay: [Date: BodyMetrics] = [:]
+        for (day, duplicates) in Dictionary(grouping: rows,
+                                             by: { cal.startOfDay(for: $0.date) }) {
+            guard let canonical = duplicates.min(by: { $0.weightKg < $1.weightKg }) else { continue }
+            for duplicate in duplicates where duplicate !== canonical {
+                canonical.bodyFatPct = canonical.bodyFatPct ?? duplicate.bodyFatPct
+                canonical.leanMassKg = canonical.leanMassKg ?? duplicate.leanMassKg
+                context.delete(duplicate)
+                changed = true
+            }
+            byDay[day] = canonical
+        }
+
+        let lowestByDay = Dictionary(grouping: samples,
+                                     by: { cal.startOfDay(for: $0.date) })
+            .compactMapValues { $0.min(by: { $0.kg < $1.kg }) }
+        for (day, sample) in lowestByDay {
+            if let row = byDay[day] {
+                guard sample.kg < row.weightKg else { continue }
+                row.weightKg = sample.kg
+                row.date = sample.date
+                row.sourceRaw = MetricSource.healthKit.rawValue
+            } else {
+                let row = BodyMetrics(date: sample.date, weightKg: sample.kg, source: .healthKit)
+                context.insert(row)
+                byDay[day] = row
+            }
             changed = true
         }
         return changed
@@ -211,13 +234,26 @@ final class SyncCoordinator {
         let query = FetchDescriptor<DailyEnergy>(
             predicate: #Predicate { $0.date >= start && $0.date <= end })
         let rows = (try? context.fetch(query)) ?? []
-        // `uniquingKeysWith`, not `uniqueKeysWithValues`: the schema carries no
-        // unique constraint on the day, so two rows can share one after a
-        // CloudKit merge between devices or an archive restore. The trapping
-        // initialiser turned that into a crash on foreground sync.
-        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
-                               uniquingKeysWith: { a, _ in a })
         var changed = false
+        var byDay: [Date: DailyEnergy] = [:]
+        for (day, duplicates) in Dictionary(grouping: rows,
+                                             by: { cal.startOfDay(for: $0.date) }) {
+            guard let canonical = duplicates.max(by: { $0.steps < $1.steps }) else { continue }
+            for duplicate in duplicates where duplicate !== canonical {
+                canonical.activeEnergyKcal = max(canonical.activeEnergyKcal,
+                                                 duplicate.activeEnergyKcal)
+                canonical.basalEnergyKcal = max(canonical.basalEnergyKcal,
+                                                duplicate.basalEnergyKcal)
+                canonical.steps = max(canonical.steps, duplicate.steps)
+                canonical.distanceKm = max(canonical.distanceKm, duplicate.distanceKm)
+                canonical.flightsClimbed = max(canonical.flightsClimbed,
+                                               duplicate.flightsClimbed)
+                context.delete(duplicate)
+                changed = true
+            }
+            if canonical.date != day { canonical.date = day; changed = true }
+            byDay[day] = canonical
+        }
         for d in days {
             let key = cal.startOfDay(for: d.day)
             let row = byDay[key] ?? {
@@ -244,9 +280,26 @@ final class SyncCoordinator {
         let query = FetchDescriptor<SleepData>(
             predicate: #Predicate { $0.date >= start && $0.date <= end })
         let rows = (try? context.fetch(query)) ?? []
-        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
-                               uniquingKeysWith: { a, _ in a })
         var changed = false
+        var byDay: [Date: SleepData] = [:]
+        for (day, duplicates) in Dictionary(grouping: rows,
+                                             by: { cal.startOfDay(for: $0.date) }) {
+            guard let canonical = duplicates.max(by: { lhs, rhs in
+                if lhs.asleepMinutes != rhs.asleepMinutes {
+                    return lhs.asleepMinutes < rhs.asleepMinutes
+                }
+                let lhsStages = lhs.deepMinutes + lhs.remMinutes + lhs.coreMinutes
+                let rhsStages = rhs.deepMinutes + rhs.remMinutes + rhs.coreMinutes
+                if lhsStages != rhsStages { return lhsStages < rhsStages }
+                return lhs.inBedMinutes < rhs.inBedMinutes
+            }) else { continue }
+            for duplicate in duplicates where duplicate !== canonical {
+                context.delete(duplicate)
+                changed = true
+            }
+            if canonical.date != day { canonical.date = day; changed = true }
+            byDay[day] = canonical
+        }
         for s in samples {
             let key = cal.startOfDay(for: s.day)
             let row = byDay[key] ?? {
@@ -274,10 +327,24 @@ final class SyncCoordinator {
         let query = FetchDescriptor<DailyVitals>(
             predicate: #Predicate { $0.date >= start && $0.date <= end })
         let rows = (try? context.fetch(query)) ?? []
-        // See `upsertActivity` — same trap, same reason.
-        var byDay = Dictionary(rows.map { (cal.startOfDay(for: $0.date), $0) },
-                               uniquingKeysWith: { a, _ in a })
         var changed = false
+        var byDay: [Date: DailyVitals] = [:]
+        for (day, duplicates) in Dictionary(grouping: rows,
+                                             by: { cal.startOfDay(for: $0.date) }) {
+            guard let canonical = duplicates.max(by: { lhs, rhs in
+                let left = (lhs.restingHR == nil ? 0 : 1) + (lhs.hrvSDNN == nil ? 0 : 1)
+                let right = (rhs.restingHR == nil ? 0 : 1) + (rhs.hrvSDNN == nil ? 0 : 1)
+                return left < right
+            }) else { continue }
+            for duplicate in duplicates where duplicate !== canonical {
+                canonical.restingHR = canonical.restingHR ?? duplicate.restingHR
+                canonical.hrvSDNN = canonical.hrvSDNN ?? duplicate.hrvSDNN
+                context.delete(duplicate)
+                changed = true
+            }
+            if canonical.date != day { canonical.date = day; changed = true }
+            byDay[day] = canonical
+        }
         func row(for date: Date) -> DailyVitals {
             let key = cal.startOfDay(for: date)
             if let r = byDay[key] { return r }

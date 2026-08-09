@@ -220,8 +220,11 @@ final class AggregationService {
     }
 
     private func store(_ pattern: CyclicalPattern?, marker: String) {
-        let existing = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
-            .first { $0.markerRaw == marker }
+        let matches = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
+            .filter { $0.markerRaw == marker }
+            .sorted { $0.detectedAt > $1.detectedAt }
+        let existing = matches.first
+        for duplicate in matches.dropFirst() { context.delete(duplicate) }
         guard let pattern else {
             existing?.isActive = false     // kept, so a flickering pattern is visible
             return
@@ -254,17 +257,22 @@ final class AggregationService {
     private func activePatterns() -> [String: CyclicalPattern] {
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first,
               profile.sex == .female else { return [:] }
-        let rows = (try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? []
-        return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+        let rows = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
+            .sorted { $0.detectedAt < $1.detectedAt }
+        var patterns: [String: CyclicalPattern] = [:]
+        for row in rows {
             guard row.isActive, row.profile.count == row.periodDays, row.periodDays > 0
-            else { return nil }
-            return (row.markerRaw,
-                    CyclicalPattern(periodDays: row.periodDays,
-                                    cyclesObserved: row.cyclesObserved,
-                                    strength: row.strength,
-                                    amplitude: row.amplitude,
-                                    profile: row.profile))
-        })
+            else { continue }
+            // Newest valid row wins until the next refresh physically removes
+            // duplicates left by a CloudKit merge.
+            patterns[row.markerRaw] = CyclicalPattern(
+                periodDays: row.periodDays,
+                cyclesObserved: row.cyclesObserved,
+                strength: row.strength,
+                amplitude: row.amplitude,
+                profile: row.profile)
+        }
+        return patterns
     }
 
     // MARK: - Recovery
@@ -305,25 +313,64 @@ final class AggregationService {
                                    to: today) ?? today
         let workoutQuery = FetchDescriptor<WorkoutRecord>(
             predicate: #Predicate { $0.startedAt >= windowStart })
-        var inputs = ((try? context.fetch(workoutQuery)) ?? []).map {
-            StrainWorkout(date: $0.startedAt,
-                          durationMinutes: $0.durationSeconds / 60,
-                          avgHeartRate: $0.avgHeartRate,
-                          heartRateSegments: $0.heartRateSegments,
-                          sessionRPE: $0.sessionRPE)
-        }
+        let workoutRecords = (try? context.fetch(workoutQuery)) ?? []
 
         let sessionQuery = FetchDescriptor<TrainingSession>(
             predicate: #Predicate { $0.startedAt >= windowStart })
-        inputs += ((try? context.fetch(sessionQuery)) ?? []).compactMap { session in
+        let localSessions: [(interval: DateInterval, input: StrainWorkout)] =
+            ((try? context.fetch(sessionQuery)) ?? []).compactMap { session in
             guard let endedAt = session.endedAt, endedAt > session.startedAt else { return nil }
             let sets = (session.sets ?? []).filter {
                 $0.completedAt != nil && !$0.isWarmup && $0.reps > 0
             }.map { StrainStrengthSet(reps: $0.reps, rir: $0.rir) }
-            return StrainWorkout(date: session.startedAt,
-                                 durationMinutes: endedAt.timeIntervalSince(session.startedAt) / 60,
-                                 sessionRPE: session.sessionRPE,
-                                 strengthSets: sets)
+            let input = StrainWorkout(
+                date: session.startedAt,
+                durationMinutes: endedAt.timeIntervalSince(session.startedAt) / 60,
+                sessionRPE: session.sessionRPE,
+                strengthSets: sets)
+            return (DateInterval(start: session.startedAt, end: endedAt), input)
+        }
+
+        let strengthRecordIndices = workoutRecords.indices.filter {
+            workoutRecords[$0].activity.isStrength && workoutRecords[$0].durationSeconds > 0
+        }
+        let matches = WorkoutTimeMatcher.matches(
+            workouts: strengthRecordIndices.map {
+                DateInterval(start: workoutRecords[$0].startedAt,
+                             end: workoutRecords[$0].endedAt)
+            },
+            sessions: localSessions.map(\.interval))
+        let recordToSession = Dictionary(uniqueKeysWithValues: matches.map {
+            (strengthRecordIndices[$0.key], $0.value)
+        })
+        let sessionToRecord = Dictionary(uniqueKeysWithValues: recordToSession.map {
+            ($0.value, $0.key)
+        })
+
+        // Unmatched imports stand alone. A matched watch workout is represented
+        // below by its richer phone session, carrying the watch's HR signal.
+        var inputs: [StrainWorkout] = workoutRecords.enumerated().compactMap { pair in
+            let (index, record) = pair
+            guard recordToSession[index] == nil else { return nil }
+            return StrainWorkout(date: record.startedAt,
+                                 durationMinutes: record.durationSeconds / 60,
+                                 avgHeartRate: record.avgHeartRate,
+                                 heartRateSegments: record.heartRateSegments,
+                                 sessionRPE: record.sessionRPE)
+        }
+        inputs += localSessions.enumerated().map { pair in
+            let (index, local) = pair
+            guard let recordIndex = sessionToRecord[index] else { return local.input }
+            let watch = workoutRecords[recordIndex]
+            let hasWatchHR = watch.avgHeartRate != nil || !watch.heartRateSegments.isEmpty
+            return StrainWorkout(
+                date: local.input.date,
+                durationMinutes: hasWatchHR ? watch.durationSeconds / 60
+                                            : local.input.durationMinutes,
+                avgHeartRate: watch.avgHeartRate,
+                heartRateSegments: watch.heartRateSegments,
+                sessionRPE: local.input.sessionRPE ?? watch.sessionRPE,
+                strengthSets: local.input.strengthSets)
         }
 
         let result = StrainEngine().evaluate(workouts: inputs, on: today,

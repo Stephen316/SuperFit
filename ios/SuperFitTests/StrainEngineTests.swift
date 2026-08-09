@@ -156,4 +156,20 @@ struct StrainEngineTests {
         #expect(result?.rawEffort == 0)
         #expect(result?.rawTrimp == trimp(cardio))
     }
+
+    @Test("Sparse watch HR yields to the complete phone RPE for a merged workout")
+    func sparseHeartRateUsesRPE() {
+        let workout = StrainWorkout(
+            date: at(0), durationMinutes: 60,
+            heartRateSegments: [.init(durationMinutes: 1, avgHeartRate: hr(0.3))],
+            sessionRPE: 10,
+            strengthSets: [.init(reps: 8, rir: 1)])
+        let result = StrainEngine().evaluate(workouts: [workout], on: day,
+                                             restingHR: restingHR, age: age,
+                                             isFemale: false, calendar: cal)
+        #expect(result?.rawTrimp == 0)
+        #expect(result?.rawEffort == 600)
+        #expect(result?.strain == 100)
+        #expect(result?.dataCompleteness == 1)
+    }
 }
