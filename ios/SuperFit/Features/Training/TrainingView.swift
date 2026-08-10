@@ -260,7 +260,7 @@ struct TrainingView: View {
 
                 Section("Today") {
                     if todaySessions.isEmpty {
-                        Text("Nothing logged yet today.").foregroundStyle(.secondary)
+                        Text("Nothing logged yet today.").foregroundStyle(Theme.textSecondary)
                     }
                     ForEach(todaySessions) { session in
                         sessionRow(session)
@@ -269,7 +269,7 @@ struct TrainingView: View {
 
                 Section("Last 7 days") {
                     if recentSessionDays.isEmpty {
-                        Text("No gym workouts in the last week.").foregroundStyle(.secondary)
+                        Text("No gym workouts in the last week.").foregroundStyle(Theme.textSecondary)
                     }
                     ForEach(recentSessionDays, id: \.day) { group in
                         Text(group.day, format: .dateTime.weekday(.wide).day().month())
@@ -327,7 +327,7 @@ struct TrainingView: View {
                                 Text(exercises.first { $0.id == p.exerciseID }?.name ?? "Exercise")
                                 Spacer()
                                 Text("\(Int(units.displayWeight(p.currentE1RM))) \(units.weightUnit) e1RM")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(Theme.textSecondary)
                                 Text(p.change, format: .percent.precision(.fractionLength(0...1)).sign(strategy: .always()))
                                     .monospacedDigit()
                                     .foregroundStyle(p.change >= 0 ? .green : .orange)
@@ -465,7 +465,7 @@ struct TrainingView: View {
                         Text("\(live.activityName) in progress")
                             .font(.subheadline.weight(.medium))
                         Text(live.startedAt, style: .timer)
-                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                            .font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
                     if let hr = live.heartRate {
@@ -482,7 +482,7 @@ struct TrainingView: View {
                         Text(w.activity.displayName)
                         Spacer()
                         Text("\(Int(w.durationSeconds / 60)) min · \(Int(w.activeEnergyKcal)) kcal")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
@@ -530,13 +530,13 @@ struct TrainingView: View {
         return Section {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 TextField("Search muscles", text: $muscleQuery)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 if !muscleQuery.isEmpty {
                     Button { muscleQuery = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -544,7 +544,7 @@ struct TrainingView: View {
 
             if rows.isEmpty {
                 Text("No muscle matches \"\(muscleQuery)\".")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             ForEach(rows) { row in
                 HStack {
@@ -557,7 +557,7 @@ struct TrainingView: View {
                     if row.isSecondaryOnly {
                         Text("secondary")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                     Text(setsLabel(row))
                         .monospacedDigit()

@@ -104,11 +104,11 @@ struct SleepView: View {
                 }
                 RuleMark(y: .value("Need", Double(SleepAnalytics.defaultNeedMinutes) / 60))
                     .lineStyle(.init(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 ForEach(SleepAnalytics().rollingAverage(nights), id: \.date) { point in
                     LineMark(x: .value("Date", point.date, unit: .day),
                              y: .value("7-day average", point.minutes / 60))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Theme.textPrimary)
                         .interpolationMethod(.monotone)
                 }
             }
@@ -152,7 +152,7 @@ struct SleepView: View {
                      : "HRV runs \(Int(abs(i.hrvDeltaPercent).rounded()))% lower after longer nights")
                     .font(.subheadline.weight(.medium))
                 Text("\(Int(i.longNightHRV)) ms after \(duration(Double(i.thresholdMinutes)))+ (\(i.longNights) nights) vs \(Int(i.shortNightHRV)) ms below it (\(i.shortNights) nights).")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
             }
         } header: {
             Text("What sleep does for you")
@@ -169,7 +169,7 @@ struct SleepView: View {
                         Text(n.date, format: .dateTime.weekday(.abbreviated).month().day())
                         if let bed = n.bedtime, let wake = n.wakeTime {
                             Text("\(bed, format: .dateTime.hour().minute()) – \(wake, format: .dateTime.hour().minute())")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                     }
                     Spacer()
@@ -177,7 +177,7 @@ struct SleepView: View {
                         Text(duration(Double(n.asleepMinutes))).monospacedDigit()
                         if let eff = n.efficiency {
                             Text("\(Int(eff * 100))%")
-                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                .font(.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
                         }
                     }
                 }
@@ -190,7 +190,7 @@ struct SleepView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("No sleep data yet").font(.headline)
                 Text("Sleep syncs from Apple Health. Wear your watch overnight, or track sleep with your iPhone, and nights will appear here.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(Theme.textSecondary)
                 WatchHelpLink()
             }
             .padding(.vertical, 6)
@@ -202,7 +202,7 @@ struct SleepView: View {
     private func stat(_ label: String, _ value: String) -> some View {
         VStack(spacing: 3) {
             Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.caption).foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -212,9 +212,9 @@ struct SleepView: View {
             HStack {
                 Text(name).font(.subheadline)
                 Spacer()
-                Text(duration(Double(minutes))).monospacedDigit().foregroundStyle(.secondary)
+                Text(duration(Double(minutes))).monospacedDigit().foregroundStyle(Theme.textSecondary)
                 Text("\(Int(share * 100))%")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    .font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
                     .frame(width: 34, alignment: .trailing)
             }
             GeometryReader { geo in

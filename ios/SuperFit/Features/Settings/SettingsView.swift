@@ -23,7 +23,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                Theme.surface.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 14) {
@@ -255,7 +255,7 @@ private struct PrivacyAboutView: View {
 
     var body: some View {
         ZStack {
-            Theme.background
+            Theme.surface.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 14) {

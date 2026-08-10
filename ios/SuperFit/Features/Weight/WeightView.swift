@@ -125,7 +125,7 @@ struct WeightView: View {
                     .listRowInsets(.init(top: 12, leading: 12, bottom: 12, trailing: 12))
                 } else {
                     Text("Log a few days to see your trend.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
     }
 
@@ -142,7 +142,7 @@ struct WeightView: View {
                         Spacer()
                         Text(units.weightDeltaString(trendSlopePerWeek))
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
 

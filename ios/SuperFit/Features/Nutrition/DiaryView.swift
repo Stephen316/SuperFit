@@ -149,7 +149,7 @@ struct DiaryView: View {
                 MacroBar(label: "Fat", value: totals.fatG, target: targets.fatG, unit: "g")
             } else {
                 Text("Log your weight and set a goal to get targets.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(Theme.textSecondary)
             }
             // Presented, not pushed: this tab lives inside a paged TabView, and
             // a pushed stack would make the back-swipe fight the tab swipe.
@@ -168,7 +168,7 @@ struct DiaryView: View {
                     Spacer()
                     if supplementCount > 0 {
                         Text("\(supplementCount)")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
                     }
                 }
             }
@@ -186,7 +186,7 @@ struct DiaryView: View {
                     Text(hydrationProgressText)
                         .font(.subheadline)
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
 
                 ProgressView(value: min(currentHydrationMl / hydrationGoalMl, 1))
@@ -210,10 +210,10 @@ struct DiaryView: View {
                     Spacer()
                     Text(formatHydration(hydrationGoalMl))
                         .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                     Image(systemName: "chevron.right")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 .font(.subheadline)
             }
@@ -231,7 +231,7 @@ struct DiaryView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text("Last 7 days")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
             Chart {
                 ForEach(points) { point in
                     BarMark(x: .value("Day", point.date, unit: .day),
@@ -251,7 +251,7 @@ struct DiaryView: View {
                         if let millilitres = value.as(Double.self) {
                             Text(hydrationAxisLabel(millilitres))
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
@@ -262,7 +262,7 @@ struct DiaryView: View {
                         if let date = value.as(Date.self) {
                             Text(date, format: .dateTime.weekday(.narrow))
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
@@ -428,10 +428,10 @@ struct MacroBar: View {
                 Text(label).font(.subheadline)
                 Spacer()
                 Text("\(Int(value)) / \(Int(target)) \(unit)")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    .font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
             }
             ProgressView(value: min(value / max(target, 1), 1))
-                .tint(value > target * 1.05 ? .orange : .primary)
+                .tint(value > target * 1.05 ? .orange : Theme.gold)
         }
         .padding(.vertical, 2)
     }
@@ -445,7 +445,7 @@ struct LogRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(logName).font(.subheadline)
                 Text("\(Int(log.servingGrams)) g · P \(Int(log.proteinG)) · C \(Int(log.carbsG)) · F \(Int(log.fatG))")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             Text("\(Int(log.kcal))").monospacedDigit()

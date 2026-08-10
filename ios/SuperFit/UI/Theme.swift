@@ -168,7 +168,7 @@ extension View {
     /// the floating tab bar.
     func themedList(bottomPadding: CGFloat = 96) -> some View {
         scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(Theme.surface)
             .listRowBackground(Theme.surface.opacity(0.55))
             .tint(Theme.gold)
             .safeAreaPadding(.bottom, bottomPadding)

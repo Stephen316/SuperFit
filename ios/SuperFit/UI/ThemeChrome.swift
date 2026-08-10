@@ -26,7 +26,7 @@ enum ThemeAppearance {
         tables()
     }
 
-    private static var barTint: UIColor { UIColor(Theme.tabBar) }
+    private static var barTint: UIColor { UIColor(Theme.backgroundBase) }
     private static var washTint: UIColor { UIColor(Theme.surface) }
     private static var hairlineTint: UIColor { UIColor(Theme.hairline) }
 
@@ -92,9 +92,10 @@ private struct ThemedChrome: ViewModifier {
             // Lists and forms paint their own grouped background, which sits
             // over the gradient and greys it out.
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
-            .toolbarBackground(Theme.tabBar, for: .navigationBar)
+            .background(Theme.surface)
+            .toolbarBackground(Theme.backgroundBase, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .foregroundStyle(Theme.textPrimary)
             // No `.buttonStyle` here, deliberately.
             //
             // This used to set `.plain` for the whole subtree to decline iOS 26's
@@ -160,12 +161,13 @@ private struct FeatureListModifier: ViewModifier {
         content
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(Theme.backgroundBase)
+            .background(Theme.surface)
             .listRowBackground(Theme.surface)
             .listRowSeparatorTint(Theme.hairline)
             .tint(Theme.gold)
+            .foregroundStyle(Theme.textPrimary)
             .safeAreaPadding(.bottom, bottomPadding)
-            .toolbarBackground(Theme.tabBar, for: .navigationBar)
+            .toolbarBackground(Theme.backgroundBase, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .font(Theme.text(16))
     }
@@ -197,7 +199,7 @@ extension View {
 
 struct FeatureBackground: View {
     var body: some View {
-        Theme.backgroundBase.ignoresSafeArea()
+        Theme.surface.ignoresSafeArea()
     }
 }
 
