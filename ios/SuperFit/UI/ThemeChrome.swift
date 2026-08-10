@@ -160,6 +160,10 @@ private struct FeatureListModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .listStyle(.plain)
+            // A nonzero inter-section spacer makes a pinned header release
+            // before its successor reaches the top, briefly exposing the light
+            // content surface between two dark category bars.
+            .listSectionSpacing(0)
             .scrollContentBackground(.hidden)
             // The List canvas remains the deep home-screen teal so section
             // headers read as bars. Content rows opt into `Theme.surface` at
@@ -226,6 +230,8 @@ struct FeatureCategoryBar: View {
             .padding(.horizontal, 20)
             .background(Theme.backgroundBase)
             .listRowInsets(.init())
+            .listRowBackground(Theme.backgroundBase)
+            .listRowSeparator(.hidden)
             .accessibilityAddTraits(.isHeader)
     }
 }
