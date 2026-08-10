@@ -76,7 +76,11 @@ struct RootView: View {
                        alignment: .leading)
                 .offset(x: -CGFloat(selectedTabIndex) * geometry.size.width + tabDragOffset)
                 .animation(Self.tabAnimation, value: tab)
-                .simultaneousGesture(tabSwipeGesture(width: geometry.size.width))
+                // Normal gesture precedence is intentional: a child row's
+                // swipeActions recognizer wins, so edit/delete never pages the
+                // app at the same time. Areas without a child horizontal
+                // gesture still provide the interactive tab swipe.
+                .gesture(tabSwipeGesture(width: geometry.size.width))
             }
             .clipped()
             .ignoresSafeArea(.keyboard)
@@ -118,9 +122,9 @@ struct RootView: View {
 
     /// The page tracks most of the finger's travel, then settles to the next tab
     /// or returns home based on distance and predicted momentum. Keeping the
-    /// gesture simultaneous and direction-locked leaves vertical lists in
-    /// control. The leading 32 points remain reserved for NavigationStack's
-    /// native back gesture.
+    /// gesture lower-priority and direction-locked leaves list scrolling and
+    /// row edit/delete gestures in control. The leading 32 points remain
+    /// reserved for NavigationStack's native back gesture.
     private func tabSwipeGesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 24)
             .onChanged { value in
