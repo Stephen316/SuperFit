@@ -568,21 +568,25 @@ struct TrainingView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
             ForEach(rows) { row in
-                HStack {
-                    Text(row.muscle.displayName)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    // A separate, quieter label rather than a longer string:
-                    // "Triceps lateral head" beside "3 sets (secondary)" runs
-                    // out of row on a small phone.
-                    if row.isSecondaryOnly {
-                        Text("secondary")
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
+                NavigationLink {
+                    ExerciseProgressView(muscle: row.muscle)
+                } label: {
+                    HStack {
+                        Text(row.muscle.displayName)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        // A separate, quieter label rather than a longer string:
+                        // "Triceps lateral head" beside "3 sets (secondary)" runs
+                        // out of row on a small phone.
+                        if row.isSecondaryOnly {
+                            Text("secondary")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        Text(setsLabel(row))
+                            .monospacedDigit()
+                            .foregroundStyle(rowColour(row))
                     }
-                    Text(setsLabel(row))
-                        .monospacedDigit()
-                        .foregroundStyle(rowColour(row))
                 }
             }
         } header: {

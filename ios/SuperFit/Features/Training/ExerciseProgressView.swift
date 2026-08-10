@@ -11,30 +11,60 @@ struct ExerciseProgressView: View {
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
     @State private var range: LiftRange = .oneMonth
 
+    /// Nil is the existing all-exercise screen. A value turns the same charts
+    /// into a muscle drill-down and adds every direct and assisting set below.
+    let muscle: MuscleGroup?
+
+    init(muscle: MuscleGroup? = nil) {
+        self.muscle = muscle
+    }
+
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
     private var exerciseName: [UUID: String] {
         Dictionary(exercises.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
     }
 
-    private var series: [LiftProgressSeries] {
+    private var exerciseTensions: [UUID: [MuscleGroup: Int]] {
+        Dictionary(exercises.map { ($0.id, $0.tension) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    private struct ProgressData {
+        let series: [LiftProgressSeries]
+        let affectingSets: [LiftRecord]
+        let loadError: String?
+    }
+
+    private var progressData: ProgressData {
         // Fetch only the window the range needs: the fixed ranges stay bounded,
         // all-time deliberately pulls the whole logged history.
         let cutoff = range.start
         let descriptor = FetchDescriptor<TrainingSession>(
             predicate: #Predicate { $0.startedAt >= cutoff },
             sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        let sessions = (try? context.fetch(descriptor)) ?? []
-        let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
-                                   uniquingKeysWith: { a, _ in a })
-        let records = TrainingRecords.completed(sessions, fractions: fractions)
-        return LiftProgress.downsampledSeries(records: records, since: cutoff,
-                                              sampling: range.sampling)
+        do {
+            let sessions = try context.fetch(descriptor)
+            let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
+                                       uniquingKeysWith: { a, _ in a })
+            let allRecords = TrainingRecords.completed(sessions, fractions: fractions)
+            let records = muscle.map {
+                MuscleProgress.affectingSets($0, records: allRecords,
+                                             tensions: exerciseTensions)
+            } ?? allRecords
+            return ProgressData(
+                series: LiftProgress.downsampledSeries(records: records, since: cutoff,
+                                                       sampling: range.sampling),
+                affectingSets: muscle == nil ? [] : records,
+                loadError: nil)
+        } catch {
+            return ProgressData(series: [], affectingSets: [],
+                                loadError: error.localizedDescription)
+        }
     }
 
     var body: some View {
-        let data = series
-        return ZStack {
+        let data = progressData
+        ZStack {
             FeatureBackground()
             ScrollView {
                 // Lazy so only the charts scrolled into view are built — a heavy
@@ -45,10 +75,15 @@ struct ExerciseProgressView: View {
                         options: LiftRange.allCases.map { ($0, $0.label) },
                         selection: $range)
 
-                    if data.isEmpty {
-                        emptyState
+                    if let error = data.loadError {
+                        emptyState(title: "Couldn't load progress", message: error)
+                    } else if let muscle {
+                        muscleProgress(data, muscle: muscle)
+                    } else if data.series.isEmpty {
+                        emptyState(title: "No logged lifts yet",
+                                   message: "Complete a weighted working set and it will chart here.")
                     } else {
-                        ForEach(data) { chart(for: $0) }
+                        ForEach(data.series) { chart(for: $0) }
                     }
                 }
                 .padding(.horizontal, 18)
@@ -56,10 +91,50 @@ struct ExerciseProgressView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .navigationTitle("Weight progress")
+        .navigationTitle(muscle?.displayName ?? "Weight progress")
         .themedChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+    }
+
+    @ViewBuilder
+    private func muscleProgress(_ data: ProgressData, muscle: MuscleGroup) -> some View {
+        if data.affectingSets.isEmpty {
+            emptyState(
+                title: "No sets in this period",
+                message: "Completed direct and assisting sets for \(muscle.displayName) will appear here.")
+        } else {
+            sectionTitle("Weight progress")
+            if data.series.isEmpty {
+                emptyState(
+                    title: "No weighted progress yet",
+                    message: "Bodyweight sets are included below. Add external load to create a weight chart.",
+                    topPadding: 12)
+            } else {
+                ForEach(data.series) { chart(for: $0) }
+            }
+
+            sectionTitle("All affecting sets", count: data.affectingSets.count)
+            ForEach(data.affectingSets.indices, id: \.self) { index in
+                affectedSetCard(data.affectingSets[index], muscle: muscle)
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String, count: Int? = nil) -> some View {
+        HStack {
+            Text(title)
+                .font(Theme.text(15, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            if let count {
+                Text("\(count) \(count == 1 ? "set" : "sets")")
+                    .font(Theme.text(13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.top, 6)
     }
 
     private func chart(for s: LiftProgressSeries) -> some View {
@@ -93,18 +168,62 @@ struct ExerciseProgressView: View {
         )
     }
 
-    private var emptyState: some View {
+    private func affectedSetCard(_ record: LiftRecord, muscle: MuscleGroup) -> some View {
+        let score = MuscleProgress.tension(for: record, muscle: muscle,
+                                           tensions: exerciseTensions)
+        let direct = score >= VolumeAggregator.fullSetTension
+        return ThemeCard(padding: 14, radius: Theme.cardRadiusCompact) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(exerciseName[record.exerciseID] ?? "Exercise")
+                        .font(Theme.text(15, .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(direct ? "direct" : "secondary")
+                        .font(Theme.text(12, .medium))
+                        .foregroundStyle(direct ? Theme.gold : Theme.textSecondary)
+                }
+                HStack(spacing: 7) {
+                    Text(record.date, format: .dateTime.day().month().year())
+                    Text("·")
+                    Text(setSummary(record))
+                    Spacer(minLength: 4)
+                    Text("Tension \(score)/5")
+                }
+                .font(Theme.text(13))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            }
+        }
+    }
+
+    private func setSummary(_ record: LiftRecord) -> String {
+        let load: String
+        if record.bodyweightFraction > 0 {
+            load = record.weightKg > 0
+                ? "Bodyweight + \(units.weightString(record.weightKg))"
+                : "Bodyweight"
+        } else {
+            load = units.weightString(record.weightKg)
+        }
+        return "\(load) × \(record.reps)"
+    }
+
+    private func emptyState(title: String, message: String,
+                            topPadding: CGFloat = 48) -> some View {
         VStack(spacing: 8) {
-            Text("No logged lifts yet")
+            Text(title)
                 .font(Theme.font(16))
                 .foregroundStyle(Theme.textPrimary)
-            Text("Complete a weighted working set and it will chart here.")
+            Text(message)
                 .font(Theme.font(13))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 48)
+        .padding(.top, topPadding)
     }
 }
 
