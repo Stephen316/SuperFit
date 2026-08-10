@@ -231,7 +231,10 @@ private struct TabBar: View {
     private static let selectionAnimation = Animation.easeOut(duration: 0.2)
 
     @State private var homeScale: CGFloat = 1
-    @State private var dragPreview: AppTab?
+    /// GestureState resets on both completion and cancellation. A persistent
+    /// State value can remain stuck when a competing row/system gesture wins
+    /// before `onEnded`, leaving whichever tab was last previewed highlighted.
+    @GestureState private var dragPreview: AppTab?
 
     /// Down and back, each leg an ease-in-out. That curve is already an S, and
     /// because it leaves and arrives at zero velocity the two legs meet at the
@@ -277,26 +280,20 @@ private struct TabBar: View {
     /// unlike a tap, sliding onto Home does not trigger its press pulse.
     private func barSwipeGesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12)
-            .onChanged { value in
+            .updating($dragPreview) { value, preview, _ in
                 guard abs(value.translation.width) > abs(value.translation.height),
                       let nearest = AppTab.nearest(to: value.location.x, in: width)
                 else {
-                    dragPreview = nil
+                    preview = nil
                     return
                 }
-                dragPreview = nearest
+                preview = nearest
             }
             .onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height),
                       let destination = AppTab.nearest(to: value.location.x, in: width)
-                else {
-                    withAnimation(Self.selectionAnimation) { dragPreview = nil }
-                    return
-                }
-                withAnimation(Self.selectionAnimation) {
-                    selection = destination
-                    dragPreview = nil
-                }
+                else { return }
+                withAnimation(Self.selectionAnimation) { selection = destination }
             }
     }
 
