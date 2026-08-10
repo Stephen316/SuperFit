@@ -206,8 +206,8 @@ extension View {
     }
 
     /// iOS 26's automatic edge treatment fades and blurs the complete pinned
-    /// section header. Category bars provide their own text-only transition, so
-    /// the system effect must not also remove the teal container underneath it.
+    /// section header. These opaque bars use List's native push handoff, so the
+    /// system effect must not remove either the label or its teal container.
     @ViewBuilder
     fileprivate func featureScrollEdgeTreatment() -> some View {
         if #available(iOS 26.0, *) {
@@ -241,15 +241,6 @@ struct FeatureCategoryBar: View {
                 .font(Theme.text(16, .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .textCase(nil)
-                // During a pinned-header handoff only the outgoing label fades;
-                // the sibling background above remains fully opaque.
-                .scrollTransition(
-                    topLeading: .interactive,
-                    bottomTrailing: .identity,
-                    axis: .vertical
-                ) { content, phase in
-                    content.opacity(phase.isIdentity ? 1 : 0)
-                }
                 .padding(.horizontal, 20)
         }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
