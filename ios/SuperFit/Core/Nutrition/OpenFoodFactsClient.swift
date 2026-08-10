@@ -124,7 +124,7 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "page", value: String(page)),
             .init(name: "page_size", value: String(Self.pageSize)),
             .init(name: "fields",
-                  value: "code,product_name,brands,nutriments,serving_quantity,countries_tags"),
+                  value: "code,product_name,brands,nutriments,serving_quantity,serving_size,product_quantity_unit,categories_tags,countries_tags"),
         ]
         guard let url = comps.url else { throw URLError(.badURL) }
         let response: AliciousResponse = try await session.getJSON(url)
@@ -145,7 +145,7 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "json", value: "1"),
             .init(name: "page_size", value: String(Self.pageSize)),
             .init(name: "page", value: String(page)),
-            .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity,countries_tags"),
+            .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity,serving_size,product_quantity_unit,categories_tags,countries_tags"),
         ]
         guard let url = comps.url else { throw URLError(.badURL) }
         let response: OFFSearchResponse = try await session.getJSON(url)
@@ -178,29 +178,29 @@ private struct AliciousHit: Decodable {
     let brands: [String]?
     let nutriments: OFFNutriments?
     let servingQuantity: StringOrDouble?
+    let servingSize: String?
+    let productQuantityUnit: String?
+    let categoriesTags: [String]?
     let countriesTags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case code, brands, nutriments
         case productName = "product_name"
         case servingQuantity = "serving_quantity"
+        case servingSize = "serving_size"
+        case productQuantityUnit = "product_quantity_unit"
+        case categoriesTags = "categories_tags"
         case countriesTags = "countries_tags"
     }
 
     func resolved(id: String) -> ResolvedFood? {
-        guard let name = productName, !name.isEmpty,
-              let n = nutriments, let kcal = n.energyKcal100g else { return nil }
-        var food = ResolvedFood(
-            id: id, source: .openFoodFacts, name: name,
+        guard let name = productName, let nutriments else { return nil }
+        return OFFFoodMapper.resolved(
+            id: id, name: name,
             brand: brands?.first?.trimmingCharacters(in: .whitespaces),
-            per100g: NutrientProfile(kcal: kcal,
-                                     proteinG: n.proteins100g ?? 0,
-                                     carbsG: n.carbohydrates100g ?? 0,
-                                     fatG: n.fat100g ?? 0,
-                                     fibreG: n.fiber100g ?? 0),
-            servingGrams: servingQuantity?.value)
-        food.countryTags = OFFCountryTag.strip(countriesTags)
-        return food
+            nutriments: nutriments, servingQuantity: servingQuantity?.value,
+            servingSize: servingSize, productQuantityUnit: productQuantityUnit,
+            categoriesTags: categoriesTags, countriesTags: countriesTags)
     }
 }
 
@@ -232,6 +232,9 @@ struct OFFNutriments: Decodable {
     let carbohydrates100g: Double?
     let fat100g: Double?
     let fiber100g: Double?
+    let water100g: Double?
+    let salt100g: Double?
+    let alcohol100g: Double?
 
     enum CodingKeys: String, CodingKey {
         case energyKcal100g = "energy-kcal_100g"
@@ -239,6 +242,9 @@ struct OFFNutriments: Decodable {
         case carbohydrates100g = "carbohydrates_100g"
         case fat100g = "fat_100g"
         case fiber100g = "fiber_100g"
+        case water100g = "water_100g"
+        case salt100g = "salt_100g"
+        case alcohol100g = "alcohol_100g"
     }
 }
 
@@ -248,30 +254,101 @@ private struct OFFProduct: Decodable {
     let brands: String?
     let nutriments: OFFNutriments?
     let servingQuantity: StringOrDouble?
+    let servingSize: String?
+    let productQuantityUnit: String?
+    let categoriesTags: [String]?
     let countriesTags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case code, brands, nutriments
         case productName = "product_name"
         case servingQuantity = "serving_quantity"
+        case servingSize = "serving_size"
+        case productQuantityUnit = "product_quantity_unit"
+        case categoriesTags = "categories_tags"
         case countriesTags = "countries_tags"
     }
 
     func resolved(id: String) -> ResolvedFood? {
-        guard let name = productName, !name.isEmpty,
-              let n = nutriments, let kcal = n.energyKcal100g else { return nil }
-        var food = ResolvedFood(
-            id: id, source: .openFoodFacts, name: name,
+        guard let name = productName, let nutriments else { return nil }
+        return OFFFoodMapper.resolved(
+            id: id, name: name,
             brand: brands?.components(separatedBy: ",").first?
                 .trimmingCharacters(in: .whitespaces),
-            per100g: NutrientProfile(kcal: kcal,
-                                     proteinG: n.proteins100g ?? 0,
-                                     carbsG: n.carbohydrates100g ?? 0,
-                                     fatG: n.fat100g ?? 0,
-                                     fibreG: n.fiber100g ?? 0),
-            servingGrams: servingQuantity?.value)
+            nutriments: nutriments, servingQuantity: servingQuantity?.value,
+            servingSize: servingSize, productQuantityUnit: productQuantityUnit,
+            categoriesTags: categoriesTags, countriesTags: countriesTags)
+    }
+}
+
+/// Normalises the two Open Food Facts response shapes through one path. OFF's
+/// `_100g` values are per 100 ml for liquid products; using a 1 g/ml internal
+/// basis preserves those values while still allowing mass-based app models.
+private enum OFFFoodMapper {
+    static func resolved(id: String, name: String, brand: String?,
+                         nutriments n: OFFNutriments, servingQuantity: Double?,
+                         servingSize: String?, productQuantityUnit: String?,
+                         categoriesTags: [String]?, countriesTags: [String]?) -> ResolvedFood? {
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmedName.isEmpty, let kcal = n.energyKcal100g else { return nil }
+
+        let volume = servingSize.flatMap(FoodVolume.millilitres(in:))
+        let explicitlyLiquid = volume != nil || isVolumeUnit(productQuantityUnit)
+        let describedAsLiquid = isLiquidName(trimmedName)
+            || (categoriesTags ?? []).contains(where: isLiquidCategory)
+
+        // OFF normalises liquid `_100g` values per 100 ml. Treating one ml as
+        // one internal gram is intentional: applying physical density here
+        // would scale an already volume-based nutrition panel twice.
+        let density: Double? = explicitlyLiquid || describedAsLiquid ? 1 : nil
+
+        let protein = n.proteins100g ?? 0
+        let carbs = n.carbohydrates100g ?? 0
+        let fat = n.fat100g ?? 0
+        let fibre = n.fiber100g ?? 0
+        let water = n.water100g.map { min(max($0, 0), 100) }
+            ?? density.map { _ in
+                // Labels rarely print water. For an identified liquid, mass by
+                // difference is a bounded fallback that also subtracts the
+                // common non-water constituents OFF exposes.
+                min(max(100 - protein - carbs - fat - fibre
+                        - (n.salt100g ?? 0) - (n.alcohol100g ?? 0), 0), 100)
+            }
+
+        let portion: FoodPortion? = volume.flatMap { volume in
+            guard volume > 0 else { return nil }
+            return FoodPortion(label: "1 serving",
+                               gramWeight: volume * (density ?? 1),
+                               millilitres: volume)
+        }
+        let grams = portion?.gramWeight ?? servingQuantity
+        var food = ResolvedFood(
+            id: id, source: .openFoodFacts, name: trimmedName, brand: brand,
+            per100g: NutrientProfile(kcal: kcal, proteinG: protein,
+                                     carbsG: carbs, fatG: fat, fibreG: fibre,
+                                     waterG: water),
+            servingGrams: grams,
+            portions: portion.map { [$0] } ?? [],
+            gramsPerMillilitre: density)
         food.countryTags = OFFCountryTag.strip(countriesTags)
         return food
+    }
+
+    private static func isVolumeUnit(_ unit: String?) -> Bool {
+        guard let unit else { return false }
+        return FoodVolume.millilitres(amount: 1, unit: unit) != nil
+    }
+
+    private static func isLiquidName(_ name: String) -> Bool {
+        FoodVolume.looksLiquid(name: name)
+    }
+
+    private static func isLiquidCategory(_ tag: String) -> Bool {
+        let lower = tag.lowercased()
+        return lower.contains("beverage") || lower.contains("drink")
+            || lower.contains("juice") || lower.contains("milk")
+            || lower.contains("sauce") || lower.contains("dressing")
+            || lower.contains("soup") || lower.contains("syrup")
     }
 }
 

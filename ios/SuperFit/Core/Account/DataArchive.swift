@@ -75,6 +75,9 @@ struct DataArchive: Codable, Sendable {
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
         var micros: [String: Double]?
         var portions: [FoodPortion]?
+        /// Optionals keep backups created before dietary hydration readable.
+        var waterGPer100g: Double?
+        var gramsPerMillilitre: Double?
         var isFavorite: Bool
     }
 
@@ -82,6 +85,7 @@ struct DataArchive: Codable, Sendable {
         var date: Date, loggedAt: Date, foodID: UUID?, foodName: String?
         var servingGrams: Double
         var kcal: Double, protein: Double, carbs: Double, fat: Double, fibre: Double
+        var waterMl: Double?
         var micros: [String]
         var meal: String
     }
@@ -189,12 +193,15 @@ enum DataArchiveService {
                       try? JSONDecoder().decode([String: Double].self, from: $0) },
                   portions: f.portionsJSON.flatMap {
                       try? JSONDecoder().decode([FoodPortion].self, from: $0) },
+                  waterGPer100g: f.waterGPer100g,
+                  gramsPerMillilitre: f.gramsPerMillilitre,
                   isFavorite: f.isFavorite)
         }
         archive.nutritionLogs = fetch(context).map { (l: NutritionLog) in
             .init(date: l.date, loggedAt: l.loggedAt, foodID: l.foodID, foodName: l.foodName,
                   servingGrams: l.servingGrams, kcal: l.kcal, protein: l.proteinG,
                   carbs: l.carbsG, fat: l.fatG, fibre: l.fibreG,
+                  waterMl: l.waterMl,
                   micros: l.microsRaw, meal: l.mealRaw)
         }
         archive.hydration = fetch(context).map { (h: HydrationLog) in
@@ -335,6 +342,8 @@ enum DataArchiveService {
             row.carbsPer100g = f.carbs
             row.fatPer100g = f.fat
             row.fibrePer100g = f.fibre
+            row.waterGPer100g = f.waterGPer100g
+            row.gramsPerMillilitre = f.gramsPerMillilitre
             row.microsJSON = f.micros.flatMap { try? JSONEncoder().encode($0) }
             row.portionsJSON = f.portions.flatMap { try? JSONEncoder().encode($0) }
             row.isFavorite = f.isFavorite
@@ -360,6 +369,7 @@ enum DataArchiveService {
             row.carbsG = l.carbs
             row.fatG = l.fat
             row.fibreG = l.fibre
+            row.waterMl = max(l.waterMl ?? 0, 0)
             row.microsRaw = l.micros
             context.insert(row)
             result.added += 1

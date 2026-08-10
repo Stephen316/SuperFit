@@ -14,12 +14,14 @@ struct DiaryView: View {
     @State private var logs: [NutritionLog] = []
     @State private var energy: [DailyEnergy] = []
     @State private var hydration: [HydrationLog] = []
+    @State private var dietaryHydration: [NutritionLog] = []
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var addingTo: MealSlot?
     @State private var showingNutrients = false
     @State private var showingSupplements = false
     @State private var editingHydrationGoal = false
+    @State private var addingCustomWater = false
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
@@ -58,10 +60,20 @@ struct DiaryView: View {
         units == .metric ? 250 : units.storeVolume(8)
     }
 
-    private var currentHydrationMl: Double {
+    private var currentManualHydrationMl: Double {
         let bounds = DayBounds(day)
         return hydration.filter { bounds.contains($0.date) }
             .reduce(0) { $0 + $1.millilitres }
+    }
+
+    private var currentDietaryHydrationMl: Double {
+        let bounds = DayBounds(day)
+        return dietaryHydration.filter { bounds.contains($0.date) }
+            .reduce(0) { $0 + max($1.waterMl, 0) }
+    }
+
+    private var currentHydrationMl: Double {
+        currentManualHydrationMl + currentDietaryHydrationMl
     }
 
     private struct HydrationPoint: Identifiable {
@@ -78,9 +90,13 @@ struct DiaryView: View {
         let byDay = Dictionary(hydration.map {
             (cal.startOfDay(for: $0.date), $0.millilitres)
         }, uniquingKeysWith: +)
+        let dietaryByDay = Dictionary(dietaryHydration.map {
+            (cal.startOfDay(for: $0.date), max($0.waterMl, 0))
+        }, uniquingKeysWith: +)
         return (0..<7).reversed().compactMap { offset in
             guard let date = cal.date(byAdding: .day, value: -offset, to: end) else { return nil }
-            return HydrationPoint(date: date, millilitres: byDay[date] ?? 0)
+            return HydrationPoint(date: date,
+                                  millilitres: (byDay[date] ?? 0) + (dietaryByDay[date] ?? 0))
         }
     }
 
@@ -144,6 +160,11 @@ struct DiaryView: View {
                 NumberEntrySheet(title: "Daily hydration goal", unit: units.volumeUnit,
                                  allowsDecimal: false) { updateHydrationGoal($0) }
             }
+            .fullScreenCover(isPresented: $addingCustomWater) {
+                NumberEntrySheet(title: "Add custom water", unit: units.volumeUnit) {
+                    addCustomWater($0)
+                }
+            }
             .task { loadDiaryData() }
             .onChange(of: day) { _, _ in loadDiaryData() }
         }
@@ -205,8 +226,33 @@ struct DiaryView: View {
 
                 HStack(spacing: 10) {
                     hydrationButton(systemName: "minus", amountMl: -hydrationStepMl)
-                        .disabled(currentHydrationMl <= 0)
+                        .disabled(currentManualHydrationMl <= 0)
                     hydrationButton(systemName: "plus", amountMl: hydrationStepMl)
+                }
+
+                Button { addingCustomWater = true } label: {
+                    Label("Add custom amount", systemImage: "plus.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.controlRadius,
+                                             style: .continuous)
+                                .fill(Theme.wash)
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.strain)
+
+                if currentDietaryHydrationMl > 0 {
+                    HStack {
+                        Label("From logged food and drinks", systemImage: "fork.knife")
+                        Spacer()
+                        Text(formatHydration(currentDietaryHydrationMl))
+                            .monospacedDigit()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
                 }
             }
             .padding(.vertical, 4)
@@ -231,7 +277,7 @@ struct DiaryView: View {
         } header: {
             FeatureCategoryBar("Hydration")
         } footer: {
-            Text("Add the water you drink. The chart compares the last seven days with your daily goal.")
+            Text("The + and − controls adjust plain water by \(formatHydration(hydrationStepMl)). Logged food and drinks also count when their water content is available.")
         }
     }
 
@@ -364,6 +410,12 @@ struct DiaryView: View {
         loadHydrationData()
     }
 
+    private func addCustomWater(_ displayedValue: Double?) {
+        guard let displayedValue, displayedValue > 0 else { return }
+        let millilitres = min(units.storeVolume(displayedValue), 10_000)
+        adjustHydration(by: millilitres)
+    }
+
     private func updateHydrationGoal(_ displayedValue: Double?) {
         guard let displayedValue, displayedValue > 0 else { return }
         let goal = min(max(units.storeVolume(displayedValue), 250), 10_000)
@@ -423,6 +475,11 @@ struct DiaryView: View {
             predicate: #Predicate { $0.date >= start && $0.date < end },
             sortBy: [SortDescriptor(\.date)])
         hydration = (try? context.fetch(query)) ?? []
+
+        let foodQuery = FetchDescriptor<NutritionLog>(
+            predicate: #Predicate { $0.date >= start && $0.date < end && $0.waterMl > 0 },
+            sortBy: [SortDescriptor(\.date)])
+        dietaryHydration = (try? context.fetch(foodQuery)) ?? []
     }
 }
 
