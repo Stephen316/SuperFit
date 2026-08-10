@@ -165,6 +165,7 @@ private struct FeatureListModifier: ViewModifier {
             // content surface between two dark category bars.
             .listSectionSpacing(0)
             .scrollContentBackground(.hidden)
+            .featureScrollEdgeTreatment()
             // The List canvas remains the deep home-screen teal so section
             // headers read as bars. Content rows opt into `Theme.surface` at
             // their declaration sites; SwiftUI does not inherit a row
@@ -203,6 +204,18 @@ extension View {
     func featurePanel() -> some View {
         modifier(FeaturePanelModifier())
     }
+
+    /// iOS 26's automatic edge treatment fades and blurs the complete pinned
+    /// section header. Category bars provide their own text-only transition, so
+    /// the system effect must not also remove the teal container underneath it.
+    @ViewBuilder
+    fileprivate func featureScrollEdgeTreatment() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
+    }
 }
 
 struct FeatureBackground: View {
@@ -222,13 +235,24 @@ struct FeatureCategoryBar: View {
     }
 
     var body: some View {
-        Text(title)
-            .font(Theme.text(16, .semibold))
-            .foregroundStyle(Theme.textPrimary)
-            .textCase(nil)
+        ZStack(alignment: .leading) {
+            Theme.backgroundBase
+            Text(title)
+                .font(Theme.text(16, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .textCase(nil)
+                // During a pinned-header handoff only the outgoing label fades;
+                // the sibling background above remains fully opaque.
+                .scrollTransition(
+                    topLeading: .interactive,
+                    bottomTrailing: .identity,
+                    axis: .vertical
+                ) { content, phase in
+                    content.opacity(phase.isIdentity ? 1 : 0)
+                }
+                .padding(.horizontal, 20)
+        }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .padding(.horizontal, 20)
-            .background(Theme.backgroundBase)
             .listRowInsets(.init())
             .listRowBackground(Theme.backgroundBase)
             .listRowSeparator(.hidden)
