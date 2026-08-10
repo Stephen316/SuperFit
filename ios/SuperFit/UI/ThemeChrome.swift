@@ -207,6 +207,29 @@ struct FeatureBackground: View {
     }
 }
 
+/// Full-width category separator for the four data-entry tabs. It uses the
+/// dashboard canvas colour so headings remain visually distinct from the
+/// lighter content rows without introducing another surface or accent.
+struct FeatureCategoryBar: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .font(Theme.text(16, .semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .textCase(nil)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .padding(.horizontal, 20)
+            .background(Theme.backgroundBase)
+            .listRowInsets(.init())
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 struct FeatureTabControl<Value: Hashable>: View {
     let options: [(value: Value, title: String)]
     @Binding var selection: Value

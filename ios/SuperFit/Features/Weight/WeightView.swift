@@ -135,7 +135,9 @@ struct WeightView: View {
     private var entries: some View {
             List {
                 Group {
-                Section { trendChart }
+                Section { trendChart } header: {
+                    FeatureCategoryBar("Weight trend")
+                }
 
                 Section {
                     HStack {
@@ -145,9 +147,11 @@ struct WeightView: View {
                             .monospacedDigit()
                             .foregroundStyle(Theme.textSecondary)
                     }
+                } header: {
+                    FeatureCategoryBar("Weekly change")
                 }
 
-                Section("Log weight") {
+                Section {
                     Button { loggingWeight = true } label: {
                         HStack {
                             Text("Add a weigh-in")
@@ -157,6 +161,8 @@ struct WeightView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                } header: {
+                    FeatureCategoryBar("Log weight")
                 }
 
                 Section {
@@ -180,6 +186,8 @@ struct WeightView: View {
                             .tint(Theme.gold)
                         }
                     }
+                } header: {
+                    FeatureCategoryBar("Weigh-ins")
                 } footer: {
                     if !metrics.isEmpty {
                         Text("Swipe a weigh-in left to correct or remove it. A wrong "

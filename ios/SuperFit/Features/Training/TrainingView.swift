@@ -250,6 +250,8 @@ struct TrainingView: View {
                         Label("New workout", systemImage: "plus.circle.fill")
                             .font(.headline)
                     }
+                } header: {
+                    FeatureCategoryBar("Workout")
                 } footer: {
                     if savedTemplates.isEmpty {
                         Text("Pick any activity — gym, run, ride, swim — or import "
@@ -259,16 +261,18 @@ struct TrainingView: View {
 
                 watchSection
 
-                Section("Today") {
+                Section {
                     if todaySessions.isEmpty {
                         Text("Nothing logged yet today.").foregroundStyle(Theme.textSecondary)
                     }
                     ForEach(todaySessions) { session in
                         sessionRow(session)
                     }
+                } header: {
+                    FeatureCategoryBar("Today")
                 }
 
-                Section("Last 7 days") {
+                Section {
                     if recentSessionDays.isEmpty {
                         Text("No gym workouts in the last week.").foregroundStyle(Theme.textSecondary)
                     }
@@ -282,6 +286,8 @@ struct TrainingView: View {
                             sessionRow(session)
                         }
                     }
+                } header: {
+                    FeatureCategoryBar("Last 7 days")
                 }
 
                 Section {
@@ -318,11 +324,11 @@ struct TrainingView: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("Shows every muscle and its sets for this week")
                 } header: {
-                    Text("Muscles worked this week")
+                    FeatureCategoryBar("Muscles worked this week")
                 }
 
                 if !progress.isEmpty {
-                    Section("Strength — last 60 days") {
+                    Section {
                         ForEach(shownProgressions(progress), id: \.exerciseID) { p in
                             HStack {
                                 Text(exercises.first { $0.id == p.exerciseID }?.name ?? "Exercise")
@@ -334,6 +340,8 @@ struct TrainingView: View {
                                     .foregroundStyle(p.change >= 0 ? .green : .orange)
                             }
                         }
+                    } header: {
+                        FeatureCategoryBar("Strength — last 60 days")
                     }
                 }
 
@@ -344,6 +352,8 @@ struct TrainingView: View {
                         Label("Weight progress", systemImage: "chart.xyaxis.line")
                             .foregroundStyle(Theme.gold)
                     }
+                } header: {
+                    FeatureCategoryBar("Progress")
                 }
 
                 if let load = cardioLoad {
@@ -357,6 +367,8 @@ struct TrainingView: View {
                                 .font(.caption)
                                 .foregroundStyle(bandColor(load.band))
                         }
+                    } header: {
+                        FeatureCategoryBar("Cardio load")
                     } footer: {
                         Text("Acute:chronic ratio for cardio only, from heart-rate "
                              + "load. Reported separately from lifting — the two "
@@ -366,7 +378,7 @@ struct TrainingView: View {
                 }
 
                 if !displayedWorkouts.isEmpty {
-                    Section("Activities") {
+                    Section {
                         ForEach(displayedWorkouts.prefix(30)) { workout in
                             Button { detailWorkout = workout } label: {
                                 WorkoutRow(workout: workout, units: units)
@@ -378,6 +390,8 @@ struct TrainingView: View {
                             for i in offsets { context.delete(shown[i]) }
                             saveChanges()
                         }
+                    } header: {
+                        FeatureCategoryBar("Activities")
                     }
                 }
                 }
@@ -460,7 +474,7 @@ struct TrainingView: View {
     @ViewBuilder
     private var watchSection: some View {
         if let live = watch.liveWorkout {
-            Section("On your watch") {
+            Section {
                 HStack {
                     Image(systemName: "applewatch.radiowaves.left.and.right")
                         .foregroundStyle(.green)
@@ -476,9 +490,11 @@ struct TrainingView: View {
                             .font(.subheadline).foregroundStyle(.red).monospacedDigit()
                     }
                 }
+            } header: {
+                FeatureCategoryBar("On your watch")
             }
         } else if !unimportedWatchWorkouts.isEmpty {
-            Section("Today from Apple Watch") {
+            Section {
                 ForEach(unimportedWatchWorkouts, id: \.externalID) { w in
                     HStack {
                         Image(systemName: w.activity.symbolName)
@@ -488,6 +504,8 @@ struct TrainingView: View {
                             .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
+            } header: {
+                FeatureCategoryBar("Today from Apple Watch")
             }
         }
     }

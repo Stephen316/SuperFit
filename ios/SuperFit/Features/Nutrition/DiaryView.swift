@@ -108,9 +108,15 @@ struct DiaryView: View {
                 Group {
                     summarySection
                     hydrationSection
-                    ForEach(MealSlot.allCases, id: \.self) { slot in
-                        mealSection(slot)
-                    }
+                }
+                .listRowBackground(Theme.surface)
+
+                FeatureCategoryBar("Meals")
+                    .listRowBackground(Theme.backgroundBase)
+                    .listRowSeparator(.hidden)
+
+                ForEach(MealSlot.allCases, id: \.self) { slot in
+                    mealSection(slot)
                 }
                 .listRowBackground(Theme.surface)
             }
@@ -175,6 +181,8 @@ struct DiaryView: View {
                     }
                 }
             }
+        } header: {
+            FeatureCategoryBar("Macros")
         }
     }
 
@@ -221,7 +229,7 @@ struct DiaryView: View {
                 .font(.subheadline)
             }
         } header: {
-            Text("Hydration")
+            FeatureCategoryBar("Hydration")
         } footer: {
             Text("Add the water you drink. The chart compares the last seven days with your daily goal.")
         }
@@ -294,7 +302,10 @@ struct DiaryView: View {
     }
 
     private func mealSection(_ slot: MealSlot) -> some View {
-        Section(slot.rawValue.capitalized) {
+        Section {
+            Text(slot.rawValue.capitalized)
+                .font(Theme.text(15, .semibold))
+                .foregroundStyle(Theme.textPrimary)
             ForEach(dayLogs.filter { $0.mealRaw == slot.rawValue }) { log in
                 LogRow(log: log)
             }

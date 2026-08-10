@@ -89,6 +89,8 @@ struct SleepView: View {
                     stat("Debt", duration(s.debtMinutes))
                 }
             }
+        } header: {
+            FeatureCategoryBar("Summary")
         } footer: {
             if s.consistencySD != nil {
                 Text("Consistency is how much your bedtime varies. Under ±30 minutes is the target — a steady schedule matters as much as total hours.")
@@ -97,7 +99,7 @@ struct SleepView: View {
     }
 
     private var durationSection: some View {
-        Section("Duration") {
+        Section {
             Chart {
                 ForEach(nights, id: \.date) { n in
                     BarMark(x: .value("Date", n.date, unit: .day),
@@ -125,6 +127,8 @@ struct SleepView: View {
             }
             .frame(height: 180)
             .listRowInsets(.init(top: 12, leading: 12, bottom: 12, trailing: 12))
+        } header: {
+            FeatureCategoryBar("Duration")
         }
     }
 
@@ -139,7 +143,7 @@ struct SleepView: View {
             stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: Theme.gold.opacity(0.65))
             stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Theme.textSecondary)
         } header: {
-            Text("Stages — nightly average")
+            FeatureCategoryBar("Stages — nightly average")
         } footer: {
             Text(staged.count < nights.count
                  ? "\(staged.count) of \(nights.count) nights have stage data. Stages need a watch worn overnight."
@@ -158,14 +162,14 @@ struct SleepView: View {
                     .font(.caption).foregroundStyle(Theme.textSecondary)
             }
         } header: {
-            Text("What sleep does for you")
+            FeatureCategoryBar("What sleep does for you")
         } footer: {
             Text("Observed in your own data. Correlation, not proof — but it's the clearest signal available.")
         }
     }
 
     private var nightsSection: some View {
-        Section("Nights") {
+        Section {
             ForEach(nights.sorted { $0.date > $1.date }.prefix(30), id: \.date) { n in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -185,6 +189,8 @@ struct SleepView: View {
                     }
                 }
             }
+        } header: {
+            FeatureCategoryBar("Nights")
         }
     }
 
@@ -197,6 +203,8 @@ struct SleepView: View {
                 WatchHelpLink()
             }
             .padding(.vertical, 6)
+        } header: {
+            FeatureCategoryBar("Sleep")
         }
     }
 
