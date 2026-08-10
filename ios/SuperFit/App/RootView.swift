@@ -51,7 +51,7 @@ struct RootView: View {
     private static let completionFraction: CGFloat = 0.2
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             Theme.background
 
             GeometryReader { geometry in
@@ -83,9 +83,17 @@ struct RootView: View {
                 .gesture(tabSwipeGesture(width: geometry.size.width))
             }
             .clipped()
-            .ignoresSafeArea(.keyboard)
-
+        }
+        // Keyboard presentation changes the bottom safe-area inset. If the bar
+        // participates in that layout it rises above the keyboard and can retain
+        // an intermediate position during a navigation transition. Ignore only
+        // the keyboard region; the device/container safe area is still honoured.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        // An overlay cannot contribute to the pager's size or inherit a child
+        // screen's alignment, which gives the bar a second independent anchor.
+        .overlay(alignment: .bottom) {
             TabBar(selection: $tab)
+                .zIndex(1)
         }
         .overlay(alignment: .top) {
             if AppSchema.isEphemeral {
