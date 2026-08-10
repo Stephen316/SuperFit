@@ -41,15 +41,18 @@ struct SleepView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let summary {
-                    summarySection(summary)
-                    durationSection
-                    if nights.contains(where: \.hasStages) { stagesSection }
-                    if let impact { impactSection(impact) }
-                    nightsSection
-                } else {
-                    emptySection
+                Group {
+                    if let summary {
+                        summarySection(summary)
+                        durationSection
+                        if nights.contains(where: \.hasStages) { stagesSection }
+                        if let impact { impactSection(impact) }
+                        nightsSection
+                    } else {
+                        emptySection
+                    }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Sleep")
             .themedChrome()

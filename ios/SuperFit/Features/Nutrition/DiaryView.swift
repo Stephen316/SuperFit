@@ -105,11 +105,14 @@ struct DiaryView: View {
     var body: some View {
         NavigationStack {
             List {
-                summarySection
-                hydrationSection
-                ForEach(MealSlot.allCases, id: \.self) { slot in
-                    mealSection(slot)
+                Group {
+                    summarySection
+                    hydrationSection
+                    ForEach(MealSlot.allCases, id: \.self) { slot in
+                        mealSection(slot)
+                    }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(day.formatted(.dateTime.weekday(.wide).month().day()))
             .themedChrome()

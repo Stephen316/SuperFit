@@ -134,6 +134,7 @@ struct WeightView: View {
     /// checker could not solve inside its time limit.
     private var entries: some View {
             List {
+                Group {
                 Section { trendChart }
 
                 Section {
@@ -186,6 +187,8 @@ struct WeightView: View {
                              + "built on that trend.")
                     }
                 }
+                }
+                .listRowBackground(Theme.surface)
             }
             .task { loadRecentMetrics() }
     }

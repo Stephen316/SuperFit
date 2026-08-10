@@ -244,6 +244,7 @@ struct TrainingView: View {
         let progress = progressions
         NavigationStack {
             List {
+                Group {
                 Section {
                     Button { showingPicker = true } label: {
                         Label("New workout", systemImage: "plus.circle.fill")
@@ -379,6 +380,8 @@ struct TrainingView: View {
                         }
                     }
                 }
+                }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Train")
             .themedChrome()

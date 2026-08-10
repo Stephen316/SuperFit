@@ -161,7 +161,11 @@ private struct FeatureListModifier: ViewModifier {
         content
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(Theme.surface)
+            // The List canvas remains the deep home-screen teal so section
+            // headers read as bars. Content rows opt into `Theme.surface` at
+            // their declaration sites; SwiftUI does not inherit a row
+            // background applied to the List itself.
+            .background(Theme.backgroundBase)
             .listRowBackground(Theme.surface)
             .listRowSeparatorTint(Theme.hairline)
             .tint(Theme.gold)
