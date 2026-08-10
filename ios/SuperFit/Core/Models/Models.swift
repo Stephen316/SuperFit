@@ -199,6 +199,11 @@ final class Food {
     var carbsPer100g: Double = 0
     var fatPer100g: Double = 0
     var fibrePer100g: Double = 0
+    /// nil means unknown; zero is a measured food with no water.
+    var waterGPer100g: Double?
+    /// Optional liquid density used to convert ml/fl oz into the gram basis
+    /// nutrition values use. Volume-labelled portions can also provide this.
+    var gramsPerMillilitre: Double?
     var microsJSON: Data?                  // [String: Double] per 100 g
     /// USDA household measures, JSON [FoodPortion]. Cached so a food logged
     /// once keeps its "1 medium" option offline and without a second request.
@@ -223,6 +228,9 @@ final class NutritionLog {
     var carbsG: Double = 0
     var fatG: Double = 0
     var fibreG: Double = 0
+    /// Water contributed by this exact logged portion. Snapshotted like the
+    /// macros so later edits to the source food cannot rewrite hydration history.
+    var waterMl: Double = 0
     var mealRaw: String = MealSlot.snack.rawValue
     /// Micronutrients snapshotted at log time, "key:amount" (CloudKit-safe).
     /// Absent keys mean the source had no value — not zero.

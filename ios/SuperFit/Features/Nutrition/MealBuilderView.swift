@@ -186,6 +186,7 @@ struct MealBuilderView: View {
             entry.carbsG = scaled.carbsG
             entry.fatG = scaled.fatG
             entry.fibreG = scaled.fibreG
+            entry.waterMl = max(scaled.waterG ?? 0, 0)
             entry.micros = Dictionary(uniqueKeysWithValues: scaled.micros.compactMap { key, value in
                 Micronutrient(rawValue: key).map { ($0, value) }
             })
@@ -262,9 +263,17 @@ private struct MealIngredientView: View {
                 .withoutGlassBackground()
             }
             .task {
-                if let portion = options.first, portion != .gram, portion != .ounce {
+                if let portion = options.first(where: { $0.kind == .portion }) {
                     unit = portion
                     quantity = 1
+                } else if food.effectiveGramsPerMillilitre != nil, units == .imperial,
+                          let fluidOunce = options.first(where: { $0.kind == .fluidOunce }) {
+                    unit = fluidOunce
+                    quantity = 8
+                } else if food.effectiveGramsPerMillilitre != nil,
+                          let millilitre = options.first(where: { $0.kind == .millilitre }) {
+                    unit = millilitre
+                    quantity = 250
                 } else if units == .imperial {
                     unit = .ounce
                     quantity = 3.5

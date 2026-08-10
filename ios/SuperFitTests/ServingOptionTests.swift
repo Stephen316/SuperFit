@@ -3,12 +3,16 @@ import Foundation
 @testable import SuperFit
 
 private func food(portions: [FoodPortion] = [], servingGrams: Double? = nil,
-                  kcal: Double = 89, protein: Double = 1.09) -> ResolvedFood {
-    ResolvedFood(id: "fdc:1", source: .usda, name: "Bananas, raw", brand: nil,
+                  kcal: Double = 89, protein: Double = 1.09,
+                  name: String = "Bananas, raw", waterG: Double? = nil,
+                  density: Double? = nil) -> ResolvedFood {
+    ResolvedFood(id: "fdc:1", source: .usda, name: name, brand: nil,
                  per100g: NutrientProfile(kcal: kcal, proteinG: protein,
                                           carbsG: 22.84, fatG: 0.33, fibreG: 2.6,
+                                          waterG: waterG,
                                           micros: [Micronutrient.potassium.rawValue: 358]),
-                 servingGrams: servingGrams, portions: portions)
+                 servingGrams: servingGrams, portions: portions,
+                 gramsPerMillilitre: density)
 }
 
 struct ServingOptionTests {
@@ -53,6 +57,32 @@ struct ServingOptionTests {
         #expect(options[0].label == "1 bar (60 g)")
     }
 
+    @Test func liquidFoodsOfferMillilitresAndFluidOuncesWithoutRemovingWeightUnits() {
+        let milk = food(name: "Whole milk", waterG: 87.7, density: 1.03)
+        let options = ServingOption.options(for: milk)
+
+        #expect(options.contains { $0.kind == .millilitre && $0.label == "ml" })
+        #expect(options.contains { $0.kind == .fluidOunce && $0.label == "fl oz" })
+        #expect(options.contains(.gram))
+        #expect(options.contains(.ounce))
+    }
+
+    @Test func volumePortionDerivesDensityForSauce() {
+        let sauce = food(portions: [
+            FoodPortion(label: "1 tbsp", gramWeight: 16,
+                        millilitres: 14.78676478125),
+        ], name: "Tomato sauce", waterG: 85)
+        let density = sauce.effectiveGramsPerMillilitre ?? 0
+        #expect(abs(density - 1.082) < 0.001)
+        #expect(ServingOption.options(for: sauce).contains { $0.kind == .millilitre })
+    }
+
+    @Test func liquidNameFallbackUsesWordsRatherThanSubstrings() {
+        let steak = food(name: "Grilled steak", waterG: 61)
+        #expect(steak.effectiveGramsPerMillilitre == nil)
+        #expect(!ServingOption.options(for: steak).contains { $0.kind == .millilitre })
+    }
+
     // MARK: Conversion
 
     @Test func ounceIsTheInternationalAvoirdupoisGram() {
@@ -82,6 +112,23 @@ struct ServingOptionTests {
         let viaOunces = banana.scaled(grams: 4 * ServingOption.ounce.gramsPerUnit)
         let viaGrams = banana.scaled(grams: 113.398092)
         #expect(abs(viaOunces.kcal - viaGrams.kcal) < 0.001)
+    }
+
+    @Test func milkVolumeScalesNutrientsAndHydrationThroughDensity() throws {
+        let milk = food(kcal: 61, protein: 3.2, name: "Whole milk",
+                        waterG: 87.7, density: 1.03)
+        let ml = try #require(ServingOption.options(for: milk)
+            .first { $0.kind == .millilitre })
+        let scaled = milk.scaled(grams: 250 * ml.gramsPerUnit)
+
+        #expect(abs(scaled.kcal - 157.075) < 0.001)
+        #expect(abs((scaled.waterG ?? 0) - 225.8275) < 0.001)
+    }
+
+    @Test func oldCachedPortionJSONStillDecodesWithoutVolume() throws {
+        let old = Data(#"[{"label":"1 cup","gramWeight":150}]"#.utf8)
+        let decoded = try JSONDecoder().decode([FoodPortion].self, from: old)
+        #expect(decoded.first?.millilitres == nil)
     }
 
     // MARK: Display

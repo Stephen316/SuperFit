@@ -30,8 +30,15 @@ struct DataArchiveTests {
         log.servingGrams = 180
         log.kcal = 297
         log.proteinG = 56
+        log.waterMl = 117
         log.micros = [.iron: 1.9, .potassium: 460]
         context.insert(log)
+
+        let milk = Food(name: "Whole milk", source: .custom)
+        milk.kcalPer100g = 61
+        milk.waterGPer100g = 87.7
+        milk.gramsPerMillilitre = 1.03
+        context.insert(milk)
 
         context.insert(HydrationLog(
             date: Date(timeIntervalSince1970: 1_700_000_000),
@@ -101,6 +108,9 @@ struct DataArchiveTests {
         #expect(restored.bodyMetrics.first?.weightKg == 82.4)
         #expect(restored.sessions.first?.sets.first?.rir == 2)
         #expect(restored.nutritionLogs.first?.micros.isEmpty == false)
+        #expect(restored.nutritionLogs.first?.waterMl == 117)
+        #expect(restored.foods.first?.waterGPer100g == 87.7)
+        #expect(restored.foods.first?.gramsPerMillilitre == 1.03)
         #expect(restored.hydration?.first?.millilitres == 1_750)
     }
 
@@ -119,7 +129,12 @@ struct DataArchiveTests {
         #expect(logs.count == 1)
         #expect(logs.first?.foodName == "Chicken breast")
         #expect(logs.first?.kcal == 297)
+        #expect(logs.first?.waterMl == 117)
         #expect(logs.first?.micros[.iron] == 1.9)
+
+        let foods = try fresh.fetch(FetchDescriptor<Food>())
+        #expect(foods.first?.waterGPer100g == 87.7)
+        #expect(foods.first?.gramsPerMillilitre == 1.03)
 
         let sessions = try fresh.fetch(FetchDescriptor<TrainingSession>())
         #expect(sessions.count == 1)

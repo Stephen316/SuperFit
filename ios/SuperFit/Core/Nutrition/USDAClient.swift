@@ -282,7 +282,11 @@ struct USDAClient: Sendable {
                         return nil
                     }
                     label = String(label.prefix(60))
-                    return FoodPortion(label: label, gramWeight: grams)
+                    let volume = unit.flatMap {
+                        FoodVolume.millilitres(amount: amount ?? 1, unit: $0)
+                    } ?? FoodVolume.millilitres(in: label)
+                    return FoodPortion(label: label, gramWeight: grams,
+                                       millilitres: volume)
                 }
             }
 
@@ -319,6 +323,7 @@ struct USDAClient: Sendable {
                     case 1004: profile.fatG = value
                     case 1005: profile.carbsG = value
                     case 1079: profile.fibreG = value
+                    case 1051: profile.waterG = min(max(value, 0), 100)
                     default:
                         if let micro = USDAClient.microIDs[id] { micros[micro.rawValue] = value }
                     }
@@ -327,7 +332,15 @@ struct USDAClient: Sendable {
                 profile.micros = micros
 
                 let brand = (brandName ?? brandOwner)?.trimmingCharacters(in: .whitespaces)
-                let grams = servingSizeUnit?.lowercased() == "g" ? servingSize : nil
+                let servingUnit = servingSizeUnit?.lowercased()
+                let servingVolume = servingSize.flatMap { size in
+                    servingUnit.flatMap { FoodVolume.millilitres(amount: size, unit: $0) }
+                }
+                // Some branded drinks declare a serving in ml but not its mass.
+                // Use the standard water-like approximation only so the entry
+                // remains loggable; a measured foodPortion below takes priority.
+                let grams = servingUnit == "g" ? servingSize
+                    : servingVolume.map { $0 }
 
                 var portions = (foodPortions ?? []).compactMap(\.resolved)
                 // Branded foods have no foodPortions but do carry a named
@@ -336,7 +349,9 @@ struct USDAClient: Sendable {
                    let household = householdServingFullText?
                     .trimmingCharacters(in: .whitespaces), !household.isEmpty {
                     portions = [FoodPortion(label: String(household.prefix(60)),
-                                            gramWeight: grams)]
+                                            gramWeight: grams,
+                                            millilitres: servingVolume
+                                                ?? FoodVolume.millilitres(in: household))]
                 }
                 // Same measure can appear twice with different weights; keep the
                 // first of each label so the picker doesn't show duplicates.
@@ -350,7 +365,8 @@ struct USDAClient: Sendable {
                     brand: (brand?.isEmpty ?? true) ? nil : brand,
                     per100g: profile,
                     servingGrams: grams,
-                    portions: portions)
+                    portions: portions,
+                    gramsPerMillilitre: servingVolume == nil ? nil : 1)
                 // Foundation, SR Legacy and the survey set are whole foods and
                 // recipes with no supplier, so they have no country. Ranking them
                 // as foreign would bury "rice, white, long-grain" under some other

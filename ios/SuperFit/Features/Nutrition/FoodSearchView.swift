@@ -114,6 +114,9 @@ struct LogFoodView: View {
                     LabeledContent("Carbs", value: "\(Int(scaled.carbsG)) g")
                     LabeledContent("Fat", value: "\(Int(scaled.fatG)) g")
                     LabeledContent("Fibre", value: "\(Int(scaled.fibreG)) g")
+                    if let water = scaled.waterG, water > 0 {
+                        LabeledContent("Hydration", value: "\(Int(water.rounded())) ml")
+                    }
                 }
             }
             .navigationTitle("Log food")
@@ -155,18 +158,33 @@ struct LogFoodView: View {
         loadingPortions = true
         defer { loadingPortions = false }
         let detailed = await FoodResolver(context: context).withPortions(resolved)
-        guard !detailed.portions.isEmpty else { return }
-        let wasDefault = unit == .gram || unit == .ounce
+        guard !detailed.portions.isEmpty || detailed.effectiveGramsPerMillilitre != nil else {
+            return
+        }
+        let previousKind = unit.kind
         resolved = detailed
-        if wasDefault, quantity == 1 || quantity == 100 { applyDefaultUnit() }
+        if previousKind != .portion,
+           let matching = options.first(where: { $0.kind == previousKind }) {
+            unit = matching
+        } else if previousKind != .portion {
+            applyDefaultUnit()
+        }
     }
 
     /// Prefer a real portion; otherwise the unit that matches the user's
     /// measurement setting, with a sensible starting quantity for each.
     private func applyDefaultUnit() {
-        if let portion = options.first, portion != .gram, portion != .ounce {
+        if let portion = options.first(where: { $0.kind == .portion }) {
             unit = portion
             quantity = 1
+        } else if resolved.effectiveGramsPerMillilitre != nil, units == .imperial,
+                  let fluidOunce = options.first(where: { $0.kind == .fluidOunce }) {
+            unit = fluidOunce
+            quantity = 8
+        } else if resolved.effectiveGramsPerMillilitre != nil,
+                  let millilitre = options.first(where: { $0.kind == .millilitre }) {
+            unit = millilitre
+            quantity = 250
         } else if units == .imperial {
             unit = .ounce
             quantity = 3.5
@@ -188,6 +206,7 @@ struct LogFoodView: View {
         entry.carbsG = scaled.carbsG
         entry.fatG = scaled.fatG
         entry.fibreG = scaled.fibreG
+        entry.waterMl = max(scaled.waterG ?? 0, 0)
         entry.micros = Dictionary(uniqueKeysWithValues: scaled.micros.compactMap { key, value in
             Micronutrient(rawValue: key).map { ($0, value) }
         })

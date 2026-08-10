@@ -27,6 +27,9 @@ struct CustomFoodView: View {
     @State private var carbs: Double?
     @State private var fat: Double?
     @State private var fibre: Double?
+    @State private var measuredByVolume = false
+    @State private var gramsPer100Ml: Double? = 100
+    @State private var waterPer100g: Double?
 
     var body: some View {
         NavigationStack {
@@ -59,6 +62,26 @@ struct CustomFoodView: View {
                     field("Carbs (g)", $carbs)
                     field("Fat (g)", $fat)
                     field("Fibre (g)", $fibre)
+                }
+
+                Section {
+                    Toggle("Offer ml and fl oz", isOn: $measuredByVolume)
+                    if measuredByVolume {
+                        LabeledContent("Weight of 100 ml") {
+                            NumberField(title: "Weight of 100 ml", unit: "g",
+                                        value: $gramsPer100Ml)
+                        }
+                        LabeledContent("Water per 100 g") {
+                            NumberField(title: "Water per 100 g", unit: "g",
+                                        value: $waterPer100g)
+                        }
+                    }
+                } header: {
+                    Text("Drinks and sauces")
+                } footer: {
+                    if measuredByVolume {
+                        Text("Volume needs the food's density for accurate nutrition. Water content is optional, but lets this portion contribute to hydration.")
+                    }
                 }
 
                 if basis == .perServing, let per100 = per100gPreview {
@@ -109,6 +132,10 @@ struct CustomFoodView: View {
         // Sanity-check the per-100 g figures, so a per-serving entry can't slip
         // an impossible density through by being small.
         guard let per100 = per100gPreview, per100.kcal >= 0, per100.kcal <= 900 else { return false }
+        if measuredByVolume {
+            guard let gramsPer100Ml, (20...250).contains(gramsPer100Ml) else { return false }
+            if let waterPer100g, !(0...100).contains(waterPer100g) { return false }
+        }
         let macroKcal = 4 * per100.proteinG + 4 * per100.carbsG + 9 * per100.fatG
         return macroKcal <= per100.kcal * 1.3 + 20   // reject internally-inconsistent entries
     }
@@ -128,6 +155,10 @@ struct CustomFoodView: View {
         food.carbsPer100g = per100.carbsG
         food.fatPer100g = per100.fatG
         food.fibrePer100g = per100.fibreG
+        if measuredByVolume, let gramsPer100Ml {
+            food.gramsPerMillilitre = gramsPer100Ml / 100
+            food.waterGPer100g = waterPer100g
+        }
         // Keep the serving as a portion so "1 serving" is one tap when logging.
         if basis == .perServing, let grams = servingGrams, grams > 0 {
             food.portionsJSON = try? JSONEncoder().encode(
