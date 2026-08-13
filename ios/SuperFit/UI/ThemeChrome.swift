@@ -227,12 +227,51 @@ struct FeatureBackground: View {
 /// Full-width category separator for the four data-entry tabs. It uses the
 /// dashboard canvas colour so headings remain visually distinct from the
 /// lighter content rows without introducing another surface or accent.
+///
+/// **Always a plain row, never a `Section` header.** iOS 26's `List` cross-fades
+/// one pinned header into the next, drawing both at partial opacity for the
+/// length of the handoff — an arriving bar and the row behind it overlaid and
+/// neither legible. That fade belongs to the pinning machinery and no public API
+/// turns it off: `scrollEdgeEffectHidden` and `scrollEdgeEffectStyle` both act on
+/// the scroll-edge effect, which is a different system, and neither changed it.
+///
+/// So the bars scroll like any other row, and `stickyCategoryHeaders()` draws the
+/// pinned one in an overlay instead. See that modifier for the handoff.
 struct FeatureCategoryBar: View {
     let title: String
+    @Environment(CategoryBarTracker.self) private var tracker: CategoryBarTracker?
+
+    /// Fixed, because the sticky overlay has to know a bar's height before the
+    /// bar exists in order to push it off by exactly its own height.
+    static let height: CGFloat = 48
 
     init(_ title: String) {
         self.title = title
     }
+
+    var body: some View {
+        FeatureCategoryLabel(title: title)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.frame(in: .global).minY, initial: true) { _, y in
+                            tracker?.positions[title] = y
+                            tracker?.seen.insert(title)
+                        }
+                        .onDisappear { tracker?.positions[title] = nil }
+                }
+            }
+            .listRowInsets(.init())
+            .listRowBackground(Theme.backgroundBase)
+            .listRowSeparator(.hidden)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The bar's appearance, with no list or measurement behaviour attached, so the
+/// sticky overlay can draw an identical copy.
+struct FeatureCategoryLabel: View {
+    let title: String
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -243,11 +282,114 @@ struct FeatureCategoryBar: View {
                 .textCase(nil)
                 .padding(.horizontal, 20)
         }
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .listRowInsets(.init())
-            .listRowBackground(Theme.backgroundBase)
-            .listRowSeparator(.hidden)
-            .accessibilityAddTraits(.isHeader)
+        .frame(maxWidth: .infinity, minHeight: FeatureCategoryBar.height, alignment: .leading)
+    }
+}
+
+/// Where each category bar currently is, in screen coordinates.
+///
+/// A shared object rather than a `PreferenceKey`, because `List` hosts every row
+/// in its own view hierarchy and preferences set inside a row never reach a
+/// modifier on the List itself. Geometry callbacks cross that boundary; anchor
+/// preferences silently do not, and the overlay simply never appears.
+@Observable
+final class CategoryBarTracker {
+    /// Top of the list in screen coordinates, so bar positions can be made
+    /// relative to it.
+    var listTop: CGFloat = 0
+    /// Title to its top edge in screen coordinates. Only bars the list has
+    /// actually realised appear here — it recycles the rest.
+    var positions: [String: CGFloat] = [:]
+    /// Every bar the screen *can* show, in order, including ones scrolled out of
+    /// the realised range. Needed to name the pinned bar once its own row has
+    /// been recycled and can no longer report a position.
+    var order: [String] = []
+    /// Bars that have actually appeared. Several sections are conditional — the
+    /// watch ones on Train, most of Sleep — so `order` lists headings that may
+    /// never render. Falling back through `order` alone would pin the name of a
+    /// section that is not on screen.
+    var seen: Set<String> = []
+
+    func offset(of title: String) -> CGFloat? {
+        positions[title].map { $0 - listTop }
+    }
+
+    /// The bar that should be pinned, and how far the next one still has to
+    /// travel before it starts pushing.
+    func sticky(barHeight: CGFloat) -> (title: String, push: CGFloat)? {
+        let placed = order.compactMap { title in offset(of: title).map { (title, $0) } }
+        guard !placed.isEmpty else { return nil }
+
+        let current: String
+        if let passed = placed.last(where: { $0.1 <= 0 }) {
+            current = passed.0
+        } else if let ahead = placed.first(where: { $0.1 > 0 }),
+                  let i = order.firstIndex(of: ahead.0),
+                  let previous = order[..<i].last(where: { seen.contains($0) }) {
+            // Its own row has been recycled, so fall back to the running order —
+            // skipping conditional sections that never rendered.
+            current = previous
+        } else {
+            return nil
+        }
+
+        let approaching = placed.first(where: { $0.1 > 0 })?.1 ?? .greatestFiniteMagnitude
+        return (current, min(0, approaching - barHeight))
+    }
+}
+
+/// Pins the current category bar under the navigation bar, and lets the next one
+/// push it out of view.
+///
+/// The four states this reproduces, in scroll order:
+///
+/// 1. the bar sits still above its category while that category's rows scroll
+/// 2. the next category's bar arrives directly beneath it
+/// 3. the arriving bar pushes it up, and it is *clipped* by the top edge
+/// 4. it is gone, and the arriving bar has taken its place
+///
+/// Step 3 is the whole point. `List`'s own pinning cross-fades there, drawing
+/// both bars at partial opacity, which is illegible against the dark surface.
+/// Here the outgoing bar is moved, not faded: `offset` slides it up by however
+/// far the next bar has yet to travel, and `clipped()` removes what leaves the
+/// top. Opacity is never touched.
+private struct StickyCategoryHeaders: ViewModifier {
+    let titles: [String]
+    @State private var tracker = CategoryBarTracker()
+
+    func body(content: Content) -> some View {
+        content
+            .environment(tracker)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.frame(in: .global).minY, initial: true) { _, y in
+                            tracker.listTop = y
+                        }
+                }
+            }
+            .overlay(alignment: .top) {
+                if let sticky = tracker.sticky(barHeight: FeatureCategoryBar.height) {
+                    ZStack(alignment: .top) {
+                        FeatureCategoryLabel(title: sticky.title)
+                            .offset(y: sticky.push)
+                    }
+                    .frame(height: FeatureCategoryBar.height)
+                    .clipped()
+                    // Decoration only: taps must reach the rows underneath.
+                    .allowsHitTesting(false)
+                }
+            }
+            .onAppear { tracker.order = titles }
+    }
+}
+
+extension View {
+    /// Draws the current `FeatureCategoryBar` pinned at the top, pushed out by
+    /// the next one. Apply to the `List`, alongside `featureList()`, passing the
+    /// bar titles in the order they appear.
+    func stickyCategoryHeaders(_ titles: [String]) -> some View {
+        modifier(StickyCategoryHeaders(titles: titles))
     }
 }
 

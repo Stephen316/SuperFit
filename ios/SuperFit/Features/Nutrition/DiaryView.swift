@@ -122,7 +122,9 @@ struct DiaryView: View {
         NavigationStack {
             List {
                 Group {
+                    FeatureCategoryBar("Macros")
                     summarySection
+                    FeatureCategoryBar("Hydration")
                     hydrationSection
                 }
                 .listRowBackground(Theme.surface)
@@ -150,6 +152,7 @@ struct DiaryView: View {
                 .withoutGlassBackground()
             }
             .featureList()
+            .stickyCategoryHeaders(["Macros", "Hydration", "Meals"])
             .settingsToolbar()
             .sheet(item: $addingTo, onDismiss: loadDiaryData) { slot in
                 FoodSearchView(day: day, meal: slot)
@@ -202,8 +205,6 @@ struct DiaryView: View {
                     }
                 }
             }
-        } header: {
-            FeatureCategoryBar("Macros")
         }
     }
 
@@ -274,8 +275,6 @@ struct DiaryView: View {
                 }
                 .font(.subheadline)
             }
-        } header: {
-            FeatureCategoryBar("Hydration")
         } footer: {
             Text("The + and − controls adjust plain water by \(formatHydration(hydrationStepMl)). Logged food and drinks also count when their water content is available.")
         }

@@ -245,13 +245,12 @@ struct TrainingView: View {
         NavigationStack {
             List {
                 Group {
+                FeatureCategoryBar("Workout")
                 Section {
                     Button { showingPicker = true } label: {
                         Label("New workout", systemImage: "plus.circle.fill")
                             .font(.headline)
                     }
-                } header: {
-                    FeatureCategoryBar("Workout")
                 } footer: {
                     if savedTemplates.isEmpty {
                         Text("Pick any activity — gym, run, ride, swim — or import "
@@ -261,6 +260,7 @@ struct TrainingView: View {
 
                 watchSection
 
+                FeatureCategoryBar("Today")
                 Section {
                     if todaySessions.isEmpty {
                         Text("Nothing logged yet today.").foregroundStyle(Theme.textSecondary)
@@ -268,10 +268,9 @@ struct TrainingView: View {
                     ForEach(todaySessions) { session in
                         sessionRow(session)
                     }
-                } header: {
-                    FeatureCategoryBar("Today")
                 }
 
+                FeatureCategoryBar("Last 7 days")
                 Section {
                     if recentSessionDays.isEmpty {
                         Text("No gym workouts in the last week.").foregroundStyle(Theme.textSecondary)
@@ -286,10 +285,9 @@ struct TrainingView: View {
                             sessionRow(session)
                         }
                     }
-                } header: {
-                    FeatureCategoryBar("Last 7 days")
                 }
 
+                FeatureCategoryBar("Muscles worked this week")
                 Section {
                     // Tall enough that width, not height, is the binding
                     // constraint — otherwise the pair is letterboxed and the
@@ -323,11 +321,10 @@ struct TrainingView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint("Shows every muscle and its sets for this week")
-                } header: {
-                    FeatureCategoryBar("Muscles worked this week")
                 }
 
                 if !progress.isEmpty {
+                    FeatureCategoryBar("Strength — last 60 days")
                     Section {
                         ForEach(shownProgressions(progress), id: \.exerciseID) { p in
                             HStack {
@@ -340,11 +337,10 @@ struct TrainingView: View {
                                     .foregroundStyle(p.change >= 0 ? .green : .orange)
                             }
                         }
-                    } header: {
-                        FeatureCategoryBar("Strength — last 60 days")
                     }
                 }
 
+                FeatureCategoryBar("Progress")
                 Section {
                     NavigationLink {
                         ExerciseProgressView()
@@ -352,11 +348,10 @@ struct TrainingView: View {
                         Label("Weight progress", systemImage: "chart.xyaxis.line")
                             .foregroundStyle(Theme.gold)
                     }
-                } header: {
-                    FeatureCategoryBar("Progress")
                 }
 
                 if let load = cardioLoad {
+                    FeatureCategoryBar("Cardio load")
                     Section {
                         HStack {
                             Text("Cardio load")
@@ -367,8 +362,6 @@ struct TrainingView: View {
                                 .font(.caption)
                                 .foregroundStyle(bandColor(load.band))
                         }
-                    } header: {
-                        FeatureCategoryBar("Cardio load")
                     } footer: {
                         Text("Acute:chronic ratio for cardio only, from heart-rate "
                              + "load. Reported separately from lifting — the two "
@@ -378,6 +371,7 @@ struct TrainingView: View {
                 }
 
                 if !displayedWorkouts.isEmpty {
+                    FeatureCategoryBar("Activities")
                     Section {
                         ForEach(displayedWorkouts.prefix(30)) { workout in
                             Button { detailWorkout = workout } label: {
@@ -390,8 +384,6 @@ struct TrainingView: View {
                             for i in offsets { context.delete(shown[i]) }
                             saveChanges()
                         }
-                    } header: {
-                        FeatureCategoryBar("Activities")
                     }
                 }
                 }
@@ -401,6 +393,7 @@ struct TrainingView: View {
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .featureList()
+            .stickyCategoryHeaders(["Workout", "Today", "Last 7 days", "Muscles worked this week", "Strength — last 60 days", "Progress", "Cardio load", "Activities", "On your watch", "Today from Apple Watch"])
             .settingsToolbar()
             .task {
                 ExerciseLibrary.seedIfNeeded(context: context)
@@ -474,6 +467,7 @@ struct TrainingView: View {
     @ViewBuilder
     private var watchSection: some View {
         if let live = watch.liveWorkout {
+            FeatureCategoryBar("On your watch")
             Section {
                 HStack {
                     Image(systemName: "applewatch.radiowaves.left.and.right")
@@ -490,10 +484,9 @@ struct TrainingView: View {
                             .font(.subheadline).foregroundStyle(.red).monospacedDigit()
                     }
                 }
-            } header: {
-                FeatureCategoryBar("On your watch")
             }
         } else if !unimportedWatchWorkouts.isEmpty {
+            FeatureCategoryBar("Today from Apple Watch")
             Section {
                 ForEach(unimportedWatchWorkouts, id: \.externalID) { w in
                     HStack {
@@ -504,8 +497,6 @@ struct TrainingView: View {
                             .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
-            } header: {
-                FeatureCategoryBar("Today from Apple Watch")
             }
         }
     }

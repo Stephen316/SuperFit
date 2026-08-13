@@ -135,10 +135,10 @@ struct WeightView: View {
     private var entries: some View {
             List {
                 Group {
-                Section { trendChart } header: {
-                    FeatureCategoryBar("Weight trend")
-                }
+                FeatureCategoryBar("Weight trend")
+                Section { trendChart }
 
+                FeatureCategoryBar("Weekly change")
                 Section {
                     HStack {
                         Text(trendLabel).font(.subheadline)
@@ -147,10 +147,9 @@ struct WeightView: View {
                             .monospacedDigit()
                             .foregroundStyle(Theme.textSecondary)
                     }
-                } header: {
-                    FeatureCategoryBar("Weekly change")
                 }
 
+                FeatureCategoryBar("Log weight")
                 Section {
                     Button { loggingWeight = true } label: {
                         HStack {
@@ -161,10 +160,9 @@ struct WeightView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                } header: {
-                    FeatureCategoryBar("Log weight")
                 }
 
+                FeatureCategoryBar("Weigh-ins")
                 Section {
                     ForEach(metrics.prefix(30)) { m in
                         HStack {
@@ -186,8 +184,6 @@ struct WeightView: View {
                             .tint(Theme.gold)
                         }
                     }
-                } header: {
-                    FeatureCategoryBar("Weigh-ins")
                 } footer: {
                     if !metrics.isEmpty {
                         Text("Swipe a weigh-in left to correct or remove it. A wrong "
@@ -219,6 +215,7 @@ struct WeightView: View {
                 .withoutGlassBackground()
             }
             .featureList()
+            .stickyCategoryHeaders(["Weight trend", "Weekly change", "Log weight", "Weigh-ins"])
             .settingsToolbar()
             .confirmationDialog("Weigh-in", isPresented: Binding(
                 get: { options != nil },

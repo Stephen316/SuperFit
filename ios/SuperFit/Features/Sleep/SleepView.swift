@@ -70,13 +70,16 @@ struct SleepView: View {
                 .withoutGlassBackground()
             }
             .featureList()
+            .stickyCategoryHeaders(["Summary", "Duration", "Stages — nightly average", "What sleep does for you", "Nights", "Sleep"])
             .settingsToolbar()
         }
     }
 
     // MARK: - Sections
 
+    @ViewBuilder
     private func summarySection(_ s: SleepSummary) -> some View {
+        FeatureCategoryBar("Summary")
         Section {
             HStack {
                 stat("Average", duration(s.averageAsleepMinutes))
@@ -89,8 +92,6 @@ struct SleepView: View {
                     stat("Debt", duration(s.debtMinutes))
                 }
             }
-        } header: {
-            FeatureCategoryBar("Summary")
         } footer: {
             if s.consistencySD != nil {
                 Text("Consistency is how much your bedtime varies. Under ±30 minutes is the target — a steady schedule matters as much as total hours.")
@@ -98,7 +99,9 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private var durationSection: some View {
+        FeatureCategoryBar("Duration")
         Section {
             Chart {
                 ForEach(nights, id: \.date) { n in
@@ -127,8 +130,6 @@ struct SleepView: View {
             }
             .frame(height: 180)
             .listRowInsets(.init(top: 12, leading: 12, bottom: 12, trailing: 12))
-        } header: {
-            FeatureCategoryBar("Duration")
         }
     }
 
@@ -138,12 +139,11 @@ struct SleepView: View {
         let rem = staged.reduce(0) { $0 + $1.remMinutes }
         let core = staged.reduce(0) { $0 + $1.coreMinutes }
         let total = Double(max(1, deep + rem + core))
+        FeatureCategoryBar("Stages — nightly average")
         return Section {
             stageRow("Deep", minutes: deep / staged.count, share: Double(deep) / total, tint: Theme.gold)
             stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: Theme.gold.opacity(0.65))
             stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Theme.textSecondary)
-        } header: {
-            FeatureCategoryBar("Stages — nightly average")
         } footer: {
             Text(staged.count < nights.count
                  ? "\(staged.count) of \(nights.count) nights have stage data. Stages need a watch worn overnight."
@@ -151,7 +151,9 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private func impactSection(_ i: SleepImpact) -> some View {
+        FeatureCategoryBar("What sleep does for you")
         Section {
             VStack(alignment: .leading, spacing: 6) {
                 Text(i.hrvDeltaPercent >= 0
@@ -161,14 +163,14 @@ struct SleepView: View {
                 Text("\(Int(i.longNightHRV)) ms after \(duration(Double(i.thresholdMinutes)))+ (\(i.longNights) nights) vs \(Int(i.shortNightHRV)) ms below it (\(i.shortNights) nights).")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
             }
-        } header: {
-            FeatureCategoryBar("What sleep does for you")
         } footer: {
             Text("Observed in your own data. Correlation, not proof — but it's the clearest signal available.")
         }
     }
 
+    @ViewBuilder
     private var nightsSection: some View {
+        FeatureCategoryBar("Nights")
         Section {
             ForEach(nights.sorted { $0.date > $1.date }.prefix(30), id: \.date) { n in
                 HStack {
@@ -189,12 +191,12 @@ struct SleepView: View {
                     }
                 }
             }
-        } header: {
-            FeatureCategoryBar("Nights")
         }
     }
 
+    @ViewBuilder
     private var emptySection: some View {
+        FeatureCategoryBar("Sleep")
         Section {
             VStack(alignment: .leading, spacing: 10) {
                 Text("No sleep data yet").font(.headline)
@@ -203,8 +205,6 @@ struct SleepView: View {
                 WatchHelpLink()
             }
             .padding(.vertical, 6)
-        } header: {
-            FeatureCategoryBar("Sleep")
         }
     }
 
