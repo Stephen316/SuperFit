@@ -22,3 +22,9 @@ dist/
 
 # Local API keys / signing config, if you ever add an xcconfig
 Secrets.xcconfig
+
+# graphify knowledge-graph output. Written here by `graphify update`, which
+# resolves its output directory against the scanned path rather than the working
+# directory. ~14 MB, machine-local, and regenerable — committing it would churn a
+# 4.7 MB graph.json through every auto-merge.
+graphify-out/

@@ -17,10 +17,16 @@ what you eat and what the scale does over rolling 7/14/30-day windows.
   to the calorie target, with a hard floor at basal metabolic rate.
 - **Micronutrients** — 14 vitamins, minerals, and health markers against reference
   intakes adjusted for sex, age, goal, and training volume.
-- **Training** — 195-exercise catalog with 1–5 muscle-tension scores across 37
-  muscle groups, e1RM progression, custom exercises, and reusable saved workouts.
-  Aliases are searchable but never shown, so one lift keeps one name and a year of
-  logs stays comparable.
+- **Training** — 224-exercise catalog (barbell, dumbbell, machine, cable and
+  bodyweight, including the atypical machines — incline/neutral-grip/converging
+  chest presses, hack and pendulum squats, iso-lateral rows) with 1–5
+  muscle-tension scores across 37 muscle groups, e1RM progression, custom
+  exercises, and reusable saved workouts. Aliases are searchable but never shown,
+  so one lift keeps one name and a year of logs stays comparable.
+- **Lift progress charts** — per-exercise heaviest-set-of-each-session over a
+  1 / 3 / 6-month or all-time window, thinned by age so recent progress stays
+  detailed and old history stays readable: twice-weekly in the last month, weekly
+  through months two and three, fortnightly beyond, and monthly bests for all-time.
 - **Weekly volume, judged per muscle** — a front-and-back diagram coloured by how
   hard each group was worked this week, against thresholds set for that group's
   size rather than one global number. Work that only assists a lift — the lower
@@ -35,6 +41,17 @@ what you eat and what the scale does over rolling 7/14/30-day windows.
   lifting tonnage. Workout calories are shown, never added back to the target.
 - **Recovery** — 0–100 readiness from sleep, HRV, resting HR, and training load
   (ACWR), degrading gracefully when inputs are missing rather than inventing a score.
+- **Strain** — daily cardiovascular exertion on a 0–100 scale (WHOOP/Bevel-style),
+  built on Banister TRIMP with a session-RPE or completed-set fallback so phone-only
+  and unmonitored lifting still contribute, normalised to your own recent peak.
+  Strength counts — it is total exertion, not just cardio.
+- **Energy** — a live "body battery" that charges from the morning's recovery and
+  drains through the day with exertion, the clock, and under-fuelling. It reads from
+  phone steps and the food diary even with no watch, and shows as a colour-filling
+  battery on the home screen.
+- **At-a-glance home screen** — Recovery, Strain and Sleep-efficiency read as a
+  three-ring triad, with the energy battery below and a setup-help prompt that
+  explains connecting an Apple Watch or Garmin when a metric has no data yet.
 - **Sleep** — duration against need, stage composition, bedtime consistency, and the
   observed correlation between your own sleep and next-morning HRV.
 - **Weigh-ins that don't lie to you** — where a day holds several readings, the
@@ -46,6 +63,10 @@ what you eat and what the scale does over rolling 7/14/30-day windows.
 ## Repository layout
 
 - [`ios/`](ios/) — the iOS app · Swift · SwiftUI · HealthKit · SwiftData + CloudKit
+- [`garmin-backend/`](garmin-backend/) — optional Node + TypeScript serverless
+  backend (Vercel) that pulls Garmin HRV and staged sleep — the data Garmin Connect
+  withholds from Apple Health — and serves it to the app over the `docs/GARMIN.md`
+  contract
 - [`windows/`](windows/) — SuperFit Lite, a standalone Windows TDEE/macro
   calculator using the same validated algorithms (download from Releases)
 - [`docs/`](docs/) — shared architecture, algorithm, and API documentation
@@ -107,10 +128,16 @@ a target to hit.
 Phases 1–5 implemented: app shell and themed UI, HealthKit sync, adaptive
 metabolism / macro / recovery / sleep engines, the full nutrition system (USDA
 FoodData Central + Open Food Facts, barcode scanning, micronutrient tracking),
-training with per-muscle weekly volume and saved workouts, a dedicated sleep tab,
-and optional Garmin integration for HRV and staged sleep.
+training with per-muscle weekly volume, saved workouts and per-exercise progress
+charts, a dedicated sleep tab, and optional Garmin integration for HRV and staged
+sleep (via the [`garmin-backend/`](garmin-backend/) service).
 
-380 tests cover the engines and the invariants they depend on. Where a fix
+The home screen adds a Recovery / Strain / Sleep triad and a live energy battery,
+and numeric entry is unified: weight, reps and now food weight/portion all use the
+same tap-to-open number pad rather than the raw keyboard.
+
+440+ tests cover the engines and the invariants they depend on — including the
+strain, energy, lift-progress and catalog-integrity checks. Where a fix
 established a rule, the test carries the reason and the measured number that
 justified it, and fixes are verified by reverting them and watching the test fail.
 
