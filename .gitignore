@@ -28,3 +28,7 @@ Secrets.xcconfig
 # directory. ~14 MB, machine-local, and regenerable — committing it would churn a
 # 4.7 MB graph.json through every auto-merge.
 graphify-out/
+
+# /pr review marker: the SHA last reviewed. Per-machine on purpose — a tracked
+# copy would conflict on every auto-merge between the two machines.
+.claude/pr-last-reviewed

@@ -20,7 +20,8 @@ printing a commit command for the repo owner to run.
 /pr                  # full pipeline on the current branch
 /pr --minor          # also bump MARKETING_VERSION minor (1.0 -> 1.1)
 /pr --major          # also bump MARKETING_VERSION major (1.0 -> 2.0)
-/pr --skip-review    # skip the code-review step (it is the slowest)
+/pr --skip-review    # skip the review step entirely
+/pr --full           # review everything since main, not just what is new (expensive)
 /pr --dry-run        # report every step, write nothing
 /pr --since <ref>    # compare against <ref> instead of main
 ```
@@ -88,11 +89,47 @@ grep -E "error:|✘|Test run with" /tmp/pr-test.log | tail -20
 
 **Non-zero exit stops the pipeline.** Report the failing tests with their output.
 
-## Step 2 — Review the diff
+## Step 2 — Review what is genuinely unreviewed
 
-Unless `--skip-review`, invoke the `code-review` skill on the branch diff. Report
-findings ranked by severity. Do **not** auto-apply fixes — the user asked for a
-review flow, and a review that silently rewrites the code is not a review.
+Skip entirely on `--skip-review`.
+
+**Scope is the whole cost of this pipeline.** Every other step is flat — build
+output is grepped down to one line, graphify costs no tokens at all, the changelog
+reads commit subjects only. This step is the sole part that scales with the size of
+the diff, so scoping it correctly is what keeps `/pr` cheap enough to run often.
+
+The scope is **not** everything since `main`. On a long-lived branch that is
+hundreds of files of already-merged, already-reviewed work — on `xcode-launch` it
+was 193 files across 82 commits, which would have cost more than everything else
+combined to re-review code from weeks ago.
+
+Review instead:
+
+1. **Uncommitted working-tree changes** — always unreviewed by definition.
+2. **Commits since the last `/pr` run**, read from `.claude/pr-last-reviewed`.
+
+```bash
+cd /Users/stephenh/SuperFit
+LAST=$(cat .claude/pr-last-reviewed 2>/dev/null)
+if [ -n "$LAST" ] && git cat-file -e "$LAST" 2>/dev/null; then
+    echo "reviewing commits since $LAST"
+    git diff --stat "$LAST"..HEAD
+else
+    echo "no marker — reviewing uncommitted changes only"
+fi
+git diff --stat HEAD
+```
+
+If the marker is missing (first run, or a fresh clone — it is gitignored and
+per-machine), review the uncommitted changes only and **say so**, offering `--full`
+rather than silently reviewing less than the user expects.
+
+`--full` overrides all of this and reviews everything since `main`. It is the
+expensive path; only take it when asked.
+
+Invoke the `code-review` skill on the resolved scope. Report findings ranked by
+severity. Do **not** auto-apply fixes — the user asked for a review flow, and a
+review that silently rewrites the code is not a review.
 
 If findings are severe (correctness bugs, not style), say so plainly and ask
 whether to continue the pipeline or stop and fix first.
@@ -227,7 +264,28 @@ Two cases it does **not** cover, and which must be reported rather than assumed:
 - **A new language grammar was installed**: an unchanged file is skipped no matter
   what the parser can now read. That needs a full rebuild, not an update.
 
-## Step 7 — Hand over
+## Step 7 — Record the review point
+
+Only if Step 2 actually ran (not on `--skip-review`), and only after the verify
+gate passed. Record the commit that was reviewed up to, so the next run reviews
+forward from here instead of repeating this diff:
+
+```bash
+cd /Users/stephenh/SuperFit && git rev-parse HEAD > .claude/pr-last-reviewed
+```
+
+It is gitignored and therefore per-machine. That is deliberate: a tracked marker
+would carry one machine's SHA into the other's auto-merge and conflict on a file
+whose whole purpose is to be rewritten every run. The cost of it being local is
+that the first run on the second machine reviews only uncommitted changes and says
+so — which is the safe direction to fail.
+
+**Caveat worth stating in the summary:** the marker records the last *commit*
+reviewed, so uncommitted changes reviewed on this run are not covered by it. They
+will be reviewed again next run if still uncommitted. That is correct — code that
+has not been committed can still change.
+
+## Step 8 — Hand over
 
 Print a summary and the commit command. Never run it.
 
