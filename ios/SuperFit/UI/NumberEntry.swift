@@ -182,3 +182,48 @@ struct NumberField: View {
         v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v)
     }
 }
+
+/// A bordered amount cell — a number and its unit — that edits through
+/// `NumberEntrySheet`. Used for food quantities, where the value is always
+/// present (unlike `NumberField`, which models an unset value as `--`).
+///
+/// `maximum` is the largest value the *caller* can actually act on, expressed in
+/// the same unit as `value`. Clamping to it is the point: the food screens cap
+/// intake at 5000 g, and a pad that accepted 6000 left the amount showing a
+/// number the Log button silently refused, with nothing on screen explaining why.
+/// Callers holding a limit in grams must convert — 5000 g is 176 oz, not 5000.
+struct AmountField: View {
+    @Binding var value: Double
+    let unit: String
+    var maximum: Double = .greatestFiniteMagnitude
+
+    @State private var editing = false
+
+    var body: some View {
+        Button { editing = true } label: {
+            HStack(spacing: 3) {
+                // NumberField's formatter, not "%g": %g switches to scientific
+                // notation below 1e-4, so 0.00001 rendered as "1e-05 g".
+                Text(NumberField.format(value))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textPrimary)
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.wash))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .fullScreenCover(isPresented: $editing) {
+            NumberEntrySheet(title: "Amount", unit: unit, allowsDecimal: true) { entered in
+                // The pad opens empty; committing it blank keeps the current
+                // amount rather than wiping a value the user meant to leave.
+                if let entered { value = entered.clamped(to: 0...maximum) }
+            }
+        }
+    }
+}

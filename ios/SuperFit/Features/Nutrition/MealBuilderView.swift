@@ -224,14 +224,14 @@ private struct MealIngredientView: View {
     private var options: [ServingOption] { ServingOption.options(for: food) }
     private var grams: Double { quantity * unit.gramsPerUnit }
 
+
     var body: some View {
         NavigationStack {
             Form {
                 Section(food.name) {
                     LabeledContent("Amount") {
-                        TextField("0", value: $quantity, format: .number)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        AmountField(value: $quantity, unit: unit.label,
+                                    maximum: 5000 / max(unit.gramsPerUnit, 0.000_1))
                     }
                     Picker("Unit", selection: $unit) {
                         ForEach(options) { Text($0.label).tag($0) }

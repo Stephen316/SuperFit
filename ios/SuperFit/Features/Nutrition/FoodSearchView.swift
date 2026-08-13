@@ -77,6 +77,7 @@ struct LogFoodView: View {
                                              supplements: supplements)
     }
 
+
     var body: some View {
         NavigationStack {
             Form {
@@ -87,9 +88,11 @@ struct LogFoodView: View {
                         }
                     }
                     LabeledContent("Amount") {
-                        TextField("0", value: $quantity, format: .number)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        // 5000 g is the cap the Log button enforces; convert it
+                        // into the chosen unit so the pad cannot accept an
+                        // amount the button will silently refuse.
+                        AmountField(value: $quantity, unit: unit.label,
+                                    maximum: 5000 / max(unit.gramsPerUnit, 0.000_1))
                     }
                     Picker("Unit", selection: $unit) {
                         ForEach(options) { option in

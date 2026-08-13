@@ -136,7 +136,7 @@ The home screen adds a Recovery / Strain / Sleep triad and a live energy battery
 and numeric entry is unified: weight, reps and now food weight/portion all use the
 same tap-to-open number pad rather than the raw keyboard.
 
-440+ tests cover the engines and the invariants they depend on — including the
+464 tests cover the engines and the invariants they depend on — including the
 strain, energy, lift-progress and catalog-integrity checks. Where a fix
 established a rule, the test carries the reason and the measured number that
 justified it, and fixes are verified by reverting them and watching the test fail.
