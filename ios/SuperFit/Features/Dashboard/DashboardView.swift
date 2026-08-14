@@ -311,42 +311,20 @@ struct DashboardView: View {
         .padding(.vertical, 12)
     }
 
-    /// Consecutive days ending today on which anything was logged.
+    /// Consecutive days of food logged, with a weigh-in every third day.
     ///
-    /// Food or a weigh-in both count. The streak is there to reward keeping the
-    /// model fed, and either one does that — demanding both would break a streak
-    /// on a day someone ate carefully but didn't stand on the scale, which
-    /// punishes the wrong thing.
-    ///
-    /// **Today not being logged does not break it.** The count runs from
-    /// yesterday in that case, because the day isn't over — a streak that resets
-    /// at midnight and only returns after breakfast would spend every morning
-    /// lying about the last three weeks.
-    ///
-    /// Capped at a year of history so this stays bounded on a long-lived store;
-    /// nobody is served differently by a 400-day streak than a 365-day one.
+    /// The rule lives in `LoggingStreak` so it can be tested without a store.
     private var loggingStreak: Int {
         let cal = Calendar.current
-        let today = cal.startOfDay(for: .now)
-        let earliest = cal.date(byAdding: .day, value: -365, to: today) ?? today
-
-        var logged = Set<Date>()
-        for l in nutrition where l.date >= earliest { logged.insert(cal.startOfDay(for: l.date)) }
-        for m in metrics where m.date >= earliest { logged.insert(cal.startOfDay(for: m.date)) }
-        guard !logged.isEmpty else { return 0 }
-
-        var cursor = today
-        if !logged.contains(cursor) {
-            guard let yesterday = cal.date(byAdding: .day, value: -1, to: cursor) else { return 0 }
-            cursor = yesterday
-        }
-        var days = 0
-        while logged.contains(cursor) {
-            days += 1
-            guard let previous = cal.date(byAdding: .day, value: -1, to: cursor) else { break }
-            cursor = previous
-        }
-        return days
+        let earliest = cal.date(byAdding: .day, value: -LoggingStreak.maximumDays,
+                                to: cal.startOfDay(for: .now)) ?? .distantPast
+        return LoggingStreak.days(
+            foodDays: Set(nutrition.filter { $0.date >= earliest }.map(\.date)),
+            // `weightKg` is defaulted, not optional, so a body-fat-only row
+            // reads as 0. That is not a weigh-in and must not hold a streak up.
+            weighDays: Set(metrics.filter { $0.date >= earliest && $0.weightKg > 0 }
+                .map(\.date)),
+            asOf: .now, calendar: cal)
     }
 
     /// The streak, lit from two consecutive days.
