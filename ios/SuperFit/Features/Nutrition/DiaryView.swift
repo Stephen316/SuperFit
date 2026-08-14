@@ -189,6 +189,25 @@ struct DiaryView: View {
                 Text("Log your weight and set a goal to get targets.")
                     .font(.subheadline).foregroundStyle(Theme.textSecondary)
             }
+            // The four bars are the headline; the full breakdown (fibre, sugars,
+            // saturates and the micros) lives a tap away rather than in the card.
+            Button {
+                showingNutrients = true
+            } label: {
+                HStack {
+                    Text("See all")
+                        .font(.subheadline)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(Theme.gold)
+                // A plain button hit-tests its label, and the Spacer is not part
+                // of it: without this the middle of the row swallows the tap.
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("See all macros and nutrients")
         }
     }
 
