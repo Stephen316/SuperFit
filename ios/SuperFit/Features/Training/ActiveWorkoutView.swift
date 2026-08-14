@@ -451,6 +451,8 @@ struct ExercisePickerView: View {
     @State private var query = ""
     @State private var muscleFilter: MuscleGroup?
     @State private var creatingCustom = false
+    /// The lift whose how-to and history are being shown.
+    @State private var info: Exercise?
 
     private var filtered: [Exercise] {
         exercises.filter { e in
@@ -464,6 +466,7 @@ struct ExercisePickerView: View {
     var body: some View {
         NavigationStack {
             List(filtered) { exercise in
+              HStack(spacing: 0) {
                 Button {
                     onPick(exercise)
                     dismiss()
@@ -480,8 +483,28 @@ struct ExercisePickerView: View {
                         }
                         TensionRow(tension: exercise.tension)
                     }
+                    // Reserves the trailing gutter the info button sits in, so the
+                    // tension list wraps before it reaches the icon rather than
+                    // running underneath it.
+                    .padding(.trailing, 34)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
+
+                // A sibling of the picking button, not an overlay on it: tapping
+                // "i" must open the detail rather than silently add the lift.
+                Button { info = exercise } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 17))
+                        .foregroundStyle(Theme.gold)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("How to do \(exercise.name)")
+              }
             }
+            .sheet(item: $info) { ExerciseInfoView(exercise: $0) }
             .searchable(text: $query, prompt: "Search exercises")
             .navigationTitle("Add exercise")
             .themedChrome()

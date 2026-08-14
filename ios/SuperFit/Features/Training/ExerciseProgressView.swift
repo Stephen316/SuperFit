@@ -14,9 +14,14 @@ struct ExerciseProgressView: View {
     /// Nil is the existing all-exercise screen. A value turns the same charts
     /// into a muscle drill-down and adds every direct and assisting set below.
     let muscle: MuscleGroup?
+    /// A single lift, for the info sheet's history tab. Reuses the same charts
+    /// rather than a second implementation, so the two cannot disagree about
+    /// what a personal best is.
+    let exercise: Exercise?
 
-    init(muscle: MuscleGroup? = nil) {
+    init(muscle: MuscleGroup? = nil, exercise: Exercise? = nil) {
         self.muscle = muscle
+        self.exercise = exercise
     }
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -47,10 +52,11 @@ struct ExerciseProgressView: View {
             let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
                                        uniquingKeysWith: { a, _ in a })
             let allRecords = TrainingRecords.completed(sessions, fractions: fractions)
-            let records = muscle.map {
+            var records = muscle.map {
                 MuscleProgress.affectingSets($0, records: allRecords,
                                              tensions: exerciseTensions)
             } ?? allRecords
+            if let exercise { records = records.filter { $0.exerciseID == exercise.id } }
             return ProgressData(
                 series: LiftProgress.downsampledSeries(records: records, since: cutoff,
                                                        sampling: range.sampling),
