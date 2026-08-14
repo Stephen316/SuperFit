@@ -152,6 +152,10 @@ struct DiaryView: View {
                 .withoutGlassBackground()
             }
             .featureList()
+            .refreshable {
+                await FeatureRefresh.syncAndAggregate(context: context)
+                loadDiaryData()
+            }
             .stickyCategoryHeaders(["Macros", "Hydration", "Meals"])
             .settingsToolbar()
             .sheet(item: $addingTo, onDismiss: loadDiaryData) { slot in

@@ -194,6 +194,7 @@ struct WeightView: View {
                 }
                 .listRowBackground(Theme.surface)
             }
+            .refreshable { await syncFromHealth() }
             .task { loadRecentMetrics() }
     }
 

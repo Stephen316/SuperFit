@@ -393,6 +393,10 @@ struct TrainingView: View {
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .featureList()
+            .refreshable {
+                await WorkoutSyncService(context: context).sync()
+                await FeatureRefresh.syncAndAggregate(context: context)
+            }
             .stickyCategoryHeaders(["Workout", "Today", "Last 7 days", "Muscles worked this week", "Strength — last 60 days", "Progress", "Cardio load", "Activities", "On your watch", "Today from Apple Watch"])
             .settingsToolbar()
             .task {

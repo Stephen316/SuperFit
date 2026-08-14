@@ -24,6 +24,7 @@ enum ThemeAppearance {
         searchFields()
         segmentedControls()
         tables()
+        refreshControls()
     }
 
     private static var barTint: UIColor { UIColor(Theme.backgroundBase) }
@@ -75,6 +76,22 @@ enum ThemeAppearance {
         control.setTitleTextAttributes(
             [.foregroundColor: UIColor(Theme.textPrimary),
              .font: UIFont.systemFont(ofSize: 13, weight: .semibold)], for: .selected)
+    }
+
+    /// The pull-to-refresh spinner, in the app's gold.
+    ///
+    /// The system control, deliberately. A hand-built indicator was tried at
+    /// length and abandoned: on a `List` it has to be an overlay, which means
+    /// tracking scroll offset, recycled rows and content insets by hand, and each
+    /// of those produced a visible defect — the page jumping when the inset was
+    /// removed, the indicator springing back when a 40 ms sync collided with a
+    /// 0.32 s animation, headings detaching mid-fling. The published libraries do
+    /// not solve it either: `SwiftUI-Refresher` only extends `ScrollView`, and
+    /// `swiftui-pull-to-refresh` delegates `List` straight back to `.refreshable`
+    /// on iOS 15+. Apple's control already handles all of it; only the colour was
+    /// ever wrong.
+    private static func refreshControls() {
+        UIRefreshControl.appearance().tintColor = UIColor(Theme.gold)
     }
 
     private static func tables() {
@@ -256,9 +273,18 @@ struct FeatureCategoryBar: View {
                     Color.clear
                         .onChange(of: proxy.frame(in: .global).minY, initial: true) { _, y in
                             tracker?.positions[title] = y
+                            tracker?.reportedAt[title] = tracker?.scroll ?? 0
                             tracker?.seen.insert(title)
                         }
-                        .onDisappear { tracker?.positions[title] = nil }
+                        // Deliberately no `onDisappear` clear. `List` recycles a
+                        // row as soon as it leaves the realised range, and during
+                        // a fast fling that happens before the next bar reports —
+                        // so clearing here left the tracker momentarily knowing
+                        // nothing, the fallback named a different heading, and the
+                        // pinned bar visibly detached. The last reported position
+                        // already says which edge it left by, which is all the
+                        // sticky calculation needs, and it is replaced the moment
+                        // the row is realised again.
                 }
             }
             .listRowInsets(.init())
@@ -297,9 +323,28 @@ final class CategoryBarTracker {
     /// Top of the list in screen coordinates, so bar positions can be made
     /// relative to it.
     var listTop: CGFloat = 0
+    /// No inset compensation, deliberately.
+    ///
+    /// An earlier version subtracted the scroll view's top inset, to survive a
+    /// `safeAreaPadding` that held the page open while refreshing. The system
+    /// refresh control grows that inset as you pull — and subtracting it told the
+    /// tracker a bar was still at the top while the bar had visibly moved down
+    /// with the content, so the overlay pinned a second copy of a heading that
+    /// was already on screen. Position and appearance move together here; leaving
+    /// the reading alone is what keeps them agreeing.
     /// Title to its top edge in screen coordinates. Only bars the list has
     /// actually realised appear here — it recycles the rest.
     var positions: [String: CGFloat] = [:]
+    /// The scroll offset at the moment each position was reported.
+    ///
+    /// Per-row geometry callbacks are throttled during a fast fling, so a
+    /// position can be tens of milliseconds out of date while the content has
+    /// already moved on. Recording where the scroll was when the reading was
+    /// taken lets the reading be corrected by however far it has scrolled since,
+    /// which is what stops the pinned bar drifting off the content it belongs to.
+    var reportedAt: [String: CGFloat] = [:]
+    /// Live scroll offset, straight from the scroll view rather than from a row.
+    var scroll: CGFloat = 0
     /// Every bar the screen *can* show, in order, including ones scrolled out of
     /// the realised range. Needed to name the pinned bar once its own row has
     /// been recycled and can no longer report a position.
@@ -311,7 +356,10 @@ final class CategoryBarTracker {
     var seen: Set<String> = []
 
     func offset(of title: String) -> CGFloat? {
-        positions[title].map { $0 - listTop }
+        guard let y = positions[title] else { return nil }
+        // Correct the reading for anything that has scrolled since it was taken.
+        let lag = scroll - (reportedAt[title] ?? scroll)
+        return y - listTop - lag
     }
 
     /// The bar that should be pinned, and how far the next one still has to
@@ -321,9 +369,17 @@ final class CategoryBarTracker {
         guard !placed.isEmpty else { return nil }
 
         let current: String
-        if let passed = placed.last(where: { $0.1 <= 0 }) {
+        // Strictly above the top, not merely at it.
+        //
+        // `<= 0` pinned a copy of the first bar even at rest, where it sat exactly
+        // over the real one and was invisible only by coincidence. Anything that
+        // separated them — a pull, the refresh control opening the content —
+        // revealed the duplicate, and suppressing the overlay instead just handed
+        // the same space to the spinner. Below the threshold the real bar does the
+        // job itself and no copy exists to diverge.
+        if let passed = placed.last(where: { $0.1 < -0.5 }) {
             current = passed.0
-        } else if let ahead = placed.first(where: { $0.1 > 0 }),
+        } else if let ahead = placed.first(where: { $0.1 >= -0.5 }),
                   let i = order.firstIndex(of: ahead.0),
                   let previous = order[..<i].last(where: { seen.contains($0) }) {
             // Its own row has been recycled, so fall back to the running order —
@@ -333,7 +389,7 @@ final class CategoryBarTracker {
             return nil
         }
 
-        let approaching = placed.first(where: { $0.1 > 0 })?.1 ?? .greatestFiniteMagnitude
+        let approaching = placed.first(where: { $0.1 >= -0.5 })?.1 ?? .greatestFiniteMagnitude
         return (current, min(0, approaching - barHeight))
     }
 }
@@ -376,11 +432,32 @@ private struct StickyCategoryHeaders: ViewModifier {
                     }
                     .frame(height: FeatureCategoryBar.height)
                     .clipped()
+                    // Sits below the space the refresh indicator holds open, so
+                    // the pinned bar tracks the page instead of overlapping it.
                     // Decoration only: taps must reach the rows underneath.
                     .allowsHitTesting(false)
                 }
             }
             .onAppear { tracker.order = titles }
+            .featureScrollTracking(tracker)
+    }
+}
+
+private extension View {
+    /// Feeds the scroll view's own offset to the tracker. Unlike a row's
+    /// geometry callback this is not throttled, so it stays correct through a
+    /// fling and can be used to age-correct the row readings.
+    @ViewBuilder
+    func featureScrollTracking(_ tracker: CategoryBarTracker) -> some View {
+        if #available(iOS 18.0, *) {
+            onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top
+            } action: { _, offset in
+                tracker.scroll = offset
+            }
+        } else {
+            self
+        }
     }
 }
 

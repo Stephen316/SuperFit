@@ -3,6 +3,7 @@ import SwiftData
 import Charts
 
 struct SleepView: View {
+    @Environment(\.modelContext) private var context
     @Query private var sleep: [SleepData]
     @Query private var vitals: [DailyVitals]
 
@@ -70,6 +71,7 @@ struct SleepView: View {
                 .withoutGlassBackground()
             }
             .featureList()
+            .refreshable { await FeatureRefresh.syncAndAggregate(context: context) }
             .stickyCategoryHeaders(["Summary", "Duration", "Stages — nightly average", "What sleep does for you", "Nights", "Sleep"])
             .settingsToolbar()
         }
