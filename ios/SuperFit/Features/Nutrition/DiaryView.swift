@@ -20,6 +20,8 @@ struct DiaryView: View {
     @State private var addingTo: MealSlot?
     @State private var showingNutrients = false
     @State private var showingSupplements = false
+    @State private var showingAllergens = false
+    @AppStorage(AvoidedAllergens.storageKey) private var avoidedAllergens = ""
     @State private var editingHydrationGoal = false
     @State private var addingCustomWater = false
 
@@ -164,6 +166,7 @@ struct DiaryView: View {
             }
             .sheet(isPresented: $showingNutrients) { NutritionView() }
             .sheet(isPresented: $showingSupplements) { SupplementsView(day: day) }
+            .sheet(isPresented: $showingAllergens) { AllergensView() }
             .fullScreenCover(isPresented: $editingHydrationGoal) {
                 NumberEntrySheet(title: "Daily hydration goal", unit: units.volumeUnit,
                                  allowsDecimal: false) { updateHydrationGoal($0) }
@@ -211,6 +214,10 @@ struct DiaryView: View {
         }
     }
 
+    private var avoidedAllergenCount: Int {
+        AvoidedAllergens.decode(avoidedAllergens).count
+    }
+
     /// Detail links, parked at the end of the page: they are references rather
     /// than part of the day's logging, so they sit below the meals and water
     /// the tab exists to capture.
@@ -233,6 +240,19 @@ struct DiaryView: View {
                     Spacer()
                     if supplementCount > 0 {
                         Text("\(supplementCount)")
+                            .font(.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
+                    }
+                }
+            }
+            Button {
+                showingAllergens = true
+            } label: {
+                HStack {
+                    Label("Allergens", systemImage: "exclamationmark.shield")
+                        .font(.subheadline)
+                    Spacer()
+                    if avoidedAllergenCount > 0 {
+                        Text("\(avoidedAllergenCount)")
                             .font(.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
                     }
                 }

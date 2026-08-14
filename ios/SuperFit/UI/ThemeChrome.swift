@@ -58,7 +58,9 @@ enum ThemeAppearance {
 
     private static func searchFields() {
         let field = UISearchTextField.appearance()
-        field.backgroundColor = washTint
+        // No `backgroundColor` here on purpose. UIKit paints that straight onto
+        // the layer as a square, which cut visibly across the rounded capsule
+        // the field draws for itself. The capsule alone is the background.
         field.textColor = UIColor(Theme.textPrimary)
         // The glass search bar sits on its own backdrop; flatten that too or the
         // field floats on a lighter panel.

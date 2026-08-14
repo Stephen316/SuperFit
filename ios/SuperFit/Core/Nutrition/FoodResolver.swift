@@ -288,6 +288,17 @@ final class FoodResolver {
             if !resolved.portions.isEmpty {
                 existing.portionsJSON = try? JSONEncoder().encode(resolved.portions)
             }
+            // Same reasoning for allergens: anything cached before this feature
+            // existed holds none, and would otherwise never gain them.
+            if !resolved.allergenTags.isEmpty {
+                existing.allergenTagsRaw = resolved.allergenTags.joined(separator: ",")
+            }
+            if !resolved.traceTags.isEmpty {
+                existing.traceTagsRaw = resolved.traceTags.joined(separator: ",")
+            }
+            if let ingredients = resolved.ingredientsText {
+                existing.ingredientsText = ingredients
+            }
             try? context.save()
             return existing
         }
@@ -307,6 +318,9 @@ final class FoodResolver {
             ? nil : try? JSONEncoder().encode(resolved.per100g.micros)
         food.portionsJSON = resolved.portions.isEmpty
             ? nil : try? JSONEncoder().encode(resolved.portions)
+        food.allergenTagsRaw = resolved.allergenTags.joined(separator: ",")
+        food.traceTagsRaw = resolved.traceTags.joined(separator: ",")
+        food.ingredientsText = resolved.ingredientsText
         context.insert(food)
         try? context.save()
         return food
@@ -394,6 +408,16 @@ extension Supplement {
 
 extension Food {
     var resolved: ResolvedFood {
+        var food = resolvedCore
+        // Without these the cached copy a second search returns would lose its
+        // allergen tags, and a food already seen would stop showing as safe.
+        food.allergenTags = allergenTagsRaw.split(separator: ",").map(String.init)
+        food.traceTags = traceTagsRaw.split(separator: ",").map(String.init)
+        food.ingredientsText = ingredientsText
+        return food
+    }
+
+    private var resolvedCore: ResolvedFood {
         ResolvedFood(id: remoteID ?? id.uuidString,
                      source: FoodSource(rawValue: sourceRaw) ?? .custom,
                      name: name, brand: brand,

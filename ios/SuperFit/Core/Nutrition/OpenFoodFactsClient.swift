@@ -124,7 +124,7 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "page", value: String(page)),
             .init(name: "page_size", value: String(Self.pageSize)),
             .init(name: "fields",
-                  value: "code,product_name,brands,nutriments,serving_quantity,serving_size,product_quantity_unit,categories_tags,countries_tags"),
+                  value: "code,product_name,brands,nutriments,serving_quantity,serving_size,product_quantity_unit,categories_tags,countries_tags,allergens_tags,traces_tags,ingredients_text"),
         ]
         guard let url = comps.url else { throw URLError(.badURL) }
         let response: AliciousResponse = try await session.getJSON(url)
@@ -145,7 +145,7 @@ struct OpenFoodFactsClient: Sendable {
             .init(name: "json", value: "1"),
             .init(name: "page_size", value: String(Self.pageSize)),
             .init(name: "page", value: String(page)),
-            .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity,serving_size,product_quantity_unit,categories_tags,countries_tags"),
+            .init(name: "fields", value: "code,product_name,brands,nutriments,serving_quantity,serving_size,product_quantity_unit,categories_tags,countries_tags,allergens_tags,traces_tags,ingredients_text"),
         ]
         guard let url = comps.url else { throw URLError(.badURL) }
         let response: OFFSearchResponse = try await session.getJSON(url)
@@ -182,6 +182,9 @@ private struct AliciousHit: Decodable {
     let productQuantityUnit: String?
     let categoriesTags: [String]?
     let countriesTags: [String]?
+    let allergensTags: [String]?
+    let tracesTags: [String]?
+    let ingredientsText: String?
 
     enum CodingKeys: String, CodingKey {
         case code, brands, nutriments
@@ -191,6 +194,9 @@ private struct AliciousHit: Decodable {
         case productQuantityUnit = "product_quantity_unit"
         case categoriesTags = "categories_tags"
         case countriesTags = "countries_tags"
+        case allergensTags = "allergens_tags"
+        case tracesTags = "traces_tags"
+        case ingredientsText = "ingredients_text"
     }
 
     func resolved(id: String) -> ResolvedFood? {
@@ -200,7 +206,9 @@ private struct AliciousHit: Decodable {
             brand: brands?.first?.trimmingCharacters(in: .whitespaces),
             nutriments: nutriments, servingQuantity: servingQuantity?.value,
             servingSize: servingSize, productQuantityUnit: productQuantityUnit,
-            categoriesTags: categoriesTags, countriesTags: countriesTags)
+            categoriesTags: categoriesTags, countriesTags: countriesTags,
+            allergensTags: allergensTags, tracesTags: tracesTags,
+            ingredientsText: ingredientsText)
     }
 }
 
@@ -258,6 +266,9 @@ private struct OFFProduct: Decodable {
     let productQuantityUnit: String?
     let categoriesTags: [String]?
     let countriesTags: [String]?
+    let allergensTags: [String]?
+    let tracesTags: [String]?
+    let ingredientsText: String?
 
     enum CodingKeys: String, CodingKey {
         case code, brands, nutriments
@@ -267,6 +278,9 @@ private struct OFFProduct: Decodable {
         case productQuantityUnit = "product_quantity_unit"
         case categoriesTags = "categories_tags"
         case countriesTags = "countries_tags"
+        case allergensTags = "allergens_tags"
+        case tracesTags = "traces_tags"
+        case ingredientsText = "ingredients_text"
     }
 
     func resolved(id: String) -> ResolvedFood? {
@@ -277,7 +291,9 @@ private struct OFFProduct: Decodable {
                 .trimmingCharacters(in: .whitespaces),
             nutriments: nutriments, servingQuantity: servingQuantity?.value,
             servingSize: servingSize, productQuantityUnit: productQuantityUnit,
-            categoriesTags: categoriesTags, countriesTags: countriesTags)
+            categoriesTags: categoriesTags, countriesTags: countriesTags,
+            allergensTags: allergensTags, tracesTags: tracesTags,
+            ingredientsText: ingredientsText)
     }
 }
 
@@ -288,7 +304,9 @@ private enum OFFFoodMapper {
     static func resolved(id: String, name: String, brand: String?,
                          nutriments n: OFFNutriments, servingQuantity: Double?,
                          servingSize: String?, productQuantityUnit: String?,
-                         categoriesTags: [String]?, countriesTags: [String]?) -> ResolvedFood? {
+                         categoriesTags: [String]?, countriesTags: [String]?,
+                         allergensTags: [String]?, tracesTags: [String]?,
+                         ingredientsText: String?) -> ResolvedFood? {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty, let kcal = n.energyKcal100g else { return nil }
 
@@ -331,6 +349,11 @@ private enum OFFFoodMapper {
             portions: portion.map { [$0] } ?? [],
             gramsPerMillilitre: density)
         food.countryTags = OFFCountryTag.strip(countriesTags)
+        food.allergenTags = OFFCountryTag.strip(allergensTags)
+        food.traceTags = OFFCountryTag.strip(tracesTags)
+        let ingredients = ingredientsText?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        food.ingredientsText = ingredients.isEmpty ? nil : ingredients
         return food
     }
 

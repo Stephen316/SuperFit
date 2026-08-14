@@ -51,6 +51,10 @@ enum Theme {
     /// The third gauge accent, for sleep — a calm indigo, the conventional sleep
     /// hue, distinct from the gold recovery and teal strain rings it sits beside.
     static let sleep = Color(light: 0x625AA7, dark: 0x8079C7)
+    /// The allergen "safe" tick. A true blue rather than the indigo above,
+    /// because the blue tick is a borrowed convention the user already reads as
+    /// "verified" — the sleep indigo renders closer to purple and loses that.
+    static let safe = Color(light: 0x1D6FD0, dark: 0x4C9AF0)
     static let backgroundBase = Color(light: 0xFFFFFF, dark: 0x051011)
     static let surface = Color(light: 0xE4EEEE, dark: 0x0F1D20)
     static let tabBar = Color(light: 0xD8E5E5, dark: 0x0A181B)

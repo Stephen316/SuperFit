@@ -208,6 +208,12 @@ final class Food {
     /// USDA household measures, JSON [FoodPortion]. Cached so a food logged
     /// once keeps its "1 medium" option offline and without a second request.
     var portionsJSON: Data?
+    /// Declared allergens and "may contain", comma separated and unprefixed.
+    /// Defaulted rather than optional so CloudKit accepts them; an empty string
+    /// means the source published nothing, not that the food is free of them.
+    var allergenTagsRaw: String = ""
+    var traceTagsRaw: String = ""
+    var ingredientsText: String?
     var isFavorite: Bool = false
 
     init(name: String, source: FoodSource = .custom) {

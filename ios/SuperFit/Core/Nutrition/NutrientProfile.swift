@@ -107,6 +107,16 @@ struct ResolvedFood: Sendable, Identifiable {
     /// doesn't say, which is not the same as "sold nowhere".
     var countryTags: [String] = []
 
+    /// Declared allergens, and "may contain" separately, without the `en:`
+    /// prefix. Empty is "nothing published", never "contains nothing" — see
+    /// `AllergenCheck`, which is the only thing allowed to draw that line.
+    var allergenTags: [String] = []
+    var traceTags: [String] = []
+
+    /// The label's ingredient list, when the source carries one. Used to
+    /// withhold a safe verdict the tags would otherwise have allowed.
+    var ingredientsText: String? = nil
+
     /// A whole food rather than a retailer's product: "Rice, white, long-grain,
     /// cooked". Has no country because it has no supplier, so it must not be
     /// ranked as foreign — plain rice is plain rice wherever you buy it.

@@ -28,6 +28,9 @@ struct FoodPickerView: View {
     @State private var scanning = false
     @State private var creatingCustom = false
     @State private var buildingMeal = false
+    /// The food whose "Allergen safe" line is currently showing, if any.
+    @State private var safeNotice: String?
+    @AppStorage(AvoidedAllergens.storageKey) private var avoidedAllergens = ""
     @State private var searchTask: Task<Void, Never>?
     @State private var confirmingDelete: ResolvedFood?
     @State private var hasMore = false
@@ -107,8 +110,16 @@ struct FoodPickerView: View {
     @ViewBuilder
     private func foodRows(_ foods: [ResolvedFood]) -> some View {
         let ids = storedIDs
+        let avoiding = AvoidedAllergens.decode(avoidedAllergens)
         ForEach(foods) { food in
-            Button { onPick(food) } label: { row(food) }
+            HStack(spacing: 0) {
+                Button { onPick(food) } label: {
+                    row(food)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                safeTick(food, avoiding: avoiding)
+            }
                 // Swipe reveals a red bin; a full swipe removes it outright,
                 // matching the delete gesture everywhere else in iOS.
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -234,10 +245,46 @@ struct FoodPickerView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(food.name).foregroundStyle(.primary)
             HStack(spacing: 6) {
-                if let brand = food.brand { Text(brand) }
-                Text("\(Int(food.per100g.kcal)) kcal · P \(Int(food.per100g.proteinG))g per 100g")
+                if safeNotice == food.id {
+                    // Replaces the macro line rather than pushing the row taller,
+                    // so a list of results doesn't jump when one is tapped.
+                    Text("Allergen safe")
+                        .foregroundStyle(Theme.safe)
+                } else {
+                    if let brand = food.brand { Text(brand) }
+                    Text("\(Int(food.per100g.kcal)) kcal · P \(Int(food.per100g.proteinG))g per 100g")
+                }
             }
             .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Shown only when the user avoids something *and* the label says enough to
+    /// clear this food. Anything unstated stays blank — see `AllergenCheck`.
+    @ViewBuilder
+    private func safeTick(_ food: ResolvedFood, avoiding: Set<Allergen>) -> some View {
+        let status = AllergenCheck.status(allergenTags: food.allergenTags,
+                                          traceTags: food.traceTags,
+                                          ingredientsText: food.ingredientsText,
+                                          avoiding: avoiding)
+        if status == .safe {
+            Button {
+                safeNotice = food.id
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    // Guarded so a second tap elsewhere isn't cut short by the
+                    // first one's timer landing after it.
+                    if safeNotice == food.id { safeNotice = nil }
+                }
+            } label: {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.safe)
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(food.name): none of your allergens listed")
         }
     }
 

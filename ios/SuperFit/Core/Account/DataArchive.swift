@@ -78,6 +78,11 @@ struct DataArchive: Codable, Sendable {
         /// Optionals keep backups created before dietary hydration readable.
         var waterGPer100g: Double?
         var gramsPerMillilitre: Double?
+        /// Optional for the same reason: backups written before allergens
+        /// existed carry none, and a non-optional would fail to decode them.
+        var allergenTags: String?
+        var traceTags: String?
+        var ingredientsText: String?
         var isFavorite: Bool
     }
 
@@ -195,6 +200,8 @@ enum DataArchiveService {
                       try? JSONDecoder().decode([FoodPortion].self, from: $0) },
                   waterGPer100g: f.waterGPer100g,
                   gramsPerMillilitre: f.gramsPerMillilitre,
+                  allergenTags: f.allergenTagsRaw, traceTags: f.traceTagsRaw,
+                  ingredientsText: f.ingredientsText,
                   isFavorite: f.isFavorite)
         }
         archive.nutritionLogs = fetch(context).map { (l: NutritionLog) in
@@ -346,6 +353,9 @@ enum DataArchiveService {
             row.gramsPerMillilitre = f.gramsPerMillilitre
             row.microsJSON = f.micros.flatMap { try? JSONEncoder().encode($0) }
             row.portionsJSON = f.portions.flatMap { try? JSONEncoder().encode($0) }
+            row.allergenTagsRaw = f.allergenTags ?? ""
+            row.traceTagsRaw = f.traceTags ?? ""
+            row.ingredientsText = f.ingredientsText
             row.isFavorite = f.isFavorite
             context.insert(row)
             result.added += 1
