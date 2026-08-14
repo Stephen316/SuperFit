@@ -42,9 +42,16 @@ struct MealBuilderView: View {
                     TextField("e.g. Overnight oats", text: $name)
                         .onChange(of: name) { meal?.name = trimmedName; save() }
                 }
+                .listRowBackground(Theme.surface)
 
-                if !ingredients.resolved.isEmpty { totalsSection }
-                ingredientsSection
+                // Applied here rather than inside each computed section: these
+                // are declared outside the List body, so the surface has to be
+                // opted into where they are placed into it.
+                Group {
+                    if !ingredients.resolved.isEmpty { totalsSection }
+                    ingredientsSection
+                }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(existing == nil ? "New meal" : "Edit meal")
             .themedChrome()
@@ -227,7 +234,7 @@ private struct MealIngredientView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section(food.name) {
                     LabeledContent("Amount") {
                         AmountField(value: $quantity, unit: unit.label,
@@ -237,6 +244,7 @@ private struct MealIngredientView: View {
                         ForEach(options) { Text($0.label).tag($0) }
                     }
                 }
+                .listRowBackground(Theme.surface)
                 Section("This amount") {
                     let scaled = food.scaled(grams: grams)
                     LabeledContent("Calories", value: "\(Int(scaled.kcal)) kcal")
@@ -244,6 +252,7 @@ private struct MealIngredientView: View {
                     LabeledContent("Carbs", value: "\(Int(scaled.carbsG)) g")
                     LabeledContent("Fat", value: "\(Int(scaled.fatG)) g")
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Add ingredient")
             .themedChrome()

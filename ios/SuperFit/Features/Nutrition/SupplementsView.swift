@@ -33,9 +33,13 @@ struct SupplementsView: View {
                         }
                         .padding(.vertical, 6)
                     }
+                    .listRowBackground(Theme.surface)
                 } else {
-                    contributionSection
-                    takenSection
+                    Group {
+                        contributionSection
+                        takenSection
+                    }
+                    .listRowBackground(Theme.surface)
                 }
 
                 Section {
@@ -43,6 +47,7 @@ struct SupplementsView: View {
                         Label("Add supplement", systemImage: "plus")
                     }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Supplements")
             .themedChrome()
@@ -252,6 +257,7 @@ struct SupplementPickerView: View {
                             }
                         }
                     }
+                    .listRowBackground(Theme.surface)
                 }
             }
         }
@@ -259,7 +265,7 @@ struct SupplementPickerView: View {
     }
 
     private func detail(for supplement: Supplement) -> some View {
-        Form {
+        List {
             Section {
                 Stepper(value: $servings, in: 0.5...20, step: 0.5) {
                     HStack {
@@ -270,6 +276,7 @@ struct SupplementPickerView: View {
                     }
                 }
             }
+            .listRowBackground(Theme.surface)
 
             Section {
                 Toggle("Every day", isOn: $everyDay)
@@ -278,6 +285,7 @@ struct SupplementPickerView: View {
                      ? "Carried forward automatically from today. You can skip a single day or stop it later without losing the history."
                      : "Added to this day only.")
             }
+            .listRowBackground(Theme.surface)
 
             Section("Per serving") {
                 let p = supplement.perServing
@@ -296,6 +304,7 @@ struct SupplementPickerView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .listRowBackground(Theme.surface)
         }
     }
 
@@ -360,7 +369,7 @@ struct CustomSupplementView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     TextField("Name", text: $name)
                     TextField("Serving (e.g. capsule, 5 g)", text: $servingLabel)
@@ -370,12 +379,14 @@ struct CustomSupplementView: View {
                         }
                     }
                 }
+                .listRowBackground(Theme.surface)
                 Section("Per serving") {
                     numberRow("Calories", $kcal, "kcal")
                     numberRow("Protein", $protein, "g")
                     numberRow("Carbs", $carbs, "g")
                     numberRow("Fat", $fat, "g")
                 }
+                .listRowBackground(Theme.surface)
                 Section {
                     ForEach(Micronutrient.allCases, id: \.self) { micro in
                         numberRow(micro.displayName,
@@ -388,6 +399,7 @@ struct CustomSupplementView: View {
                 } footer: {
                     Text("Leave at zero for anything the label doesn't list.")
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Custom supplement")
             .themedChrome()

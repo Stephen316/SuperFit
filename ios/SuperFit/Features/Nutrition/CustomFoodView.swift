@@ -33,11 +33,12 @@ struct CustomFoodView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section("Food") {
                     TextField("Name", text: $name)
                     TextField("Brand (optional)", text: $brand)
                 }
+                .listRowBackground(Theme.surface)
                 Section {
                     FeatureTabControl(
                         options: Basis.allCases.map { ($0, $0.label) },
@@ -55,6 +56,7 @@ struct CustomFoodView: View {
                          ? "Enter the serving weight and the numbers from the per-serving column."
                          : "Enter the numbers from the per-100 g column.")
                 }
+                .listRowBackground(Theme.surface)
 
                 Section(basis.label) {
                     field("Calories (kcal)", $kcal)
@@ -63,6 +65,7 @@ struct CustomFoodView: View {
                     field("Fat (g)", $fat)
                     field("Fibre (g)", $fibre)
                 }
+                .listRowBackground(Theme.surface)
 
                 Section {
                     Toggle("Offer ml and fl oz", isOn: $measuredByVolume)
@@ -83,6 +86,7 @@ struct CustomFoodView: View {
                         Text("Volume needs the food's density for accurate nutrition. Water content is optional, but lets this portion contribute to hydration.")
                     }
                 }
+                .listRowBackground(Theme.surface)
 
                 if basis == .perServing, let per100 = per100gPreview {
                     Section("Stored as per 100 g") {
@@ -91,6 +95,7 @@ struct CustomFoodView: View {
                         LabeledContent("Carbs", value: "\(Int(per100.carbsG)) g")
                         LabeledContent("Fat", value: "\(Int(per100.fatG)) g")
                     }
+                    .listRowBackground(Theme.surface)
                 }
             }
             .navigationTitle("Custom food")

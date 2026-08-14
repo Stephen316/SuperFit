@@ -80,7 +80,7 @@ struct LogFoodView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     LabeledContent(resolved.name) {
                         if let brand = resolved.brand {
@@ -111,6 +111,7 @@ struct LogFoodView: View {
                         }
                     }
                 }
+                .listRowBackground(Theme.surface)
                 Section("This portion") {
                     LabeledContent("Calories", value: "\(Int(scaled.kcal)) kcal")
                     LabeledContent("Protein", value: "\(Int(scaled.proteinG)) g")
@@ -121,6 +122,7 @@ struct LogFoodView: View {
                         LabeledContent("Hydration", value: "\(Int(water.rounded())) ml")
                     }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Log food")
             .themedChrome()

@@ -36,8 +36,11 @@ struct ActivityPickerView: View {
         NavigationStack {
             List {
                 if search.isEmpty {
-                    if !recentWatchWorkouts.isEmpty { recentSection }
-                    strengthSection
+                    Group {
+                        if !recentWatchWorkouts.isEmpty { recentSection }
+                        strengthSection
+                    }
+                    .listRowBackground(Theme.surface)
                 }
 
                 ForEach(groups) { group in
@@ -47,6 +50,7 @@ struct ActivityPickerView: View {
                                 row(for: activity)
                             }
                         }
+                        .listRowBackground(Theme.surface)
                     }
                 }
             }
@@ -202,11 +206,12 @@ private struct WorkoutTemplateEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section("Saved workout") {
                     TextField("Workout name", text: $name)
                         .textInputAutocapitalization(.words)
                 }
+                .listRowBackground(Theme.surface)
 
                 Section {
                     if exerciseIDs.isEmpty {
@@ -228,6 +233,7 @@ private struct WorkoutTemplateEditorView: View {
                 } footer: {
                     Text("Starting this workout copies weights, reps, RIR and sets from its latest completed session. Every copied set starts unchecked.")
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Edit saved workout")
             .navigationBarTitleDisplayMode(.inline)
@@ -333,6 +339,7 @@ struct ActivityStartOptionsView: View {
                          + "Use this when the phone is all you have with you.")
                 }
             }
+            .listRowBackground(Theme.surface)
 
             Section("Recent \(activity.displayName.lowercased()) from your watch") {
                 if recent.isEmpty {
@@ -356,6 +363,7 @@ struct ActivityStartOptionsView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .listRowBackground(Theme.surface)
         }
         .navigationTitle(activity.displayName)
         .themedChrome()

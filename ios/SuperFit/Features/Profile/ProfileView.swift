@@ -23,7 +23,7 @@ struct ProfileView: View {
 
     var body: some View {
         if let profile {
-            Form {
+            List {
                 Section("Goal") {
                     Picker("Goal", selection: bind(profile, \.goal)) {
                         ForEach(FitnessGoal.allCases, id: \.self) { g in
@@ -31,6 +31,7 @@ struct ProfileView: View {
                         }
                     }
                 }
+                .listRowBackground(Theme.surface)
 
                 Section("About you") {
                     Picker("Sex", selection: bind(profile, \.sex)) {
@@ -51,8 +52,10 @@ struct ProfileView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .listRowBackground(Theme.surface)
 
                 bodyCompositionSection
+                    .listRowBackground(Theme.surface)
 
                 Section("Activity baseline") {
                     Picker("Baseline", selection: bind(profile, \.activity)) {
@@ -64,6 +67,7 @@ struct ProfileView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Profile")
             .themedChrome()

@@ -139,20 +139,25 @@ struct NutritionView: View {
     var body: some View {
         NavigationStack {
             List {
-                if windowLogs.isEmpty && supplementTotal.kcal == 0
-                    && supplementTotal.micros.isEmpty {
-                    emptySection
-                } else {
-                    macroSection
-                    if microTargets.isEmpty {
-                        needsProfileSection
+                // These sections are declared as computed properties, so the
+                // surface is opted into here, where they enter the list.
+                Group {
+                    if windowLogs.isEmpty && supplementTotal.kcal == 0
+                        && supplementTotal.micros.isEmpty {
+                        emptySection
                     } else {
-                        ForEach(Micronutrient.Group.allCases, id: \.self) { group in
-                            microSection(group)
+                        macroSection
+                        if microTargets.isEmpty {
+                            needsProfileSection
+                        } else {
+                            ForEach(Micronutrient.Group.allCases, id: \.self) { group in
+                                microSection(group)
+                            }
+                            coverageFooter
                         }
-                        coverageFooter
                     }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(averaging ? "Nutrition — 7-day average" : "Nutrition")
             .themedChrome()

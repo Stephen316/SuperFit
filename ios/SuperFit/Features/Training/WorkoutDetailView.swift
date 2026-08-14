@@ -20,17 +20,24 @@ struct WorkoutDetailView: View {
     var body: some View {
         NavigationStack {
             List {
-                summarySection
-                effortSection
+                Group {
+                    summarySection
+                    effortSection
+                }
+                .listRowBackground(Theme.surface)
                 if !detailRows.isEmpty {
                     Section("Detail") {
                         ForEach(detailRows, id: \.label) { row in
                             LabeledContent(row.label, value: row.value)
                         }
                     }
+                    .listRowBackground(Theme.surface)
                 }
-                if !workout.laps.isEmpty { lapSection }
-                sourceSection
+                Group {
+                    if !workout.laps.isEmpty { lapSection }
+                    sourceSection
+                }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(workout.activity.displayName)
             .themedChrome()

@@ -57,6 +57,7 @@ struct ActiveWorkoutView: View {
                         Label("Add exercise", systemImage: "plus")
                     }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(session.templateName ?? "Workout")
             .themedChrome()
@@ -571,7 +572,7 @@ struct CustomExerciseView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     TextField("Exercise name", text: $name)
                     Picker("Equipment", selection: $category) {
@@ -582,6 +583,7 @@ struct CustomExerciseView: View {
                         Text("Bodyweight").tag(ExerciseCategory.bodyweight)
                     }
                 }
+                .listRowBackground(Theme.surface)
                 Section {
                     ForEach(MuscleGroup.allCases, id: \.self) { muscle in
                         Stepper(value: Binding(get: { scores[muscle] ?? 0 },
@@ -601,6 +603,7 @@ struct CustomExerciseView: View {
                 } footer: {
                     Text("5 = prime mover under maximal tension, 1 = lightly involved, 0 = not trained. Drives weekly volume tracking.")
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("New exercise")
             .themedChrome()

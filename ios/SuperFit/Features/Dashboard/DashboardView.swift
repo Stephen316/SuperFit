@@ -534,7 +534,7 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     cardLabel("Energy")
                     if hasData {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text("\(Int(level))%")
                                 .font(Theme.text(28, .bold))
                                 .foregroundStyle(Theme.textPrimary)

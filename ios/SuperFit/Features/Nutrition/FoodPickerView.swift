@@ -142,24 +142,31 @@ struct FoodPickerView: View {
 
     var body: some View {
         List {
-            if !matchingMeals.isEmpty && filter != .all || (showsMeals && !matchingMeals.isEmpty) {
-                mealsSection
-            }
-            if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
-                emptyRow
-            }
-            let sections = sections
-            if sections.count == 1 {
-                foodRows(sections[0].foods)
-            } else {
-                ForEach(sections) { section in
-                    Section(section.title ?? "") { foodRows(section.foods) }
+            // Every row here is content, so the surface is applied once around
+            // the whole body. Tagging sections individually left the rows built
+            // from computed properties — the creation and load-more rows — on
+            // the default grey.
+            Group {
+                if !matchingMeals.isEmpty && filter != .all || (showsMeals && !matchingMeals.isEmpty) {
+                    mealsSection
                 }
+                if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
+                    emptyRow
+                }
+                let sections = sections
+                if sections.count == 1 {
+                    foodRows(sections[0].foods)
+                } else {
+                    ForEach(sections) { section in
+                        Section(section.title ?? "") { foodRows(section.foods) }
+                    }
+                }
+                if hasMore && filter == .all && !visible.isEmpty {
+                    loadMoreRow
+                }
+                creationRow
             }
-            if hasMore && filter == .all && !visible.isEmpty {
-                loadMoreRow
-            }
-            creationRow
+            .listRowBackground(Theme.surface)
         }
         .searchable(text: $query, prompt: "Search foods")
         .overlay { if searching { ProgressView() } }
