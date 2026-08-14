@@ -124,8 +124,6 @@ struct DiaryView: View {
                 Group {
                     FeatureCategoryBar("Macros")
                     summarySection
-                    FeatureCategoryBar("Hydration")
-                    hydrationSection
                 }
                 .listRowBackground(Theme.surface)
 
@@ -135,6 +133,13 @@ struct DiaryView: View {
 
                 ForEach(MealSlot.allCases, id: \.self) { slot in
                     mealSection(slot)
+                }
+                .listRowBackground(Theme.surface)
+
+                Group {
+                    FeatureCategoryBar("Hydration")
+                    hydrationSection
+                    nutrientLinksSection
                 }
                 .listRowBackground(Theme.surface)
             }
@@ -152,7 +157,7 @@ struct DiaryView: View {
                 await FeatureRefresh.syncAndAggregate(context: context)
                 loadDiaryData()
             }
-            .stickyCategoryHeaders(["Macros", "Hydration", "Meals"])
+            .stickyCategoryHeaders(["Macros", "Meals", "Hydration"])
             .settingsToolbar()
             .sheet(item: $addingTo, onDismiss: loadDiaryData) { slot in
                 FoodSearchView(day: day, meal: slot)
@@ -184,6 +189,14 @@ struct DiaryView: View {
                 Text("Log your weight and set a goal to get targets.")
                     .font(.subheadline).foregroundStyle(Theme.textSecondary)
             }
+        }
+    }
+
+    /// Detail links, parked at the end of the page: they are references rather
+    /// than part of the day's logging, so they sit below the meals and water
+    /// the tab exists to capture.
+    private var nutrientLinksSection: some View {
+        Section {
             // Presented, not pushed: this tab lives inside a paged TabView, and
             // a pushed stack would make the back-swipe fight the tab swipe.
             Button {
@@ -348,9 +361,26 @@ struct DiaryView: View {
 
     private func mealSection(_ slot: MealSlot) -> some View {
         Section {
-            Text(slot.rawValue.capitalized)
-                .font(Theme.text(15, .semibold))
-                .foregroundStyle(Theme.textPrimary)
+            HStack {
+                Text(slot.rawValue.capitalized)
+                    .font(Theme.text(15, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                // Shares the slot's own line rather than taking a row below it:
+                // four empty meals otherwise cost eight rows of nothing.
+                Button {
+                    addingTo = slot
+                } label: {
+                    Label("Add food", systemImage: "plus")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.gold)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add food to \(slot.rawValue)")
+            }
+            // Without this the separator indents to the trailing button and the
+            // rule floats under "Add food" instead of spanning the row.
+            .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] }
             ForEach(dayLogs.filter { $0.mealRaw == slot.rawValue }) { log in
                 LogRow(log: log)
             }
@@ -359,12 +389,6 @@ struct DiaryView: View {
                 for i in offsets { context.delete(slotLogs[i]) }
                 try? context.save()
                 loadDiaryData()
-            }
-            Button {
-                addingTo = slot
-            } label: {
-                Label("Add food", systemImage: "plus")
-                    .font(.subheadline)
             }
         }
     }
