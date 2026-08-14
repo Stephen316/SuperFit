@@ -234,8 +234,10 @@ struct ExerciseProgressView: View {
 }
 
 /// The windows the strength history offers — the 1 / 3 / 6 months requested.
+/// Declared longest-first: pickers render `allCases` in order, and the ranges
+/// read left-to-right widest to narrowest.
 enum LiftRange: Int, CaseIterable, Identifiable {
-    case oneMonth = 30, threeMonths = 90, sixMonths = 180, allTime = 0
+    case allTime = 0, sixMonths = 180, threeMonths = 90, oneMonth = 30
 
     var id: Int { rawValue }
     var label: String {

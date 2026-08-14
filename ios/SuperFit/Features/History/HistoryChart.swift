@@ -2,8 +2,10 @@ import SwiftUI
 import Charts
 
 /// Time span a history screen is showing.
+/// Declared longest-first: pickers render `allCases` in order, and the ranges
+/// read left-to-right widest to narrowest.
 enum HistoryRange: Int, CaseIterable, Identifiable {
-    case month = 30, quarter = 90, halfYear = 180, year = 365
+    case year = 365, halfYear = 180, quarter = 90, month = 30
 
     var id: Int { rawValue }
     var label: String {
