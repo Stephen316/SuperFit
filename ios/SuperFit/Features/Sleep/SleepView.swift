@@ -135,6 +135,7 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private var stagesSection: some View {
         let staged = nights.filter(\.hasStages)
         let deep = staged.reduce(0) { $0 + $1.deepMinutes }
@@ -142,7 +143,7 @@ struct SleepView: View {
         let core = staged.reduce(0) { $0 + $1.coreMinutes }
         let total = Double(max(1, deep + rem + core))
         FeatureCategoryBar("Stages — nightly average")
-        return Section {
+        Section {
             stageRow("Deep", minutes: deep / staged.count, share: Double(deep) / total, tint: Theme.gold)
             stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: Theme.gold.opacity(0.65))
             stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Theme.textSecondary)
