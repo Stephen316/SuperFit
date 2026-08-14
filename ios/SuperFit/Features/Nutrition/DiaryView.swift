@@ -138,16 +138,12 @@ struct DiaryView: View {
                 }
                 .listRowBackground(Theme.surface)
             }
-            .navigationTitle(day.formatted(.dateTime.weekday(.wide).month().day()))
+            .navigationTitle(DayTitle.text(for: day))
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button { shift(-1) } label: { Image(systemName: "chevron.left") }
-                        .accessibilityLabel("Previous day")
-                    Button { shift(1) } label: { Image(systemName: "chevron.right") }
-                        .disabled(Calendar.current.isDateInToday(day))
-                        .accessibilityLabel("Next day")
+                ToolbarItem(placement: .topBarLeading) {
+                    DayStepper(day: $day)
                 }
                 .withoutGlassBackground()
             }
@@ -371,10 +367,6 @@ struct DiaryView: View {
                     .font(.subheadline)
             }
         }
-    }
-
-    private func shift(_ days: Int) {
-        day = Calendar.current.date(byAdding: .day, value: days, to: day) ?? day
     }
 
     private var hydrationProgressText: String {

@@ -298,10 +298,10 @@ struct DashboardView: View {
     private var headerRow: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(isToday ? "Today" : Self.dayFormatter.string(from: day))
+                Text(DayTitle.text(for: day))
                     .font(Theme.text(18, .bold))
                     .foregroundStyle(Theme.textPrimary)
-                dayStepper
+                DayStepper(day: $day)
             }
             Spacer(minLength: 0)
             streakBadge
@@ -376,41 +376,6 @@ struct DashboardView: View {
         .accessibilityLabel(lit
                             ? "Logging streak, \(streak) days"
                             : "No logging streak yet, \(streak) of 2 days")
-    }
-
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("EEE d MMM")
-        return f
-    }()
-
-    /// Steps the whole page a day at a time. Forward stops at today: there is no
-    /// data ahead of now, and an empty screen reads as a bug rather than a date.
-    private var dayStepper: some View {
-        HStack(spacing: 0) {
-            stepButton("chevron.left", label: "Previous day", by: -1, enabled: true)
-            Rectangle().fill(Theme.hairline).frame(width: 1, height: 16)
-            stepButton("chevron.right", label: "Next day", by: 1, enabled: !isToday)
-        }
-        .background(Capsule().fill(Theme.wash))
-        .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
-    }
-
-    private func stepButton(_ icon: String, label: String, by days: Int,
-                            enabled: Bool) -> some View {
-        Button {
-            guard let moved = Calendar.current.date(byAdding: .day, value: days, to: day)
-            else { return }
-            withAnimation(.easeOut(duration: 0.15)) { day = moved }
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(enabled ? Theme.textPrimary : Theme.textSecondary.opacity(0.4))
-                .frame(width: 32, height: 26)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(label)
     }
 
     /// settings-btn: 40pt visible circle inside a 44pt touch target.
