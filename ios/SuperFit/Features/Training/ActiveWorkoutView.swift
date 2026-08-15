@@ -233,7 +233,11 @@ struct ActiveWorkoutView: View {
         }
         guard session.endedAt == nil else { dismiss(); return }
         session.endedAt = .now
-        if saveChanges() { showingRPE = true }
+        if saveChanges() {
+            // Today's workout nudge has nothing left to ask for.
+            ReminderService.refreshAfterLogging(context: context)
+            showingRPE = true
+        }
     }
 
     private func continueAfterEffortRating() {

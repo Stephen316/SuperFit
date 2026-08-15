@@ -111,7 +111,8 @@ struct RootView: View {
         .task {
             ensureProfile()
             if UserDefaults.standard.bool(forKey: ReminderSettings.enabledKey) {
-                await ReminderService.refresh()
+                await ReminderService.refresh(
+                    state: ReminderStateLoader.load(context: context))
             }
             // Seeded here rather than in SupplementsView: food-like supplements
             // are searchable from the food diary, so they must exist even if

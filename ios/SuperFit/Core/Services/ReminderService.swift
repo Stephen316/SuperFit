@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import UserNotifications
 
 enum ReminderSettings {
@@ -17,6 +18,38 @@ enum ReminderKind: String, CaseIterable, Sendable {
         }
     }
 
+    /// The meal this reminder is about, so a logged lunch silences the lunch
+    /// nudge specifically rather than every meal nudge for the day.
+    var mealSlot: MealSlot? {
+        switch self {
+        case .morning: .breakfast
+        case .lunch: .lunch
+        case .dinner: .dinner
+        case .workout: nil
+        }
+    }
+
+    /// Order to drop reminders in as the back-off tightens. Dinner survives
+    /// longest: it is the last chance to log anything for the day.
+    static let priority: [ReminderKind] = [.dinner, .morning, .lunch, .workout]
+}
+
+/// What has actually been logged, so reminders can stay quiet about it.
+struct ReminderState: Equatable, Sendable {
+    /// Meals already logged today.
+    var loggedMeals: Set<MealSlot> = []
+    /// Whether a workout has been recorded today.
+    var loggedWorkout = false
+    /// Consecutive days before today with nothing logged at all. Drives the
+    /// back-off: someone ignoring the app does not need four nudges a day.
+    var quietDays = 0
+
+    /// True when this reminder has nothing left to ask for today.
+    func isSatisfied(_ kind: ReminderKind) -> Bool {
+        if kind == .workout { return loggedWorkout }
+        guard let slot = kind.mealSlot else { return false }
+        return loggedMeals.contains(slot)
+    }
 }
 
 struct ReminderCopy: Sendable {
@@ -68,25 +101,54 @@ struct ReminderPlan: Equatable, Sendable {
 enum ReminderSchedule {
     static let identifierPrefix = "superfit.reminder."
 
+    /// How many reminders a day is allowed, given a run of days with nothing
+    /// logged. Peppering someone who has stopped logging is how an app gets its
+    /// notifications turned off for good, so the schedule thins out instead.
+    ///
+    /// It never reaches zero: after a week it drops to one reminder every third
+    /// day, which is a way back in rather than silence.
+    static func dailyAllowance(quietDays: Int) -> Int {
+        switch quietDays {
+        case ...1: ReminderKind.allCases.count
+        case 2...3: 2
+        default: 1
+        }
+    }
+
+    /// Days to skip entirely once someone has been quiet for a week.
+    static func dayStride(quietDays: Int) -> Int { quietDays >= 7 ? 3 : 1 }
+
     /// One-off requests allow the copy to rotate. Four reminders for 14 days
     /// stay below iOS's 64-pending-notification limit, and launch refreshes the
     /// rolling window before it runs out.
+    ///
+    /// `state` only describes today, which is all that can be known at schedule
+    /// time — so today's already-logged meals are dropped here, and `refresh`
+    /// is called again after each log to withdraw the rest.
     static func plans(
         from now: Date,
         days: Int = 14,
+        state: ReminderState = ReminderState(),
         calendar: Calendar = .current,
         copy: ReminderCopy = .bundled
     ) -> [ReminderPlan] {
         let start = calendar.startOfDay(for: now)
         var result: [ReminderPlan] = []
 
-        for dayOffset in 0..<days {
+        let allowance = dailyAllowance(quietDays: state.quietDays)
+        let stride = dayStride(quietDays: state.quietDays)
+        let allowed = Set(ReminderKind.priority.prefix(allowance))
+
+        for dayOffset in 0..<days where dayOffset % stride == 0 {
             guard let day = calendar.date(byAdding: .day, value: dayOffset, to: start) else {
                 continue
             }
             let dayNumber = calendar.ordinality(of: .day, in: .era, for: day) ?? dayOffset
 
             for (kindOffset, kind) in ReminderKind.allCases.enumerated() {
+                guard allowed.contains(kind) else { continue }
+                // Only today's logging is known; later days are still open.
+                if dayOffset == 0 && state.isSatisfied(kind) { continue }
                 guard let section = copy.sections[kind],
                       !section.title.isEmpty,
                       !section.lines.isEmpty else { continue }
@@ -122,7 +184,7 @@ enum ReminderService {
         }
     }
 
-    static func refresh(now: Date = .now) async {
+    static func refresh(now: Date = .now, state: ReminderState = ReminderState()) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized
@@ -133,7 +195,7 @@ enum ReminderService {
             .filter { $0.hasPrefix(ReminderSchedule.identifierPrefix) }
         center.removePendingNotificationRequests(withIdentifiers: existing)
 
-        for plan in ReminderSchedule.plans(from: now) {
+        for plan in ReminderSchedule.plans(from: now, state: state) {
             let content = UNMutableNotificationContent()
             content.title = plan.title
             content.body = plan.body
@@ -145,6 +207,16 @@ enum ReminderService {
                                                         content: content,
                                                         trigger: trigger))
         }
+    }
+
+    /// Re-plans against what is now logged. Called after a meal or workout is
+    /// recorded, which is what withdraws the rest of today's pending nudges —
+    /// scheduling alone cannot know about a log made after it ran.
+    @MainActor
+    static func refreshAfterLogging(context: ModelContext) {
+        guard UserDefaults.standard.bool(forKey: ReminderSettings.enabledKey) else { return }
+        let state = ReminderStateLoader.load(context: context)
+        Task { await refresh(state: state) }
     }
 
     static func disable() async {
