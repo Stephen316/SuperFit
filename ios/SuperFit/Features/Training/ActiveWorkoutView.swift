@@ -504,6 +504,7 @@ struct ExercisePickerView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("How to do \(exercise.name)")
               }
+              .listRowBackground(Theme.surface)
             }
             .sheet(item: $info) { ExerciseInfoView(exercise: $0) }
             .searchable(text: $query, prompt: "Search exercises")
@@ -543,15 +544,33 @@ struct ExercisePickerView: View {
 }
 
 /// "Chest 5 · Triceps 3 · Shoulders 2" — the per-muscle tension breakdown.
+/// The muscles an exercise trains directly.
+///
+/// Only tension ≥ 4, the threshold at which a set counts as a whole direct set
+/// rather than assistance, and the score itself is never shown. The number is a
+/// model input; picking an exercise only needs the answer to "what does this
+/// train", and 4 versus 5 is not a distinction to act on at the rack.
 struct TensionRow: View {
     let tension: [MuscleGroup: Int]
 
+    private var directMuscles: String {
+        tension.filter { $0.value >= 4 }
+            .sorted {
+                $0.value != $1.value ? $0.value > $1.value
+                                     : $0.key.displayName < $1.key.displayName
+            }
+            .map(\.key.displayName)
+            .joined(separator: " · ")
+    }
+
     var body: some View {
-        Text(tension.sorted { $0.value > $1.value }
-            .map { "\($0.key.displayName) \($0.value)" }
-            .joined(separator: " · "))
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        // Nothing rather than an empty line: a few catalogue entries are all
+        // assistance, and a blank caption would leave a gap under the name.
+        if !directMuscles.isEmpty {
+            Text(directMuscles)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
