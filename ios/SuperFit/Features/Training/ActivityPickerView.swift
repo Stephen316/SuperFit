@@ -130,7 +130,7 @@ struct ActivityPickerView: View {
                 onStartStrength(nil)
                 dismiss()
             } label: {
-                Label("Empty gym workout", systemImage: "dumbbell.fill")
+                Label("New gym workout", systemImage: "dumbbell.fill")
             }
             .buttonStyle(.plain)
         } header: {

@@ -110,6 +110,9 @@ struct RootView: View {
         .onOpenURL { handleDeepLink($0) }
         .task {
             ensureProfile()
+            // Watches saves from here on, so every logging path reschedules —
+            // including workouts synced from Health, which no view touches.
+            ReminderCoordinator.shared.start(container: context.container)
             if UserDefaults.standard.bool(forKey: ReminderSettings.enabledKey) {
                 await ReminderService.refresh(
                     state: ReminderStateLoader.load(context: context))

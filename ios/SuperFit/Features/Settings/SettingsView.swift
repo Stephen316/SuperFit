@@ -493,7 +493,10 @@ private struct ReminderToggle: View {
         isUpdating = true
         Task {
             if newValue {
-                enabled = await ReminderService.enable()
+                // Without today's state, switching this on after lunch would
+                // still schedule a nudge to log lunch.
+                enabled = await ReminderService.enable(
+                    state: ReminderCoordinator.shared.currentState())
             } else {
                 enabled = false
                 await ReminderService.disable()

@@ -171,13 +171,36 @@ enum ReminderSchedule {
     }
 }
 
+/// Serialises rescheduling.
+///
+/// `refresh` clears every pending request before re-adding them, so two runs
+/// overlapping would let one delete what the other had just written. Chaining
+/// on the previous task means only one is ever inside that window.
+private actor RefreshGate {
+    static let shared = RefreshGate()
+    private var current: Task<Void, Never>?
+
+    func run(_ work: @Sendable @escaping () async -> Void) async {
+        let previous = current
+        let task = Task {
+            await previous?.value
+            await work()
+        }
+        current = task
+        await task.value
+    }
+}
+
 enum ReminderService {
-    static func enable() async -> Bool {
+    /// - Parameter state: what is already logged today. Passing it matters here
+    ///   as much as anywhere: enabling reminders after lunch should not then
+    ///   schedule a nudge to log lunch.
+    static func enable(state: ReminderState = ReminderState()) async -> Bool {
         let center = UNUserNotificationCenter.current()
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
             guard granted else { return false }
-            await refresh()
+            await refresh(state: state)
             return true
         } catch {
             return false
@@ -185,6 +208,10 @@ enum ReminderService {
     }
 
     static func refresh(now: Date = .now, state: ReminderState = ReminderState()) async {
+        await RefreshGate.shared.run { await performRefresh(now: now, state: state) }
+    }
+
+    private static func performRefresh(now: Date, state: ReminderState) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized
@@ -207,16 +234,6 @@ enum ReminderService {
                                                         content: content,
                                                         trigger: trigger))
         }
-    }
-
-    /// Re-plans against what is now logged. Called after a meal or workout is
-    /// recorded, which is what withdraws the rest of today's pending nudges —
-    /// scheduling alone cannot know about a log made after it ran.
-    @MainActor
-    static func refreshAfterLogging(context: ModelContext) {
-        guard UserDefaults.standard.bool(forKey: ReminderSettings.enabledKey) else { return }
-        let state = ReminderStateLoader.load(context: context)
-        Task { await refresh(state: state) }
     }
 
     static func disable() async {

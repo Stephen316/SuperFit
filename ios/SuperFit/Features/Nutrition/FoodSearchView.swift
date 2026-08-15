@@ -217,8 +217,6 @@ struct LogFoodView: View {
         })
         context.insert(entry)
         try? context.save()
-        // Withdraws the rest of today's meal nudges now that this one is logged.
-        ReminderService.refreshAfterLogging(context: context)
         dismiss()
         onLogged()
     }
