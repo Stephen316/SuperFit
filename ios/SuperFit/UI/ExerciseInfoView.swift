@@ -121,18 +121,13 @@ struct ExerciseInfoView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
-            VStack(spacing: 8) {
-                ForEach(Array(ExerciseVideos.searchURLs(for: exercise.name).enumerated()),
-                        id: \.offset) { index, entry in
-                    Button(index == 0 ? "Search \(entry.channel)" : entry.channel) {
-                        openURL(entry.url)
-                    }
-                    .font(Theme.text(index == 0 ? 15 : 14, index == 0 ? .semibold : .regular))
-                    .foregroundStyle(index == 0 ? .black : Theme.textSecondary)
-                    .padding(.horizontal, 20).padding(.vertical, index == 0 ? 11 : 5)
-                    .background { if index == 0 { Capsule().fill(Theme.gold) } }
+            if let search = ExerciseVideos.searchURL(for: exercise.name) {
+                Button("Search YouTube") { openURL(search) }
+                    .font(Theme.text(15, .semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 20).padding(.vertical, 11)
+                    .background { Capsule().fill(Theme.gold) }
                     .buttonStyle(.plain)
-                }
             }
             Spacer()
         }

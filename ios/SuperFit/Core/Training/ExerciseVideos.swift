@@ -369,15 +369,16 @@ enum ExerciseVideos {
     /// deleted, and it cannot silently point at the wrong lift. That risk is
     /// real — searching for a neutral-grip chest press surfaced a *row* machine
     /// video with a near-identical title.
-    static func searchURLs(for exerciseName: String) -> [(channel: String, url: URL)] {
-        preferredChannels.compactMap { channel in
-            var components = URLComponents(string: "https://www.youtube.com/results")
-            components?.queryItems = [
-                URLQueryItem(name: "search_query",
-                             value: "\(channel) \"How To: \(exerciseName)\"")
-            ]
-            return components?.url.map { (channel, $0) }
-        }
+    /// One search rather than one per channel. Naming channels here promised a
+    /// curation that an uncurated result cannot deliver: the link is a plain
+    /// query, and dressing it as "Scott Herman's video" implied a video had been
+    /// picked and vetted when none had.
+    static func searchURL(for exerciseName: String) -> URL? {
+        var components = URLComponents(string: "https://www.youtube.com/results")
+        components?.queryItems = [
+            URLQueryItem(name: "search_query", value: "how to \(exerciseName) form")
+        ]
+        return components?.url
     }
 
     /// The public thumbnail for a video. `hqdefault` exists for every upload,
