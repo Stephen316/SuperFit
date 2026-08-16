@@ -10,6 +10,7 @@ struct ActiveWorkoutView: View {
     @Query private var savedTemplates: [WorkoutTemplate]
 
     @State private var pickingExercise = false
+    @State private var didOfferFirstExercise = false
     @State private var restEndsAt: Date?
     @State private var savingTemplate = false
     @State private var templateName = ""
@@ -79,6 +80,15 @@ struct ActiveWorkoutView: View {
                 ExercisePickerView { exercise in
                     addSet(for: exercise)
                 }
+            }
+            // A new workout opens on an empty list, and the only useful first
+            // action is adding an exercise. Once only: cancelling the picker is
+            // a decision, and reopening it would trap the user in the sheet.
+            .task {
+                guard !didOfferFirstExercise, session.endedAt == nil,
+                      exerciseSections.isEmpty else { return }
+                didOfferFirstExercise = true
+                pickingExercise = true
             }
             .sheet(isPresented: $showingRPE, onDismiss: {
                 guard continueAfterRPE else { return }
