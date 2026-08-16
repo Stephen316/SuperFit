@@ -51,22 +51,38 @@ struct ActiveWorkoutView: View {
                                     onSetCompleted: startRest,
                                     onSaveFailure: { persistenceFailure = $0 })
                 }
-                // "Add set" belongs to the exercise above it; "Add exercise" is
-                // a workout-level action. Butted together on one surface they
-                // read as a pair, so a base-coloured gap divides them.
-                Color.clear
-                    .frame(height: 14)
-                    .listRowBackground(Theme.backgroundBase)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
+                // Separated by weight rather than by a gap: "Add set" is a plain
+                // row belonging to the exercise above it, while the one action
+                // that operates on the whole workout is the only filled control
+                // on the page. Styling sits inside the label so the whole
+                // capsule is tappable, not just the text.
                 Section {
                     Button {
                         pickingExercise = true
                     } label: {
                         Label("Add exercise", systemImage: "plus")
+                            .font(Theme.text(16, .semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                            .background(Capsule().fill(Theme.gold))
+                            .contentShape(Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 14, leading: 16,
+                                              bottom: 6, trailing: 16))
                 }
-                .listRowBackground(Theme.surface)
+                .listRowBackground(Theme.backgroundBase)
+                .listRowSeparator(.hidden)
+
+                // Carries the darker tone down past the last row. The list's own
+                // empty area sits on the content surface, which otherwise leaves
+                // a lighter slab under the add button.
+                Color.clear
+                    .frame(minHeight: 500)
+                    .listRowBackground(Theme.backgroundBase)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
             }
             .navigationTitle(session.templateName ?? "Workout")
             .themedChrome()
