@@ -469,8 +469,12 @@ struct ExercisePickerView: View {
         exercises.filter { e in
             // `matches` also checks the alias list, so "OHP" or "RDL" finds the
             // lift while the row still shows its catalogue name.
+            // Direct work only, matching the muscles the row lists. At >= 3 the
+            // filter returned lifts that merely assist the chosen muscle and
+            // never name it, so filtering by triceps surfaced bench presses.
             e.matches(query)
-            && (muscleFilter == nil || (e.tension[muscleFilter!] ?? 0) >= 3)
+            && (muscleFilter == nil
+                || (e.tension[muscleFilter!] ?? 0) >= TensionRow.directThreshold)
         }
     }
 
@@ -561,10 +565,15 @@ struct ExercisePickerView: View {
 /// model input; picking an exercise only needs the answer to "what does this
 /// train", and 4 versus 5 is not a distinction to act on at the rack.
 struct TensionRow: View {
+    /// Where a set stops being assistance and counts as direct work. Shared
+    /// with the picker's muscle filter so the list it returns and the muscles
+    /// each row names can never disagree.
+    static let directThreshold = 4
+
     let tension: [MuscleGroup: Int]
 
     private var directMuscles: String {
-        tension.filter { $0.value >= 4 }
+        tension.filter { $0.value >= Self.directThreshold }
             .sorted {
                 $0.value != $1.value ? $0.value > $1.value
                                      : $0.key.displayName < $1.key.displayName
