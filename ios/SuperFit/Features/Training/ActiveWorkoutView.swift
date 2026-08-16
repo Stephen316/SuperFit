@@ -461,7 +461,6 @@ struct ExercisePickerView: View {
     @Query(sort: \Exercise.name) private var exercises: [Exercise]
     @State private var query = ""
     @State private var muscleFilter: MuscleGroup?
-    @State private var creatingCustom = false
     /// The lift whose how-to and history are being shown.
     @State private var info: Exercise?
 
@@ -542,16 +541,6 @@ struct ExercisePickerView: View {
                     }
                 }
                 .withoutGlassBackground()
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { creatingCustom = true } label: { Image(systemName: "plus") }
-                }
-                .withoutGlassBackground()
-            }
-            .sheet(isPresented: $creatingCustom) {
-                CustomExerciseView { exercise in
-                    onPick(exercise)
-                    dismiss()
-                }
             }
         }
     }
@@ -589,94 +578,6 @@ struct TensionRow: View {
             Text(directMuscles)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        }
-    }
-}
-
-struct CustomExerciseView: View {
-    let onCreated: (Exercise) -> Void
-
-    @Environment(\.modelContext) private var context
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var category = ExerciseCategory.barbell
-    @State private var scores: [MuscleGroup: Int] = [:]
-    @State private var persistenceFailure: String?
-
-    private var isValid: Bool {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        return !trimmed.isEmpty && trimmed.count <= 60 && scores.values.contains { $0 > 0 }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    TextField("Exercise name", text: $name)
-                    Picker("Equipment", selection: $category) {
-                        Text("Barbell").tag(ExerciseCategory.barbell)
-                        Text("Dumbbell").tag(ExerciseCategory.dumbbell)
-                        Text("Machine").tag(ExerciseCategory.machine)
-                        Text("Cable").tag(ExerciseCategory.cable)
-                        Text("Bodyweight").tag(ExerciseCategory.bodyweight)
-                    }
-                }
-                .listRowBackground(Theme.surface)
-                Section {
-                    ForEach(MuscleGroup.allCases, id: \.self) { muscle in
-                        Stepper(value: Binding(get: { scores[muscle] ?? 0 },
-                                               set: { scores[muscle] = $0 }),
-                                in: 0...5) {
-                            HStack {
-                                Text(muscle.displayName)
-                                Spacer()
-                                Text("\(scores[muscle] ?? 0)")
-                                    .monospacedDigit()
-                                    .foregroundStyle((scores[muscle] ?? 0) > 0 ? .primary : .secondary)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Muscle tension (0–5)")
-                } footer: {
-                    Text("5 = prime mover under maximal tension, 1 = lightly involved, 0 = not trained. Drives weekly volume tracking.")
-                }
-                .listRowBackground(Theme.surface)
-            }
-            .navigationTitle("New exercise")
-            .themedChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .featureList()
-            .keyboardDoneButton()
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
-                .withoutGlassBackground()
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { save() }.disabled(!isValid)
-                }
-                .withoutGlassBackground()
-            }
-            .alert("Couldn't save exercise", isPresented: Binding(
-                get: { persistenceFailure != nil },
-                set: { if !$0 { persistenceFailure = nil } })) {
-                Button("OK", role: .cancel) { persistenceFailure = nil }
-            } message: {
-                Text(persistenceFailure ?? "")
-            }
-        }
-    }
-
-    private func save() {
-        let tension = scores.filter { $0.value > 0 }
-        let exercise = Exercise(name: name.trimmingCharacters(in: .whitespaces),
-                                category: category, tension: tension, isCustom: true)
-        context.insert(exercise)
-        do {
-            try context.save()
-            dismiss()
-            onCreated(exercise)
-        } catch {
-            persistenceFailure = error.localizedDescription
         }
     }
 }
