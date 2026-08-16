@@ -225,6 +225,104 @@ enum ExerciseVideos {
         // Perfect Pull Ups | 4 Exercises to Help You Perform Pull Ups
         "Pull-Up": "KlKkUdCj6aM",
 
+        // ==== Second pass: shortest matching demo per exercise ====
+
+        // ---- ScottHermanFitness ----
+        // How To: Single-Leg Box Squat  [85s]
+        "Box Squat": "DuE_ScvXwtg",
+        // Bigger Bicep Peaks NOW! Standing Double Bicep Cable Curl  [90s]
+        "Cable Curl": "hdH6GnAgw-w",
+        // How To: Strap Chin-Up  [102s]
+        "Chin-Up": "TQCN0Cez5S8",
+        // How To: Dumbbell Concentration Curl  [101s]
+        "Concentration Curl": "Jvj2wV0vOYU",
+        // How To: Deficit Deadlift- Improve Form & Increase Your MAX  [515s]
+        "Deficit Deadlift": "m7Q8igdp3lA",
+        // How To: Weighted Dip  [125s]
+        "Dip": "2i3o0bFZT_s",
+        // How To: Flat Dumbbell Fly  [114s]
+        "Dumbbell Fly": "MxfVDZrsdZ0",
+        // How To: Single-Arm Dumbbell Overhead Extension  [120s]
+        "Dumbbell Overhead Extension": "jTQWYdWLvys",
+        // How To: Single-Leg Neutral-Grip Dumbbell Row  [85s]
+        "Dumbbell Row": "_ZEIwijWYUA",
+        // How To: Outside-Grip EZ-Bar Curl  [75s]
+        "EZ Bar Curl": "aEscWJ3dS3w",
+        // How To: Overhead Front Raise (With Plate)  [103s]
+        "Front Raise": "e8my9OOCXVo",
+        // How To: Smith Machine- Elevated-Feet Inverted Row  [82s]
+        "Inverted Row": "IrIYsh0dBt4",
+        // HOW TO: Chest "Low-To-High" Cable Fly (BIGGER UPPER CHEST) || PERFECT FORM  [188s]
+        "Low-to-High Cable Fly": "eQ_NBB6OBH4",
+        // How To: Pistol Squat - Build Leg Strength & Correct Muscle Imbalances!  [242s]
+        "Pistol Squat": "7NvOuty_Fnc",
+        // How To: Dumbbell Laying Reverse Crunch into a Floor Press  [124s]
+        "Reverse Crunch": "5oFIeO131Pk",
+        // How To: Bodyweight Reverse Lunge  [147s]
+        "Reverse Lunge": "raQl44N_REc",
+        // How To: One-Handed Reverse Wrist Curl  [70s]
+        "Reverse Wrist Curl": "KRvllKDbb3I",
+        // How To: Barbell Stiff-Leg Deadlift  [117s]
+        "Stiff-Leg Deadlift": "1uDiW5--rAE",
+
+        // ---- UNBROKEN FITNESS SOLUTIONS ----
+        // 45° Low Back Extension  [49s]
+        "Back Extension": "FDqemqkfQXg",
+        // Cable Single Arm Chest Supported Row  [31s]
+        "Chest-Supported Row": "l8lgVBjwD08",
+        // Banded Good Morning  [38s]
+        "Good Morning": "8SGcpFag5Vc",
+        // Banded Standing Pallof Press  [24s]
+        "Pallof Press": "CXmltluNLy0",
+        // Balance Disc Single Leg Romanian Deadlift  [18s]
+        "Single-Leg Romanian Deadlift": "i593XqRgPss",
+        // Dumbbell Step Up To Balance  [21s]
+        "Step-Up": "zOtwjwmGo4o",
+        // ==== Third pass: wider channels, shortest demo first ====
+
+        // ---- Bodybuilding.com ----
+        // One-Legged Cable Kickback - Leg Exercise - Bodybuilding.com  [53s]
+        "Cable Kickback": "xO5WVJGVJ2w",
+        // Walking Lunge with Weight Overhead | Exercise Guide  [65s]
+        "Walking Lunge": "OmjKyr_Q7fE",
+
+        // ---- Muscle & Strength ----
+        // Dumbbell Pullover: Chest or Back Exercise?  [197s]
+        "Dumbbell Pullover": "5YStMv6m2g8",
+
+        // ---- Renaissance Periodization ----
+        // Assisted Dip  [12s]
+        "Assisted Dip": "yZ83t4mrPrI",
+        // Cable Pull Through  [11s]
+        "Cable Pull-Through": "pv8e6OSyETE",
+        // Cable Shrug  [9s]
+        "Cable Shrug": "YykmcX2b-LY",
+        // Incline Dumbbell Curl  [17s]
+        "Incline Dumbbell Curl": "aTYlqC_JacQ",
+        // Incline Machine Chest Press  [13s]
+        "Incline Machine Chest Press": "TrTSvn5-MTk",
+        // JM Press  [14s]
+        "JM Press": "Tih5iHyELsE",
+        // Machine Chest Press  [11s]
+        "Machine Chest Press": "NwzUje3z0qY",
+        // Machine Glute Kickback  [10s]
+        "Machine Glute Kickback": "NLDBFtSNhqg",
+        // Machine Hip Thrust  [11s]
+        "Machine Hip Thrust": "ZSPmIyX9RZs",
+        // Machine Lateral Raise  [12s]
+        "Machine Lateral Raise": "0o07iGKUarI",
+        // Machine Pullover  [16s]
+        "Machine Pullover": "oxpAl14EYyc",
+        // Machine Triceps Extension  [12s]
+        "Machine Triceps Extension": "Bx8ga1BLHLE",
+        // Cable Single Arm Pushdown  [11s]
+        "Single-Arm Cable Pushdown": "Cp_bShvMY4c",
+        // Smith Machine Row  [16s]
+        "Smith Machine Row": "3QcJggd_L24",
+
+        // ---- UNBROKEN FITNESS SOLUTIONS ----
+        // EZ Bar Reverse Curl  [17s]
+        "Reverse Curl": "U63Ylqz8Qhw",
     ]
 
     private static let index: [String: String] = {
