@@ -44,6 +44,8 @@ struct LiveCardioView: View {
         }
         .onAppear {
             if tracksDistance { location.start() }
+            CardioActivityController.start(activityName: activity.displayName,
+                                           effectiveStart: startedAt)
         }
         .onDisappear { location.stop() }
         .onReceive(tick) { _ in
@@ -180,9 +182,19 @@ struct LiveCardioView: View {
             isPaused = true
             location.stop()
         }
+        syncLiveActivity()
+    }
+
+    /// The lock-screen clock is derived from a start date shifted by the paused
+    /// total, so it resumes where it stopped without per-second updates.
+    private func syncLiveActivity() {
+        CardioActivityController.update(
+            effectiveStart: startedAt.addingTimeInterval(pausedTotal),
+            pausedElapsed: isPaused ? elapsed : nil)
     }
 
     private func finish() {
+        CardioActivityController.end()
         location.stop()
         if isPaused, let pauseStartedAt {
             pausedTotal += Date.now.timeIntervalSince(pauseStartedAt)

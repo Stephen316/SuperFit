@@ -63,6 +63,9 @@ targets:
       - path: ios/SuperFit
         excludes:
           - "**/.DS_Store"
+      # Compiled into both targets: the app starts the Live Activity, the
+      # extension draws it, and they must agree on its shape.
+      - path: ios/Shared
     settings:
       base:
         INFOPLIST_FILE: ios/SuperFit/SupportingFiles/Info.plist
@@ -74,11 +77,32 @@ targets:
     dependencies:
       - package: Supabase
         product: Supabase
+      - target: SuperFitWidgets
     # The entitlements file is hand-maintained and referenced by
     # CODE_SIGN_ENTITLEMENTS above. Do not add an `entitlements:` block here —
     # that makes XcodeGen *generate* the file from `properties:`, and with none
     # given it overwrites HealthKit, CloudKit and Sign in with Apple with an
     # empty dict on every `xcodegen generate`.
+
+  # Live Activities need their own bundle: a widget extension is a separate
+  # binary the system runs, so it cannot live inside the app's source glob.
+  SuperFitWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ios/SuperFitWidgets
+        excludes:
+          - "**/.DS_Store"
+          - Info.plist
+      - path: ios/Shared
+    settings:
+      base:
+        INFOPLIST_FILE: ios/SuperFitWidgets/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.stephenh.superfit.widgets
+        # Must sit inside the app's identifier or the extension will not embed.
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
 
   SuperFitTests:
     type: bundle.unit-test

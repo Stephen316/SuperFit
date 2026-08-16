@@ -44,7 +44,10 @@ struct ActiveWorkoutView: View {
         NavigationStack {
             List {
                 if let restEndsAt {
-                    RestTimerRow(endsAt: restEndsAt) { self.restEndsAt = nil }
+                    RestTimerRow(endsAt: restEndsAt) {
+                        self.restEndsAt = nil
+                        RestActivityController.end()
+                    }
                 }
                 ForEach(exerciseSections) { exercise in
                     ExerciseSection(session: session, exercise: exercise,
@@ -174,7 +177,12 @@ struct ActiveWorkoutView: View {
     }
 
     private func startRest(_ seconds: Int) {
-        restEndsAt = Date().addingTimeInterval(TimeInterval(seconds))
+        let endsAt = Date().addingTimeInterval(TimeInterval(seconds))
+        restEndsAt = endsAt
+        // Mirrors the in-app row onto the lock screen, so the countdown survives
+        // the phone going back in a pocket between sets.
+        RestActivityController.start(
+            exercise: exerciseSections.last?.name ?? "Workout", endsAt: endsAt)
     }
 
     /// Distinct exercises in first-set order — what a saved template captures.
@@ -266,6 +274,7 @@ struct ActiveWorkoutView: View {
             return
         }
         guard session.endedAt == nil else { dismiss(); return }
+        RestActivityController.end()
         session.endedAt = .now
         if saveChanges() { showingRPE = true }
     }
