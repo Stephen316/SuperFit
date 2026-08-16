@@ -51,6 +51,14 @@ struct ActiveWorkoutView: View {
                                     onSetCompleted: startRest,
                                     onSaveFailure: { persistenceFailure = $0 })
                 }
+                // "Add set" belongs to the exercise above it; "Add exercise" is
+                // a workout-level action. Butted together on one surface they
+                // read as a pair, so a base-coloured gap divides them.
+                Color.clear
+                    .frame(height: 14)
+                    .listRowBackground(Theme.backgroundBase)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
                 Section {
                     Button {
                         pickingExercise = true
@@ -281,7 +289,13 @@ private struct ExerciseSection: View {
     }
 
     var body: some View {
-        Section(exercise.name) {
+        // The name gets the darker bar and the sets the lighter surface, so the
+        // two alternate. A plain `Section(header:)` picked up neither and the
+        // whole block read as one flat colour.
+        FeatureCategoryBar(exercise.name)
+            .listRowBackground(Theme.backgroundBase)
+            .listRowSeparator(.hidden)
+        Section {
             ForEach(sets) { set in
                 SetRow(set: set, onCompleted: onSetCompleted,
                        onSaveFailure: onSaveFailure)
@@ -302,6 +316,10 @@ private struct ExerciseSection: View {
                 Label("Add set", systemImage: "plus").font(.subheadline)
             }
         }
+        // The sets and their Add row take the content surface; the exercise
+        // name keeps the darker header behind it, so the two alternate the way
+        // a category bar and its rows do everywhere else.
+        .listRowBackground(Theme.surface)
     }
 
     private func saveChanges() {

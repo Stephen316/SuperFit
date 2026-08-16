@@ -32,15 +32,25 @@ struct SessionRPEPrompt: View {
                 .font(Theme.font(12))
                 .foregroundStyle(Theme.textSecondary)
 
-                Button("Save effort") { onComplete(Int(rating)) }
-                    .font(Theme.font(16, .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Theme.gold)
-                    )
-                    .foregroundStyle(.black)
+                // The fill and padding belong to the *label*, not to modifiers
+                // hung off the Button. Outside it they are decoration the button
+                // does not hit-test: only the glyphs of "Save effort" responded,
+                // so a finger landing anywhere else on the gold did nothing.
+                Button {
+                    onComplete(Int(rating))
+                } label: {
+                    Text("Save effort")
+                        .font(Theme.font(16, .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Theme.gold)
+                        )
+                        .foregroundStyle(.black)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(24)
             .toolbar {
