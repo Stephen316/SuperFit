@@ -13,7 +13,14 @@ struct SuperFitApp: App {
     /// regardless, so this asserts what is already true instead of changing the
     /// conformance.
     init() {
-        MainActor.assumeIsolated { ThemeAppearance.apply() }
+        MainActor.assumeIsolated {
+            ThemeAppearance.apply()
+            // Set here, before any window or intent runs, so a lock-screen
+            // Pause/Resume/End tap that relaunches the app in the background
+            // still reaches ActivityKit. LiveCardioSession stays ActivityKit-free
+            // (it compiles into the widget); this is the app-side bridge.
+            LiveCardioSession.shared.onChange = { CardioActivityController.apply($0) }
+        }
     }
 
     var body: some Scene {

@@ -1,6 +1,9 @@
 import Foundation
 #if canImport(ActivityKit)
-import ActivityKit
+// ActivityKit's `Activity` isn't Sendable-audited, so calling its async
+// update/end from the main actor otherwise warns "sending non-Sendable"; the
+// calls are genuinely fire-and-forget and safe.
+@preconcurrency import ActivityKit
 #endif
 
 /// Puts the rest countdown on the lock screen and in the Dynamic Island.

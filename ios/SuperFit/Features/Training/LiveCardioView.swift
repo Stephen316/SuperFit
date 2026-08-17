@@ -15,11 +15,12 @@ struct LiveCardioView: View {
     let activity: WorkoutActivity
 
     @State private var location = LocationTracker()
-    @State private var startedAt = Date.now
+    /// Clock and pause state live in the shared session, not here, so the
+    /// lock-screen App Intents drive the same session this screen does.
+    private let session = LiveCardioSession.shared
+    /// A per-tick mirror of `session.elapsed` (a computed, time-based value that
+    /// Observation can't fire on) so the big timer refreshes each second.
     @State private var elapsed: TimeInterval = 0
-    @State private var isPaused = false
-    @State private var pausedTotal: TimeInterval = 0
-    @State private var pauseStartedAt: Date?
     @State private var showingDiscard = false
     @State private var showingRPE = false
 
@@ -44,16 +45,25 @@ struct LiveCardioView: View {
         }
         .onAppear {
             if tracksDistance { location.start() }
-            CardioActivityController.start(activityName: activity.displayName,
-                                           effectiveStart: startedAt)
+            session.start(activityName: activity.displayName)
+            elapsed = 0
         }
         .onDisappear { location.stop() }
         .onReceive(tick) { _ in
-            guard !isPaused else { return }
-            elapsed = Date.now.timeIntervalSince(startedAt) - pausedTotal
+            elapsed = session.elapsed
+        }
+        // The Live Activity's End button stops the session from outside this
+        // view; when it does, run the same finish flow so the workout is saved.
+        .onChange(of: session.finishRequestedExternally) { _, requested in
+            guard requested else { return }
+            location.stop()
+            elapsed = session.lastElapsed
+            showingRPE = true
         }
         .confirmationDialog("Discard this workout?", isPresented: $showingDiscard) {
             Button("Discard", role: .destructive) {
+                session.stop()
+                session.clear()
                 location.stop()
                 dismiss()
             }
@@ -142,7 +152,7 @@ struct LiveCardioView: View {
             Button {
                 togglePause()
             } label: {
-                Text(isPaused ? "Resume" : "Pause")
+                Text(session.isPaused ? "Resume" : "Pause")
                     .font(Theme.font(16, .medium))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -169,44 +179,29 @@ struct LiveCardioView: View {
         }
     }
 
+    /// Pause and resume both go through the shared session, which the app
+    /// reflects onto the Live Activity — so tapping here or on the lock screen
+    /// lands in the same place. GPS is stopped while paused to save power.
     private func togglePause() {
-        if isPaused {
-            if let pauseStartedAt {
-                pausedTotal += Date.now.timeIntervalSince(pauseStartedAt)
-            }
-            pauseStartedAt = nil
-            isPaused = false
-            if tracksDistance { location.start() }
-        } else {
-            pauseStartedAt = .now
-            isPaused = true
+        session.toggle()
+        if session.isPaused {
             location.stop()
+        } else if tracksDistance {
+            location.start()
         }
-        syncLiveActivity()
-    }
-
-    /// The lock-screen clock is derived from a start date shifted by the paused
-    /// total, so it resumes where it stopped without per-second updates.
-    private func syncLiveActivity() {
-        CardioActivityController.update(
-            effectiveStart: startedAt.addingTimeInterval(pausedTotal),
-            pausedElapsed: isPaused ? elapsed : nil)
     }
 
     private func finish() {
-        CardioActivityController.end()
+        elapsed = session.stop()
         location.stop()
-        if isPaused, let pauseStartedAt {
-            pausedTotal += Date.now.timeIntervalSince(pauseStartedAt)
-        }
-        elapsed = max(Date.now.timeIntervalSince(startedAt) - pausedTotal, 0)
-        isPaused = true
         showingRPE = true
     }
 
     private func saveFinishedWorkout(rpe: Int?) {
+        let startedAt = session.startedAt
+        let duration = max(session.lastElapsed, 0)
         let record = WorkoutRecord(startedAt: startedAt,
-                                   endedAt: startedAt.addingTimeInterval(max(elapsed, 0)),
+                                   endedAt: startedAt.addingTimeInterval(duration),
                                    activity: activity,
                                    source: .liveSession)
         record.sourceName = "iPhone"
@@ -230,6 +225,7 @@ struct LiveCardioView: View {
                                  distanceMetres: record.distanceMetres)
         Task { try? await HealthKitManager().saveWorkout(write) }
 
+        session.clear()
         showingRPE = false
         dismiss()
     }
