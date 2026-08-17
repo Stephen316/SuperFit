@@ -22,10 +22,12 @@ struct HistoryView: View {
     @Query private var sleep: [SleepData]
     @Query private var sessions: [TrainingSession]
     @Query private var exercises: [Exercise]
+    @Query private var workouts: [WorkoutRecord]
 
     @State private var range = HistoryRange.quarter
     @State private var selectedMuscle = MuscleGroup.chest
     @State private var selectedExerciseID: UUID?
+    @State private var selectedActivity: WorkoutActivity?
     @State private var showingRate = false
 
     init() {
@@ -44,6 +46,8 @@ struct HistoryView: View {
         _sleep = Query(filter: #Predicate { $0.date >= chartCutoff },
                        sort: \SleepData.date)
         _sessions = Query(filter: #Predicate { $0.startedAt >= chartCutoff })
+        _workouts = Query(filter: #Predicate { $0.startedAt >= chartCutoff },
+                          sort: \WorkoutRecord.startedAt)
     }
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
@@ -62,6 +66,7 @@ struct HistoryView: View {
                     recoveryCard
                     vitalsCard
                     sleepCard
+                    if !distanceActivities.isEmpty { distanceCard }
                     volumeCard
                     if selectedExerciseID != nil { strengthCard }
                 }
@@ -73,7 +78,10 @@ struct HistoryView: View {
         .navigationTitle("Trends")
         .navigationBarTitleDisplayMode(.inline)
         .themedChrome()
-        .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
+        .task {
+            if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID }
+            if selectedActivity == nil { selectedActivity = distanceActivities.first }
+        }
     }
 
     private var rangePicker: some View {
@@ -431,6 +439,62 @@ struct HistoryView: View {
             isEmpty: range.showsDailyPoints ? points.count < 2 : mean.isEmpty,
             emptyMessage: "No sleep recorded in this period."
         )
+    }
+
+    // MARK: - Cardio
+
+    private var cardioRecords: [CardioDistanceRecord] {
+        workouts.map {
+            CardioDistanceRecord(date: $0.startedAt, activity: $0.activity,
+                                 distanceMetres: $0.distanceMetres ?? 0)
+        }
+    }
+
+    /// Only activities with a logged distance, so the picker never offers an
+    /// activity with nothing to plot.
+    private var distanceActivities: [WorkoutActivity] {
+        HistorySeries.loggedDistanceActivities(cardioRecords, from: start, to: .now)
+    }
+
+    /// Per-session distance for the chosen activity — the trend that says whether
+    /// the runs (or swims, rides) are getting longer.
+    private var distanceCard: some View {
+        let activity = selectedActivity ?? distanceActivities.first ?? .running
+        let points = HistorySeries.distanceTrend(cardioRecords, activity: activity,
+                                                 from: start, to: .now)
+            .map { HistoryPoint(date: $0.date, value: units.displayDistance($0.value)) }
+        let delta = HistorySeries.change(points, edgeDays: 14)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Picker("Activity", selection: $selectedActivity) {
+                ForEach(distanceActivities, id: \.self) { a in
+                    Text(a.displayName).tag(Optional(a))
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(Theme.gold)
+
+            HistoryChartCard(
+                title: "Distance — \(activity.displayName)",
+                headline: points.last.map {
+                    String(format: "%.2f %@", $0.value, units.distanceUnit) },
+                change: delta.map { String(format: "%+.2f %@", $0, units.distanceUnit) },
+                changeIsGood: delta.map { $0 >= 0 },
+                yLabel: { String(format: "%.1f", $0) },
+                content: {
+                    ForEach(points) { p in
+                        LineMark(x: .value("Date", p.date), y: .value("Distance", p.value))
+                            .foregroundStyle(Theme.gold)
+                            .interpolationMethod(.monotone)
+                        PointMark(x: .value("Date", p.date), y: .value("Distance", p.value))
+                            .foregroundStyle(Theme.gold)
+                            .symbolSize(20)
+                    }
+                },
+                isEmpty: points.count < 2,
+                emptyMessage: "Log a couple of \(activity.displayName.lowercased()) sessions with distance to see a trend."
+            )
+        }
     }
 
     // MARK: - Training

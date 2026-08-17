@@ -16,6 +16,14 @@ struct HistoryBand: Sendable, Identifiable {
     var id: Date { date }
 }
 
+/// A distance-bearing workout reduced to what a distance trend needs — the
+/// value-type input to `HistorySeries`, so the shaping stays free of SwiftData.
+struct CardioDistanceRecord: Sendable {
+    let date: Date
+    let activity: WorkoutActivity
+    let distanceMetres: Double
+}
+
 /// Turns stored records into chartable series.
 ///
 /// Pure and Sendable — no SwiftData, no I/O — so the shaping is testable without
@@ -252,6 +260,36 @@ struct HistorySeries: Sendable {
     /// Trailing mean, for laying a readable line over noisy daily points.
     /// Returns nothing until a full window exists rather than showing a partial
     /// average that looks like a trend.
+    // MARK: Cardio
+
+    /// Per-session distance (metres) for one activity within a range,
+    /// chronological. Only sessions that actually recorded a distance count — a
+    /// GPS-less run or a strength session reads as no data, never a zero, so the
+    /// trend can't be dragged down by an unmeasured session.
+    static func distanceTrend(_ records: [CardioDistanceRecord],
+                              activity: WorkoutActivity,
+                              from start: Date, to end: Date) -> [HistoryPoint] {
+        records
+            .filter { $0.activity == activity && $0.date >= start && $0.date <= end
+                      && $0.distanceMetres > 0 }
+            .sorted { $0.date < $1.date }
+            .map { HistoryPoint(date: $0.date, value: $0.distanceMetres) }
+    }
+
+    /// Distance activities the user actually logged in the range, most-frequent
+    /// first — the picker's options, so it never offers one with no data.
+    static func loggedDistanceActivities(_ records: [CardioDistanceRecord],
+                                         from start: Date, to end: Date) -> [WorkoutActivity] {
+        var counts: [WorkoutActivity: Int] = [:]
+        for record in records
+        where record.date >= start && record.date <= end && record.distanceMetres > 0 {
+            counts[record.activity, default: 0] += 1
+        }
+        return counts.sorted {
+            $0.value != $1.value ? $0.value > $1.value : $0.key.rawValue < $1.key.rawValue
+        }.map(\.key)
+    }
+
     static func rollingMean(_ points: [HistoryPoint], window: Int = 7) -> [HistoryPoint] {
         guard points.count >= window else { return [] }
         let sorted = points.sorted { $0.date < $1.date }

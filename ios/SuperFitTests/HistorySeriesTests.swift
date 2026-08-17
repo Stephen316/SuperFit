@@ -308,6 +308,40 @@ struct HistorySeriesTests {
         #expect(HistorySeries.hitRate(points) == 0.5)
         #expect(HistorySeries.hitRate([]) == nil)
     }
+
+    // MARK: Cardio distance
+
+    private func cardioRecords() -> [CardioDistanceRecord] {
+        [
+            .init(date: day(-20), activity: .running, distanceMetres: 5_000),
+            .init(date: day(-10), activity: .running, distanceMetres: 8_000),
+            .init(date: day(-30), activity: .running, distanceMetres: 3_000),
+            .init(date: day(-5), activity: .poolSwimming, distanceMetres: 1_500),
+            .init(date: day(-3), activity: .running, distanceMetres: 0),      // no distance
+            .init(date: day(-100), activity: .running, distanceMetres: 9_000), // out of range
+        ]
+    }
+
+    @Test func distanceTrendFiltersSortsAndDropsZeroAndOutOfRange() {
+        let points = HistorySeries.distanceTrend(cardioRecords(), activity: .running,
+                                                 from: day(-40), to: day(0))
+        #expect(points.map(\.value) == [3_000, 5_000, 8_000])
+        #expect(points.map(\.date) == [day(-30), day(-20), day(-10)])
+    }
+
+    @Test func distanceTrendIsActivitySpecific() {
+        let points = HistorySeries.distanceTrend(cardioRecords(), activity: .poolSwimming,
+                                                 from: day(-40), to: day(0))
+        #expect(points.map(\.value) == [1_500])
+    }
+
+    @Test func loggedDistanceActivitiesRankByFrequencyAndExcludeEmpty() {
+        let activities = HistorySeries.loggedDistanceActivities(cardioRecords(),
+                                                                from: day(-40), to: day(0))
+        // Running (3 distance-bearing sessions in range) before swimming (1);
+        // the 0 m run adds no running count.
+        #expect(activities == [.running, .poolSwimming])
+    }
 }
 
 // `@retroactive` because `HistoryPoint` belongs to the app module, not the test
