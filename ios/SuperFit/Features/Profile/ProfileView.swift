@@ -30,6 +30,10 @@ struct ProfileView: View {
                             Text(g.displayName).tag(g)
                         }
                     }
+                    // The section header already reads "Goal"; a visible picker
+                    // label repeats it. Hide the label (kept for VoiceOver) so
+                    // the row shows only the selected goal.
+                    .labelsHidden()
                 }
                 .listRowBackground(Theme.surface)
 

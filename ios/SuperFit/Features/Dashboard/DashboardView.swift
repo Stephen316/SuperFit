@@ -750,10 +750,19 @@ struct SettingsGear: View {
 
     var body: some View {
         Button { showing = true } label: {
-            Image(systemName: "gearshape")
-                .font(.system(size: 20))
-                .foregroundStyle(Theme.textPrimary)
+            // Matches the home screen's `circleButton`: a 40pt Theme.wash
+            // circle with a size-17 icon in a 44pt hit area, so the gear looks
+            // the same in every tab's toolbar as it does on the Dashboard.
+            ZStack {
+                Circle().fill(Theme.wash).frame(width: 40, height: 40)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Settings")
         .sheet(isPresented: $showing) { SettingsView() }
     }
