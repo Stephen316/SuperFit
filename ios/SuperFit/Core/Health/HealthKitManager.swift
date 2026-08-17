@@ -36,9 +36,68 @@ actor HealthKitManager: HealthProvider {
         return t
     }
 
+    /// What the app writes back: the workout itself plus the energy and distance
+    /// samples that make it read as a real session in Apple Fitness. Kept as
+    /// narrow as the write path actually uses — no HR, since an iPhone-only
+    /// session records none.
+    private var shareTypes: Set<HKSampleType> {
+        var t: Set<HKSampleType> = [HKObjectType.workoutType()]
+        func q(_ id: HKQuantityTypeIdentifier) { if let x = HKQuantityType.quantityType(forIdentifier: id) { t.insert(x) } }
+        q(.activeEnergyBurned)
+        q(.distanceWalkingRunning); q(.distanceCycling); q(.distanceSwimming)
+        return t
+    }
+
     func requestAuthorization() async throws {
         guard isAvailable else { throw HealthError.unavailable }
-        try await store.requestAuthorization(toShare: [], read: readTypes)
+        try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+    }
+
+    // MARK: Write-back
+
+    /// Saves a SuperFit-tracked workout to HealthKit via `HKWorkoutBuilder`, so a
+    /// run or ride started in the app lands in Apple Health and Fitness alongside
+    /// watch workouts. Returns quietly when HealthKit is unavailable, the
+    /// interval is empty, or the user hasn't granted write access — the builder
+    /// throws in the last case and the caller treats a failed write as best-effort.
+    func saveWorkout(_ write: WorkoutWrite) async throws {
+        guard isAvailable, write.end > write.start else { return }
+
+        let config = HKWorkoutConfiguration()
+        config.activityType = write.activity.healthKitType
+
+        let builder = HKWorkoutBuilder(healthStore: store, configuration: config, device: .local())
+        try await builder.beginCollection(at: write.start)
+
+        var samples: [HKSample] = []
+        if let kcal = write.activeEnergyKcal, kcal > 0,
+           let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+            let qty = HKQuantity(unit: .kilocalorie(), doubleValue: kcal)
+            samples.append(HKQuantitySample(type: energyType, quantity: qty,
+                                            start: write.start, end: write.end))
+        }
+        if let metres = write.distanceMetres, metres > 0,
+           let distanceID = distanceIdentifier(for: config.activityType),
+           let distanceType = HKQuantityType.quantityType(forIdentifier: distanceID) {
+            let qty = HKQuantity(unit: .meter(), doubleValue: metres)
+            samples.append(HKQuantitySample(type: distanceType, quantity: qty,
+                                            start: write.start, end: write.end))
+        }
+        if !samples.isEmpty { try await builder.addSamples(samples) }
+
+        try await builder.endCollection(at: write.end)
+        _ = try await builder.finishWorkout()
+    }
+
+    /// Distance is a per-modality quantity type in HealthKit; only the activities
+    /// SuperFit can measure a distance for map to one.
+    private func distanceIdentifier(for type: HKWorkoutActivityType) -> HKQuantityTypeIdentifier? {
+        switch type {
+        case .running, .walking, .hiking: return .distanceWalkingRunning
+        case .cycling: return .distanceCycling
+        case .swimming: return .distanceSwimming
+        default: return nil
+        }
     }
 
     // MARK: Body
@@ -170,6 +229,7 @@ actor HealthKitManager: HealthProvider {
         s.distanceMetres = distance
         s.swimStrokeCount = stat(.swimmingStrokeCount, .count())
         s.sourceName = workout.sourceRevision.source.name
+        s.sourceBundleID = workout.sourceRevision.source.bundleIdentifier
         s.elevationGainMetres = (meta[HKMetadataKeyElevationAscended] as? HKQuantity)?
             .doubleValue(for: .meter())
         s.swimStrokeStyle = (meta[HKMetadataKeySwimmingStrokeStyle] as? Int)

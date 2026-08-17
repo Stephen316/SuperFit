@@ -218,6 +218,18 @@ struct LiveCardioView: View {
         }
         context.insert(record)
         try? context.save()
+
+        // Mirror the session into HealthKit so it appears in Apple Health and
+        // Fitness. Best-effort: an unauthorised or unavailable store just means
+        // the workout stays in SuperFit only. The importer skips our own
+        // authored copy on the next sync, so this never doubles the record.
+        let write = WorkoutWrite(start: record.startedAt, end: record.endedAt,
+                                 activity: record.activity,
+                                 activeEnergyKcal: record.activeEnergyKcal > 0
+                                     ? record.activeEnergyKcal : nil,
+                                 distanceMetres: record.distanceMetres)
+        Task { try? await HealthKitManager().saveWorkout(write) }
+
         showingRPE = false
         dismiss()
     }

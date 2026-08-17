@@ -169,8 +169,23 @@ struct WorkoutSample: Sendable {
     var heartRateSegments: [HeartRateSegment] = []
     /// Device or app that recorded it — "Apple Watch", "Garmin Connect".
     var sourceName: String?
+    /// Bundle identifier of the app that wrote the workout. Lets the importer
+    /// recognise — and skip — the workouts SuperFit itself wrote to HealthKit,
+    /// which would otherwise re-import as duplicates of sessions it already has.
+    var sourceBundleID: String?
 
     var durationSeconds: Double { end.timeIntervalSince(start) }
+}
+
+/// A workout SuperFit tracked itself, described for writing back to HealthKit so
+/// it shows up in Apple Health and the Fitness app. Only what SuperFit actually
+/// measured is carried; an absent value is written as no sample, never a zero.
+struct WorkoutWrite: Sendable {
+    let start: Date
+    let end: Date
+    let activity: WorkoutActivity
+    var activeEnergyKcal: Double?
+    var distanceMetres: Double?
 }
 
 struct DailyActivity: Sendable {
@@ -194,4 +209,12 @@ protocol HealthProvider: Sendable {
     func restingHeartRate(in range: DateInterval) async throws -> [SampleValue]
     func hrv(in range: DateInterval) async throws -> [SampleValue]
     func vo2Max(in range: DateInterval) async throws -> [SampleValue]
+    /// Writes a SuperFit-tracked workout to HealthKit so it appears in Apple
+    /// Health/Fitness. Providers that can't write (the non-Apple stub, test
+    /// doubles, Garmin) inherit the no-op default below.
+    func saveWorkout(_ write: WorkoutWrite) async throws
+}
+
+extension HealthProvider {
+    func saveWorkout(_ write: WorkoutWrite) async throws {}
 }

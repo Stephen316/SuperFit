@@ -54,6 +54,28 @@ struct WorkoutImportTests {
         #expect(decisions.map(\.action) == [.insert, .skipDuplicateInBatch])
     }
 
+    /// SuperFit now writes its own workouts to HealthKit; those come back through
+    /// the observer authored by this app. Re-importing them would duplicate a
+    /// session already stored, so the sync must drop anything it authored while
+    /// still importing genuine watch/third-party workouts.
+    @MainActor
+    @Test func workoutsAuthoredBySuperFitAreNotReimported() throws {
+        let context = try makeContext()
+        let service = WorkoutSyncService(garmin: nil, context: context)
+
+        var ours = sample("ours")
+        ours.sourceBundleID = Bundle.main.bundleIdentifier
+        var watch = sample("watch", offsetMinutes: 120)
+        watch.sourceBundleID = "com.apple.health"
+
+        let inserted = service.apply([ours, watch])
+
+        let records = try context.fetch(FetchDescriptor<WorkoutRecord>())
+        #expect(inserted == 1)
+        #expect(records.count == 1)
+        #expect(records.first?.externalID == "watch")
+    }
+
     // MARK: Time-based reconciliation
 
     @Test func watchStrengthOverlappingALoggedSessionIsRetainedForMerging() {

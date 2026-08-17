@@ -275,8 +275,16 @@ struct ActiveWorkoutView: View {
         }
         guard session.endedAt == nil else { dismiss(); return }
         RestActivityController.end()
-        session.endedAt = .now
+        let endedAt = Date.now
+        session.endedAt = endedAt
         if saveChanges() { showingRPE = true }
+
+        // Mirror the strength session into HealthKit so it appears in Apple
+        // Health/Fitness. Duration and type only — energy isn't tracked for a
+        // set-logged session. Best-effort; the importer skips our own copy.
+        let write = WorkoutWrite(start: session.startedAt, end: endedAt,
+                                 activity: .strengthTraining)
+        Task { try? await HealthKitManager().saveWorkout(write) }
     }
 
     private func continueAfterEffortRating() {

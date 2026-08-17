@@ -64,6 +64,10 @@ final class WorkoutSyncService {
     }
 
     private func apply(_ samples: [WorkoutSample], in range: DateInterval) -> Int {
+        // Workouts SuperFit wrote to HealthKit itself come back through the same
+        // observer. Re-importing them would duplicate a session the app already
+        // stored, so drop anything this app authored before deciding.
+        let samples = samples.filter { $0.sourceBundleID != Bundle.main.bundleIdentifier }
         let existing = fetchRecords(in: range)
         var byExternalID = Dictionary(
             existing.compactMap { r in r.externalID.map { ($0, r) } },
