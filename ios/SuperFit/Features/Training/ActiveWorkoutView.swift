@@ -103,6 +103,13 @@ struct ActiveWorkoutView: View {
                 }
                 .withoutGlassBackground()
             }
+            // The rest countdown is this workout's Live Activity. End it whenever
+            // the workout screen closes — Close, discard, finish or swipe-dismiss
+            // — so a cancelled workout never leaves a timer running on the lock
+            // screen. Idempotent: finish() already ends it, and end() no-ops when
+            // nothing is live. onDisappear only fires on real dismissal here (the
+            // sub-screens are sheets/covers), never on backgrounding mid-rest.
+            .onDisappear { RestActivityController.end() }
             .sheet(isPresented: $pickingExercise) {
                 ExercisePickerView { exercise in
                     addSet(for: exercise)
