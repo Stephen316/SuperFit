@@ -45,7 +45,9 @@ enum MuscleGroup: String, Codable, CaseIterable, Sendable {
     var displayName: String {
         switch self {
         case .upperChest:      return "Upper chest"
-        case .chest:           return "Chest"
+        // Both heads of pec major. Named by position because that is how the
+        // bench angle addresses them; the serratus is next door, not chest.
+        case .chest:           return "Lower chest"
         case .serratus:        return "Serratus"
         case .frontDelts:      return "Front delts"
         case .sideDelts:       return "Side delts"

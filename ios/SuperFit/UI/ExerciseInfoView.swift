@@ -66,9 +66,10 @@ struct ExerciseInfoView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Play \(exercise.name) demonstration on YouTube")
 
-                Text("Opens in YouTube")
+                Text("Opens in YouTube — needs an internet connection")
                     .font(Theme.text(13))
                     .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
 
                 flagControl
                 Spacer(minLength: 0)

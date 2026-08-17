@@ -46,7 +46,7 @@ struct ConnectedServicesView: View {
             } header: {
                 SettingsSectionHeader(
                     title: "Food search",
-                    information: "A free USDA key adds more generic and branded foods. Without one, search still uses Open Food Facts and foods you've logged before."
+                    information: "A free USDA key adds more generic and branded foods. Without one, search still uses Open Food Facts and foods you've logged before. Verifying a key and searching for new foods both need an internet connection."
                 )
             }
 
@@ -100,7 +100,7 @@ struct ConnectedServicesView: View {
                     title: "Garmin",
                     information: isLinked
                         ? "Garmin adds HRV and detailed sleep that Garmin Connect does not share with Apple Health."
-                        : "Garmin can fill gaps in recovery data. It requires a separately hosted SuperFit server, configured under Server settings."
+                        : "Garmin can fill gaps in recovery data. It requires a separately hosted SuperFit server, configured under Server settings. Connecting and syncing need an internet connection."
                 )
             }
         }
