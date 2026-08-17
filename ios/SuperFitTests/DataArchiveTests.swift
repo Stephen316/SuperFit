@@ -65,6 +65,22 @@ struct DataArchiveTests {
         entry.startedOn = Date(timeIntervalSince1970: 1_700_000_000)
         context.insert(entry)
 
+        let run = WorkoutRecord(startedAt: Date(timeIntervalSince1970: 1_700_050_000),
+                                endedAt: Date(timeIntervalSince1970: 1_700_052_400),
+                                activity: .running, source: .appleHealth)
+        run.externalID = "HK-RUN-1"
+        run.activeEnergyKcal = 512
+        run.distanceMetres = 8_200
+        run.avgHeartRate = 148
+        context.insert(run)
+
+        let mealTemplate = SavedMeal(name: "Post-workout shake")
+        context.insert(mealTemplate)
+        let mealItem = SavedMealItem(foodID: milk.id, servingGrams: 400,
+                                     foodName: "Whole milk")
+        mealItem.meal = mealTemplate
+        context.insert(mealItem)
+
         try? context.save()
     }
 
@@ -85,6 +101,10 @@ struct DataArchiveTests {
         #expect(archive.sessions.first?.sets.count == 1)
         #expect(archive.supplements.count == 1)
         #expect(archive.supplementEntries.count == 1)
+        #expect(archive.workouts?.count == 1)
+        #expect(archive.workouts?.first?.distanceMetres == 8_200)
+        #expect(archive.savedMeals?.count == 1)
+        #expect(archive.savedMeals?.first?.items.count == 1)
     }
 
     @Test func backgroundExporterCapturesSavedData() async throws {
@@ -147,6 +167,19 @@ struct DataArchiveTests {
         #expect(hydration.count == 1)
         #expect(hydration.first?.millilitres == 1_750)
         #expect(try fresh.fetch(FetchDescriptor<HydrationSettings>()).first?.dailyGoalMl == 2_800)
+
+        let workouts = try fresh.fetch(FetchDescriptor<WorkoutRecord>())
+        #expect(workouts.count == 1)
+        #expect(workouts.first?.externalID == "HK-RUN-1")
+        #expect(workouts.first?.activity == .running)
+        #expect(workouts.first?.distanceMetres == 8_200)
+        #expect(workouts.first?.avgHeartRate == 148)
+
+        let meals = try fresh.fetch(FetchDescriptor<SavedMeal>())
+        #expect(meals.count == 1)
+        #expect(meals.first?.name == "Post-workout shake")
+        #expect(meals.first?.orderedItems.first?.servingGrams == 400)
+        #expect(meals.first?.orderedItems.first?.foodName == "Whole milk")
     }
 
     // MARK: Merge safety
@@ -170,6 +203,42 @@ struct DataArchiveTests {
         #expect(try fresh.fetch(FetchDescriptor<TrainingSession>()).count == 1)
         #expect(try fresh.fetch(FetchDescriptor<Supplement>()).count == 1)
         #expect(try fresh.fetch(FetchDescriptor<HydrationLog>()).count == hydrationFirst)
+        #expect(try fresh.fetch(FetchDescriptor<WorkoutRecord>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<SavedMeal>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<SavedMealItem>()).count == 1)
+    }
+
+    /// A HealthKit workout restored from a backup and then re-synced by the
+    /// import path share an `externalID`; the restore must recognise it and not
+    /// leave two rows for one run.
+    @Test func restoredWorkoutDoesNotDuplicateAnExistingExternalID() throws {
+        var archive = DataArchive()
+        archive.workouts = [.init(
+            id: UUID(),
+            externalID: "HK-RUN-1",
+            startedAt: Date(timeIntervalSince1970: 1_700_050_000),
+            endedAt: Date(timeIntervalSince1970: 1_700_052_400),
+            activity: WorkoutActivity.running.rawValue,
+            source: WorkoutSource.appleHealth.rawValue,
+            sourceName: nil, activeEnergyKcal: 512, totalEnergyKcal: nil,
+            distanceMetres: 8_200, avgHeartRate: 148, maxHeartRate: nil,
+            minHeartRate: nil, elevationGainMetres: nil, avgCadence: nil,
+            avgPowerWatts: nil, swimStrokeCount: nil, swimStrokeStyle: nil,
+            lapsJSON: nil, heartRateSegmentsJSON: nil, perceivedExertion: 0, notes: nil)]
+
+        let context = try makeContext()
+        // The same run already present under its own local id but same externalID.
+        let synced = WorkoutRecord(startedAt: Date(timeIntervalSince1970: 1_700_050_000),
+                                   endedAt: Date(timeIntervalSince1970: 1_700_052_400),
+                                   activity: .running, source: .appleHealth)
+        synced.externalID = "HK-RUN-1"
+        context.insert(synced)
+        try context.save()
+
+        let result = DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        #expect(try context.fetch(FetchDescriptor<WorkoutRecord>()).count == 1)
+        #expect(result.skipped == 1)
     }
 
     @Test func mergeKeepsDataThatIsNotInTheArchive() throws {
@@ -267,6 +336,10 @@ struct DataArchiveTests {
         let names = try fresh.fetch(FetchDescriptor<NutritionLog>()).compactMap(\.foodName)
         #expect(!names.contains("From the other account"))
         #expect(names.contains("Chicken breast"))
+        // A replace erases first, so the archived workout and saved meal are the
+        // only reason either survives — the exact case this fix exists for.
+        #expect(try fresh.fetch(FetchDescriptor<WorkoutRecord>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<SavedMeal>()).count == 1)
     }
 
     /// Built-in exercises are re-seeded on every launch with fresh ids, so an
@@ -415,6 +488,9 @@ struct DataArchiveTests {
         #expect(try context.fetch(FetchDescriptor<Supplement>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<HydrationLog>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<HydrationSettings>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<WorkoutRecord>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<SavedMeal>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<SavedMealItem>()).isEmpty)
     }
 
 }

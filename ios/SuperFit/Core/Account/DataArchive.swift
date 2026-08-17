@@ -14,22 +14,18 @@ import SwiftData
 /// absent here is gone for good. Read the list below as the definition of what
 /// survives that, not as a summary of the schema.
 ///
-/// Two kinds of omission, for opposite reasons:
+/// The only omission is **derived data, rebuilt rather than carried.** Metabolic
+/// estimates, recovery scores and detected cyclical patterns are recomputed by
+/// `AggregationService.runAll()` at the end of a restore. Archiving them would
+/// only create a way for a restored file to disagree with the data it came from.
 ///
-/// - **Derived, so rebuilt rather than carried.** Metabolic estimates, recovery
-///   scores and detected cyclical patterns are recomputed by
-///   `AggregationService.runAll()` at the end of a restore. Archiving them would
-///   only create a way for a restored file to disagree with the data it came
-///   from.
-/// - **User data, deliberately not carried (for now).** `WorkoutRecord` — runs,
-///   rides, swims, watch imports — and `SavedMeal`/`SavedMealItem`. A product
-///   decision, not an oversight: what the calorie targets need is
-///   `DailyEnergy`, which *is* archived, so expenditure history survives while
-///   the individual sessions do not. HealthKit-sourced workouts return on the
-///   next sync within its rolling 90-day window; anything tracked in the app or
-///   entered by hand does not, and neither do meal templates. Adding
-///   `WorkoutDTO` and `SavedMealDTO` is the fix whenever that trade stops being
-///   acceptable.
+/// Everything a user creates *is* carried, including `WorkoutRecord` (runs,
+/// rides, swims, watch imports) and `SavedMeal`/`SavedMealItem`: a hand-entered
+/// or app-tracked workout has no other way back after a `.replace` restore, and
+/// a move to a different Apple ID would otherwise lose every saved meal.
+/// HealthKit-sourced workouts dedupe on `externalID` — the same idempotency key
+/// the import path uses — so a restored file and a later re-sync converge on one
+/// row rather than doubling the session.
 struct DataArchive: Codable, Sendable {
     static let currentVersion = 1
 
@@ -51,6 +47,12 @@ struct DataArchive: Codable, Sendable {
     var sleep: [SleepDTO] = []
     var vitals: [VitalsDTO] = []
     var energy: [EnergyDTO] = []
+    /// Optional so archives written before workouts and saved meals were carried
+    /// decode rather than throwing: a missing key reads as nil (no rows), exactly
+    /// as a pre-workout backup should. This is what lets the format grow without
+    /// bumping `version`.
+    var workouts: [WorkoutDTO]?
+    var savedMeals: [SavedMealDTO]?
 
     // MARK: - DTOs
     //
@@ -155,6 +157,41 @@ struct DataArchive: Codable, Sendable {
         var date: Date, active: Double, basal: Double
         var steps: Int, distanceKm: Double, flights: Int
     }
+
+    struct WorkoutDTO: Codable, Sendable {
+        var id: UUID
+        /// The source's own identifier (HealthKit's workout UUID). Present makes
+        /// a restore idempotent against a later re-sync; nil for app-tracked or
+        /// hand-entered sessions, which fall back to `id`.
+        var externalID: String?
+        var startedAt: Date, endedAt: Date
+        var activity: String, source: String
+        var sourceName: String?
+        var activeEnergyKcal: Double
+        var totalEnergyKcal: Double?
+        var distanceMetres: Double?
+        var avgHeartRate: Double?, maxHeartRate: Double?, minHeartRate: Double?
+        var elevationGainMetres: Double?
+        var avgCadence: Double?, avgPowerWatts: Double?
+        var swimStrokeCount: Double?, swimStrokeStyle: String?
+        /// Laps and minute-level heart rate are carried as the model's own JSON
+        /// blobs — lossless, and Data is Sendable, so the DTO stays Sendable
+        /// without conforming the sample types.
+        var lapsJSON: Data?
+        var heartRateSegmentsJSON: Data?
+        var perceivedExertion: Int
+        var notes: String?
+    }
+
+    struct SavedMealDTO: Codable, Sendable {
+        var id: UUID, name: String, createdAt: Date, lastLoggedAt: Date?
+        var items: [ItemDTO]
+
+        struct ItemDTO: Codable, Sendable {
+            var id: UUID, foodID: UUID?, foodName: String?
+            var servingGrams: Double, addedAt: Date
+        }
+    }
 }
 
 enum DataArchiveService {
@@ -254,6 +291,27 @@ enum DataArchiveService {
         archive.energy = fetch(context).map { (e: DailyEnergy) in
             .init(date: e.date, active: e.activeEnergyKcal, basal: e.basalEnergyKcal,
                   steps: e.steps, distanceKm: e.distanceKm, flights: e.flightsClimbed)
+        }
+        archive.workouts = fetch(context).map { (w: WorkoutRecord) in
+            .init(id: w.id, externalID: w.externalID,
+                  startedAt: w.startedAt, endedAt: w.endedAt,
+                  activity: w.activityRaw, source: w.sourceRaw, sourceName: w.sourceName,
+                  activeEnergyKcal: w.activeEnergyKcal, totalEnergyKcal: w.totalEnergyKcal,
+                  distanceMetres: w.distanceMetres,
+                  avgHeartRate: w.avgHeartRate, maxHeartRate: w.maxHeartRate,
+                  minHeartRate: w.minHeartRate, elevationGainMetres: w.elevationGainMetres,
+                  avgCadence: w.avgCadence, avgPowerWatts: w.avgPowerWatts,
+                  swimStrokeCount: w.swimStrokeCount, swimStrokeStyle: w.swimStrokeStyle,
+                  lapsJSON: w.lapsJSON, heartRateSegmentsJSON: w.heartRateSegmentsJSON,
+                  perceivedExertion: w.perceivedExertion, notes: w.notes)
+        }
+        archive.savedMeals = fetch(context).map { (m: SavedMeal) in
+            .init(id: m.id, name: m.name, createdAt: m.createdAt,
+                  lastLoggedAt: m.lastLoggedAt,
+                  items: m.orderedItems.map {
+                      .init(id: $0.id, foodID: $0.foodID, foodName: $0.foodName,
+                            servingGrams: $0.servingGrams, addedAt: $0.addedAt)
+                  })
         }
         return archive
     }
@@ -553,6 +611,65 @@ enum DataArchiveService {
             row.distanceKm = e.distanceKm
             row.flightsClimbed = e.flights
             context.insert(row)
+            result.added += 1
+        }
+
+        // Workouts dedupe on `externalID` first — the same key the import path
+        // uses — so a restored HealthKit session and a later re-sync land on one
+        // row. App-tracked and hand-entered sessions have no externalID and fall
+        // back to `id`, which also makes re-restoring the same file idempotent.
+        let existingWorkouts: [WorkoutRecord] = fetch(context)
+        var existingWorkoutIDs = Set(existingWorkouts.map(\.id))
+        var existingWorkoutExternalIDs = Set(existingWorkouts.compactMap(\.externalID))
+        for w in archive.workouts ?? [] {
+            let externalID = w.externalID.flatMap { $0.isEmpty ? nil : $0 }
+            if let ext = externalID, existingWorkoutExternalIDs.contains(ext) {
+                result.skipped += 1; continue
+            }
+            guard existingWorkoutIDs.insert(w.id).inserted else { result.skipped += 1; continue }
+            if let ext = externalID { existingWorkoutExternalIDs.insert(ext) }
+            let row = WorkoutRecord(startedAt: w.startedAt, endedAt: w.endedAt,
+                                    activity: WorkoutActivity(rawValue: w.activity) ?? .other,
+                                    source: WorkoutSource(rawValue: w.source) ?? .appleHealth)
+            row.id = w.id
+            row.externalID = w.externalID
+            row.sourceName = w.sourceName
+            row.activeEnergyKcal = w.activeEnergyKcal
+            row.totalEnergyKcal = w.totalEnergyKcal
+            row.distanceMetres = w.distanceMetres
+            row.avgHeartRate = w.avgHeartRate
+            row.maxHeartRate = w.maxHeartRate
+            row.minHeartRate = w.minHeartRate
+            row.elevationGainMetres = w.elevationGainMetres
+            row.avgCadence = w.avgCadence
+            row.avgPowerWatts = w.avgPowerWatts
+            row.swimStrokeCount = w.swimStrokeCount
+            row.swimStrokeStyle = w.swimStrokeStyle
+            row.lapsJSON = w.lapsJSON
+            row.heartRateSegmentsJSON = w.heartRateSegmentsJSON
+            row.perceivedExertion = w.perceivedExertion
+            row.notes = w.notes
+            context.insert(row)
+            result.added += 1
+        }
+
+        var existingMealIDs = Set(fetch(context).map { (m: SavedMeal) in m.id })
+        for m in archive.savedMeals ?? [] {
+            guard existingMealIDs.insert(m.id).inserted else { result.skipped += 1; continue }
+            let meal = SavedMeal(name: m.name)
+            meal.id = m.id
+            meal.createdAt = m.createdAt
+            meal.lastLoggedAt = m.lastLoggedAt
+            context.insert(meal)
+            for i in m.items {
+                let item = SavedMealItem(foodID: i.foodID ?? UUID(),
+                                         servingGrams: i.servingGrams, foodName: i.foodName)
+                item.id = i.id
+                item.foodID = i.foodID
+                item.addedAt = i.addedAt
+                item.meal = meal
+                context.insert(item)
+            }
             result.added += 1
         }
 
