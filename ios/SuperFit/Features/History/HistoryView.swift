@@ -65,9 +65,14 @@ struct HistoryView: View {
                     if !compositionPoints.isEmpty { compositionCard }
                     recoveryCard
                     vitalsCard
+                    stepsCard
+                    activeEnergyCard
                     sleepCard
+                    sleepStagesCard
+                    bedtimeCard
                     if !distanceActivities.isEmpty { distanceCard }
                     volumeCard
+                    trainingLoadCard
                     if selectedExerciseID != nil { strengthCard }
                 }
                 .padding(.horizontal, 18)
@@ -495,6 +500,147 @@ struct HistoryView: View {
                 emptyMessage: "Log a couple of \(activity.displayName.lowercased()) sessions with distance to see a trend."
             )
         }
+    }
+
+    // MARK: - Fundamental trends (#11)
+
+    private var stepsCard: some View {
+        let points = HistorySeries.daily(energy.filter { $0.date >= start && $0.steps > 0 },
+                                         date: \.date, value: { Double($0.steps) })
+        let mean = HistorySeries.rollingMean(points)
+        return HistoryChartCard(
+            title: "Steps",
+            headline: mean.last.map { "\(Int($0.value.rounded())) /day avg" },
+            content: {
+                if range.showsDailyPoints {
+                    ForEach(points) { p in
+                        BarMark(x: .value("Date", p.date, unit: .day), y: .value("Steps", p.value))
+                            .foregroundStyle(Theme.gold.opacity(0.3))
+                    }
+                }
+                ForEach(mean) { p in
+                    LineMark(x: .value("Date", p.date), y: .value("Average", p.value))
+                        .foregroundStyle(Theme.gold).interpolationMethod(.monotone)
+                }
+            },
+            isEmpty: points.count < 2,
+            emptyMessage: "No step data in this period."
+        )
+    }
+
+    private var activeEnergyCard: some View {
+        let points = HistorySeries.daily(energy.filter { $0.date >= start && $0.activeEnergyKcal > 0 },
+                                         date: \.date, value: { $0.activeEnergyKcal })
+        let mean = HistorySeries.rollingMean(points)
+        return HistoryChartCard(
+            title: "Active energy",
+            headline: mean.last.map { "\(Int($0.value.rounded())) kcal/day avg" },
+            content: {
+                if range.showsDailyPoints {
+                    ForEach(points) { p in
+                        BarMark(x: .value("Date", p.date, unit: .day), y: .value("kcal", p.value))
+                            .foregroundStyle(Theme.strain.opacity(0.3))
+                    }
+                }
+                ForEach(mean) { p in
+                    LineMark(x: .value("Date", p.date), y: .value("Average", p.value))
+                        .foregroundStyle(Theme.strain).interpolationMethod(.monotone)
+                }
+            },
+            isEmpty: points.count < 2,
+            emptyMessage: "No active-energy data in this period."
+        )
+    }
+
+    /// Deep + REM are what recovery leans on, so stages are stacked rather than
+    /// hidden inside a single "asleep" total.
+    private struct StageArea: Identifiable {
+        let date: Date, stage: String, hours: Double
+        var id: String { "\(date.timeIntervalSince1970)-\(stage)" }
+    }
+
+    private var sleepStagesCard: some View {
+        let nights = sleep.filter { $0.date >= start && $0.asleepMinutes > 0 }
+            .sorted { $0.date < $1.date }
+        let areas = nights.flatMap { n in
+            [("Deep", n.deepMinutes), ("REM", n.remMinutes), ("Core", n.coreMinutes)]
+                .map { StageArea(date: n.date, stage: $0.0, hours: Double($0.1) / 60) }
+        }
+        return HistoryChartCard(
+            title: "Sleep stages",
+            headline: nights.last.map {
+                String(format: "%.1f h deep + REM", Double($0.deepMinutes + $0.remMinutes) / 60) },
+            yLabel: { "\(Int($0))h" },
+            content: {
+                ForEach(areas) { seg in
+                    AreaMark(x: .value("Date", seg.date), y: .value("Hours", seg.hours))
+                        .foregroundStyle(by: .value("Stage", seg.stage))
+                }
+            },
+            isEmpty: nights.count < 2,
+            emptyMessage: "Needs a few nights of stage data from a watch."
+        )
+    }
+
+    private var bedtimePoints: [HistoryPoint] {
+        sleep.filter { $0.date >= start }
+            .compactMap { s in s.bedtime.map {
+                HistoryPoint(date: s.date, value: HistorySeries.bedtimeOffsetMinutes($0)) } }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// Bedtime plotted per night with its rolling mean; the spread *is* the
+    /// consistency the SD headline names. See `HistorySeries.bedtimeOffsetMinutes`.
+    private var bedtimeCard: some View {
+        let points = bedtimePoints
+        let sd = HistorySeries.standardDeviation(points.map(\.value))
+        return HistoryChartCard(
+            title: "Bedtime consistency",
+            headline: sd.map { "±\(Int($0.rounded())) min" },
+            yLabel: { clockFromOffset($0) },
+            content: {
+                ForEach(points) { p in
+                    PointMark(x: .value("Date", p.date), y: .value("Bedtime", p.value))
+                        .foregroundStyle(Theme.sleep.opacity(0.6)).symbolSize(14)
+                }
+                ForEach(HistorySeries.rollingMean(points)) { p in
+                    LineMark(x: .value("Date", p.date), y: .value("Average", p.value))
+                        .foregroundStyle(Theme.sleep).interpolationMethod(.monotone)
+                }
+            },
+            isEmpty: points.count < 2,
+            emptyMessage: "Needs a few nights with a recorded bedtime."
+        )
+    }
+
+    private func clockFromOffset(_ offset: Double) -> String {
+        let m = ((Int(offset.rounded()) % 1440) + 1440) % 1440
+        return String(format: "%02d:%02d", m / 60, m % 60)
+    }
+
+    /// Overall weekly load — tonnage moved and how often — complementing the
+    /// per-muscle set volume below. Frequency rides in the corner metric.
+    private var trainingLoadCard: some View {
+        let tonnage = HistorySeries.weeklyTonnage(records: liftRecords, from: start, to: .now)
+            .map { HistoryPoint(date: $0.date, value: units.displayWeight($0.value)) }
+        let sessions = HistorySeries.weeklySessionCount(records: liftRecords, from: start, to: .now)
+        let lastSessions = Int(sessions.last?.value ?? 0)
+        return HistoryChartCard(
+            title: "Training load",
+            headline: tonnage.last.map {
+                String(format: "%.0f %@ this week", $0.value, units.weightUnit) },
+            change: "\(lastSessions) session\(lastSessions == 1 ? "" : "s")/wk",
+            yLabel: { "\(Int($0))" },
+            content: {
+                ForEach(tonnage) { p in
+                    BarMark(x: .value("Week", p.date, unit: .weekOfYear),
+                            y: .value("Tonnage", p.value))
+                        .foregroundStyle(Theme.gold.opacity(0.8))
+                }
+            },
+            isEmpty: tonnage.allSatisfy { $0.value == 0 },
+            emptyMessage: "Log some weighted sets to see weekly tonnage."
+        )
     }
 
     // MARK: - Training

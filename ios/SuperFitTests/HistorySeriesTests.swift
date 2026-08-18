@@ -342,6 +342,54 @@ struct HistorySeriesTests {
         // the 0 m run adds no running count.
         #expect(activities == [.running, .poolSwimming])
     }
+
+    // MARK: Training load
+
+    private func lift(_ dayOffset: Int, weight: Double, reps: Int,
+                      warmup: Bool = false, at date: Date? = nil) -> LiftRecord {
+        LiftRecord(date: date ?? day(dayOffset), exerciseID: UUID(), weightKg: weight,
+                   reps: reps, isWarmup: warmup, bodyweightFraction: 0)
+    }
+
+    @Test func weeklyTonnageSumsWorkingSetsAndIgnoresWarmups() {
+        let records = [
+            lift(-3, weight: 100, reps: 5),                 // 500
+            lift(-3, weight: 80, reps: 5),                  // 400
+            lift(-3, weight: 60, reps: 10, warmup: true),   // excluded
+            lift(-1, weight: 0, reps: 12),                  // bodyweight → 0
+        ]
+        let points = HistorySeries.weeklyTonnage(records: records, from: day(-10), to: day(0))
+        #expect(points.map(\.value).reduce(0, +) == 900)
+    }
+
+    @Test func weeklySessionCountCountsDistinctSessionsNotSets() {
+        let a = day(-3), b = day(-1)
+        let records = [
+            lift(0, weight: 100, reps: 5, at: a),
+            lift(0, weight: 90, reps: 5, at: a),   // same session as the first
+            lift(0, weight: 80, reps: 5, at: b),
+        ]
+        let points = HistorySeries.weeklySessionCount(records: records, from: day(-10), to: day(0))
+        #expect(points.map(\.value).reduce(0, +) == 2)
+    }
+
+    // MARK: Sleep
+
+    private func clock(_ h: Int, _ m: Int) -> Date {
+        cal.date(bySettingHour: h, minute: m, second: 0, of: today)!
+    }
+
+    @Test func bedtimeOffsetWrapsAroundMidnight() {
+        // 23:50 → -10, 00:10 → +10 — 20 minutes apart, not 23h40m.
+        #expect(HistorySeries.bedtimeOffsetMinutes(clock(23, 50), calendar: cal) == -10)
+        #expect(HistorySeries.bedtimeOffsetMinutes(clock(0, 10), calendar: cal) == 10)
+    }
+
+    @Test func standardDeviationOfBedtimes() {
+        let sd = HistorySeries.standardDeviation([2, 4, 6])   // mean 4, sd = √(8/3)
+        #expect(sd != nil && abs(sd! - 1.632993) < 0.0001)
+        #expect(HistorySeries.standardDeviation([5]) == nil)
+    }
 }
 
 // `@retroactive` because `HistoryPoint` belongs to the app module, not the test

@@ -290,6 +290,64 @@ struct HistorySeries: Sendable {
         }.map(\.key)
     }
 
+    // MARK: Load
+
+    /// Weekly tonnage — Σ(weight × reps) over working sets, ISO weeks. Warm-ups
+    /// and bodyweight-only work (weight 0) don't count: tonnage is external load
+    /// moved, so a calisthenics session reads as 0 here even though it trained you.
+    static func weeklyTonnage(records: [LiftRecord],
+                              from start: Date, to end: Date) -> [HistoryPoint] {
+        weeklyReduce(from: start, to: end) { week in
+            records.filter { !$0.isWarmup && week.contains($0.date) }
+                .reduce(0.0) { $0 + $1.weightKg * Double($1.reps) }
+        }
+    }
+
+    /// Distinct training sessions per ISO week — frequency. Keyed by each
+    /// session's start instant (every set of a session shares it), so this counts
+    /// sessions, not sets.
+    static func weeklySessionCount(records: [LiftRecord],
+                                   from start: Date, to end: Date) -> [HistoryPoint] {
+        weeklyReduce(from: start, to: end) { week in
+            Double(Set(records.filter { week.contains($0.date) }.map(\.date)).count)
+        }
+    }
+
+    private static func weeklyReduce(from start: Date, to end: Date,
+                                     _ value: (DateInterval) -> Double) -> [HistoryPoint] {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.firstWeekday = 2
+        var out: [HistoryPoint] = []
+        var cursor = calendar.dateInterval(of: .weekOfYear, for: start)?.start ?? start
+        while cursor <= end {
+            guard let week = calendar.dateInterval(of: .weekOfYear, for: cursor) else { break }
+            out.append(HistoryPoint(date: week.start, value: value(week)))
+            cursor = week.end
+        }
+        return out
+    }
+
+    // MARK: Sleep
+
+    /// Bedtime as minutes relative to midnight, evening negative, so 23:50 and
+    /// 00:10 sit 20 minutes apart rather than a day — the continuous axis the
+    /// consistency SD is measured on.
+    static func bedtimeOffsetMinutes(_ bedtime: Date, calendar: Calendar = .current) -> Double {
+        let c = calendar.dateComponents([.hour, .minute], from: bedtime)
+        let hour = c.hour ?? 0
+        let minutes = Double(hour * 60 + (c.minute ?? 0))
+        return hour >= 12 ? minutes - 1440 : minutes
+    }
+
+    /// Population standard deviation of a set of values; nil below two. The
+    /// bedtime-consistency number, computed over a range rather than one night.
+    static func standardDeviation(_ values: [Double]) -> Double? {
+        guard values.count >= 2 else { return nil }
+        let mean = values.reduce(0, +) / Double(values.count)
+        let variance = values.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
+        return variance.squareRoot()
+    }
+
     static func rollingMean(_ points: [HistoryPoint], window: Int = 7) -> [HistoryPoint] {
         guard points.count >= window else { return [] }
         let sorted = points.sorted { $0.date < $1.date }
