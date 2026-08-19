@@ -8,6 +8,10 @@ struct ActiveWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var exercises: [Exercise]
     @Query private var savedTemplates: [WorkoutTemplate]
+    @Query private var profiles: [UserProfile]
+
+    /// Drives goal-specific training defaults (reps/rest) — #27.
+    private var goal: FitnessGoal { profiles.first?.goal ?? .recomposition }
 
     @State private var pickingExercise = false
     @State private var didOfferFirstExercise = false
@@ -271,7 +275,10 @@ struct ActiveWorkoutView: View {
         let entry = SetEntry(order: (sets.map(\.order).max() ?? 0) + 1,
                              exerciseID: exercise.id,
                              weightKg: previous?.weightKg,
-                             reps: previous?.reps ?? SetRow.defaultReps)
+                             // A fresh exercise's first set starts at the goal's
+                             // rep target (3 for strength, 8 otherwise); further
+                             // sets copy the previous one.
+                             reps: previous?.reps ?? goal.repTarget)
         entry.session = session
         context.insert(entry)
         saveChanges()
@@ -460,7 +467,9 @@ private struct SetRow: View {
     /// property is named `set`, so a body starting with `set.` parses as a
     /// setter declaration.)
     private var defaultRest: Int {
-        return set.reps <= 6 ? 180 : 120
+        // Heavier, lower-rep sets earn longer rest. A near-maximal ≤3-rep set —
+        // what the strength goal starts at — rests longest (~4 min).
+        return set.reps <= 3 ? 240 : set.reps <= 6 ? 180 : 120
     }
 
     /// A tappable value cell that reads like an editable field.

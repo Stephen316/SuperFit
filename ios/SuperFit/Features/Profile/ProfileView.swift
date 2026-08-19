@@ -34,6 +34,11 @@ struct ProfileView: View {
                     // label repeats it. Hide the label (kept for VoiceOver) so
                     // the row shows only the selected goal.
                     .labelsHidden()
+
+                    // Goal-specific nudge (#28) — what this goal most depends on.
+                    Text(GoalGuidance.tip(for: profile.goal))
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 .listRowBackground(Theme.surface)
 
@@ -154,6 +159,7 @@ extension FitnessGoal {
         case .maintenance: return "Maintenance"
         case .muscleGain: return "Muscle gain"
         case .recomposition: return "Recomposition"
+        case .strength: return "Strength"
         }
     }
 }

@@ -2,14 +2,20 @@ import Foundation
 
 /// Body-recomposition goal. Drives target-calorie offset and default protein.
 enum FitnessGoal: String, Codable, CaseIterable, Sendable {
-    case fatLoss, maintenance, muscleGain, recomposition
+    case fatLoss, maintenance, muscleGain, recomposition, strength
 
     /// Fraction applied to TDEE to get the calorie target.
+    ///
+    /// Strength sits at a small surplus (+5%): strength is largely neural plus
+    /// moderate hypertrophy, so it gains on a slight surplus that supports lean
+    /// mass without the fat of a full bulk (Iraki et al. 2019) — deliberately
+    /// below muscleGain's +10%, which prioritises size over strength.
     var calorieOffset: Double {
         switch self {
         case .fatLoss: return -0.20
         case .recomposition: return -0.10
         case .maintenance: return 0
+        case .strength: return 0.05
         case .muscleGain: return 0.10
         }
     }
@@ -26,8 +32,8 @@ enum FitnessGoal: String, Codable, CaseIterable, Sendable {
         switch (self, perLeanMass) {
         case (.fatLoss, false), (.recomposition, false): return 2.0
         case (.fatLoss, true), (.recomposition, true): return 2.4
-        case (.maintenance, false), (.muscleGain, false): return 1.8
-        case (.maintenance, true), (.muscleGain, true): return 2.2
+        case (.maintenance, false), (.muscleGain, false), (.strength, false): return 1.8
+        case (.maintenance, true), (.muscleGain, true), (.strength, true): return 2.2
         }
     }
 }

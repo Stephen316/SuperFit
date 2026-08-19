@@ -12,9 +12,9 @@ private let muscles: [UUID: [MuscleGroup: Int]] = [
 ]
 
 private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
-                  warmup: Bool = false) -> LiftRecord {
+                  warmup: Bool = false, rir: Int? = nil) -> LiftRecord {
     LiftRecord(date: Date().addingTimeInterval(-Double(daysAgo) * 86_400),
-               exerciseID: id, weightKg: kg, reps: reps, isWarmup: warmup)
+               exerciseID: id, weightKg: kg, reps: reps, isWarmup: warmup, rir: rir)
 }
 
 @Suite struct VolumeAggregatorTests {
@@ -52,6 +52,63 @@ private func lift(_ daysAgo: Int, _ id: UUID, _ kg: Double, _ reps: Int,
         let records = [lift(1, benchID, 100, 8), lift(10, benchID, 100, 8)]
         let v = VolumeAggregator().weeklySets(records: records, muscles: muscles, week: week)
         #expect(v[.chest] == 1)
+    }
+
+    // MARK: Proximity to failure (#24)
+
+    @Test func failureProximityCurve() {
+        #expect(VolumeAggregator.failureProximity(rir: 0) == 1.0)
+        #expect(abs(VolumeAggregator.failureProximity(rir: 4) - 0.5) < 1e-9)
+        #expect(VolumeAggregator.failureProximity(rir: nil) == 1.0)   // unlogged → full
+        #expect(VolumeAggregator.failureProximity(rir: -3) == 1.0)    // clamped at 0
+    }
+
+    /// Three chest sets taken to failure grade higher than three left well short:
+    /// RIR 0 → 3 × 1.0 = 3.0 effective; RIR 4 → 3 × 0.5 = 1.5. The set *count* is
+    /// three either way — only the colour-driving effective volume differs.
+    @Test func nearFailureDirectSetsGradeHigherThanEasyOnes() {
+        let hard = [lift(1, benchID, 100, 5, rir: 0), lift(1, benchID, 100, 5, rir: 0),
+                    lift(1, benchID, 100, 5, rir: 0)]
+        let easy = [lift(1, benchID, 100, 5, rir: 4), lift(1, benchID, 100, 5, rir: 4),
+                    lift(1, benchID, 100, 5, rir: 4)]
+        let vHard = VolumeAggregator().weeklySets(records: hard, muscles: muscles, week: week)
+        let vEasy = VolumeAggregator().weeklySets(records: easy, muscles: muscles, week: week)
+        #expect(abs(vHard[.chest]! - 3.0) < 0.001)
+        #expect(abs(vEasy[.chest]! - 1.5) < 0.001)
+        #expect(vHard[.chest]! > vEasy[.chest]!)
+
+        let vol = VolumeAggregator().weeklyVolume(records: hard, muscles: muscles, week: week)
+        #expect(vol[.chest]!.direct == 3)   // count unchanged; only the grade moves
+    }
+
+    @Test func unloggedRIRIsUnchangedFromBefore() {
+        let sets = [lift(1, benchID, 100, 5), lift(1, benchID, 100, 5), lift(1, benchID, 100, 5)]
+        let v = VolumeAggregator().weeklySets(records: sets, muscles: muscles, week: week)
+        #expect(abs(v[.chest]! - 3.0) < 0.001)
+    }
+
+    @Test func repEffectivenessCurve() {
+        #expect(VolumeAggregator.repEffectiveness(reps: 1, goal: .fatLoss) == 0.5)
+        #expect(VolumeAggregator.repEffectiveness(reps: 2, goal: .recomposition) == 0.7)
+        #expect(VolumeAggregator.repEffectiveness(reps: 3, goal: .muscleGain) == 0.85)
+        #expect(VolumeAggregator.repEffectiveness(reps: 5, goal: .muscleGain) == 1.0)
+        // Under the strength goal, low-rep work is the point — it counts full.
+        #expect(VolumeAggregator.repEffectiveness(reps: 1, goal: .strength) == 1.0)
+        #expect(VolumeAggregator.repEffectiveness(reps: 3, goal: .strength) == 1.0)
+    }
+
+    /// Three 2-rep maxes to failure: for a size goal they're worth 0.7 each
+    /// (2.1 total); under the strength goal they count full (3.0).
+    @Test func lowRepSetsCountLessForSizeGoalsButFullForStrength() {
+        let sets = [lift(1, benchID, 140, 2, rir: 0), lift(1, benchID, 140, 2, rir: 0),
+                    lift(1, benchID, 140, 2, rir: 0)]
+        let size = VolumeAggregator().weeklySets(records: sets, muscles: muscles,
+                                                 week: week, goal: .recomposition)
+        let strength = VolumeAggregator().weeklySets(records: sets, muscles: muscles,
+                                                     week: week, goal: .strength)
+        #expect(abs(size[.chest]! - 2.1) < 0.001)
+        #expect(abs(strength[.chest]! - 3.0) < 0.001)
+        #expect(size[.chest]! < strength[.chest]!)
     }
 
     @Test func tonnageAndFrequency() {

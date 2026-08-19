@@ -15,6 +15,11 @@ struct LiftRecord: Sendable {
     /// session scores zero training load and the recovery engine reads the
     /// athlete as fully rested.
     var bodyweightFraction: Double = 0
+    /// Reps in reserve — how far the set was from failure. nil when the lifter
+    /// didn't log it, which is treated as a full-effort set so non-loggers see no
+    /// change. Reflects the prime mover's proximity to failure, so it only
+    /// discounts a muscle's *direct* work, never its assisting work.
+    var rir: Int? = nil
 
     /// Load actually moved per rep.
     func effectiveLoadKg(bodyweightKg: Double) -> Double {
@@ -118,6 +123,34 @@ struct VolumeAggregator: Sendable {
         tension >= 5 ? 1.0 : 0.85
     }
 
+    /// How much a direct set's effective credit is worth, from how close it was
+    /// taken to failure. Reuses the strain engine's curve — RIR 0 counts full,
+    /// ~4 counts half — so a couple of sets taken near failure grade higher than
+    /// the same count left well short. An unlogged set counts full, so a lifter
+    /// who never logs RIR sees no change. Applied to *direct* credit only: the
+    /// logged RIR is the prime mover's proximity, not an assisting muscle's.
+    static func failureProximity(rir: Int?) -> Double {
+        guard let rir else { return 1.0 }
+        return 1.0 / (1.0 + 0.25 * Double(max(rir, 0)))
+    }
+
+    /// How much a direct set counts given its rep count and the lifter's goal.
+    ///
+    /// A heavy 1–3 rep set — even taken to failure — delivers fewer stimulating
+    /// reps than a set of five or more, so for a *size* goal (fat loss, recomp,
+    /// muscle gain, maintenance) it is worth less than a full set. Under the
+    /// **strength** goal that low-rep work is the adaptation being trained, so it
+    /// counts full. Sets of four or more reps always count full.
+    static func repEffectiveness(reps: Int, goal: FitnessGoal) -> Double {
+        guard goal != .strength else { return 1.0 }
+        switch reps {
+        case ...1: return 0.5
+        case 2:    return 0.7
+        case 3:    return 0.85
+        default:   return 1.0
+        }
+    }
+
     /// What one assisting set is worth, as a fraction of a direct set.
     ///
     /// Not `score/5`. A 3 is a muscle doing real work under moderate tension at
@@ -159,10 +192,13 @@ struct VolumeAggregator: Sendable {
     /// ceiling the model just re-derives "enough indirect work equals any amount
     /// of direct work", which is the thing that was wrong.
 
-    /// Per-muscle volume within `week`.
+    /// Per-muscle volume within `week`. `goal` tunes how much low-rep work
+    /// counts — see `repEffectiveness`; defaulted so callers that don't care
+    /// (and the tonnage/count helpers) are unaffected.
     func weeklyVolume(records: [LiftRecord],
                       muscles: [UUID: [MuscleGroup: Int]],
-                      week: DateInterval) -> [MuscleGroup: EffectiveVolume] {
+                      week: DateInterval,
+                      goal: FitnessGoal = .recomposition) -> [MuscleGroup: EffectiveVolume] {
         var direct: [MuscleGroup: Int] = [:]
         var secondary: [MuscleGroup: Int] = [:]
         var directCredit: [MuscleGroup: Double] = [:]
@@ -176,7 +212,10 @@ struct VolumeAggregator: Sendable {
             for (muscle, score) in tension where score > 0 {
                 if score >= Self.fullSetTension {
                     direct[muscle, default: 0] += 1
-                    directCredit[muscle, default: 0] += Self.directCredit(tension: score)
+                    directCredit[muscle, default: 0] +=
+                        Self.directCredit(tension: score)
+                        * Self.failureProximity(rir: r.rir)
+                        * Self.repEffectiveness(reps: r.reps, goal: goal)
                 } else {
                     secondary[muscle, default: 0] += 1
                     assistCredit[muscle, default: 0] += Self.assistingCredit(tension: score)
@@ -200,8 +239,9 @@ struct VolumeAggregator: Sendable {
     /// Effective sets per muscle, for callers that only need the number.
     func weeklySets(records: [LiftRecord],
                     muscles: [UUID: [MuscleGroup: Int]],
-                    week: DateInterval) -> [MuscleGroup: Double] {
-        weeklyVolume(records: records, muscles: muscles, week: week)
+                    week: DateInterval,
+                    goal: FitnessGoal = .recomposition) -> [MuscleGroup: Double] {
+        weeklyVolume(records: records, muscles: muscles, week: week, goal: goal)
             .mapValues(\.effective)
     }
 

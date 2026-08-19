@@ -124,7 +124,8 @@ struct TrainingView: View {
     private var thisWeekVolume: [MuscleGroup: VolumeAggregator.EffectiveVolume] {
         guard let week = currentWeek else { return [:] }
         return VolumeAggregator().weeklyVolume(records: allRecords,
-                                               muscles: muscleTension, week: week)
+                                               muscles: muscleTension, week: week,
+                                               goal: profiles.first?.goal ?? .recomposition)
     }
 
     /// Whether a session logged real work — at least one completed, non-warmup

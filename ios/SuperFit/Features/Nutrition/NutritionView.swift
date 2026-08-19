@@ -300,6 +300,8 @@ struct NutritionView: View {
             return "Protein is set at the upper end to build muscle while calories run slightly below expenditure."
         case .maintenance:
             return "Calories match your measured expenditure, with protein set to maintain lean mass."
+        case .strength:
+            return "Calories sit slightly above your measured expenditure to fuel heavy, low-rep training, with protein set to support recovery."
         }
     }
 

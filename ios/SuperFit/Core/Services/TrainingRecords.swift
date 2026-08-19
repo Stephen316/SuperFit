@@ -33,7 +33,8 @@ enum TrainingRecords {
                 return LiftRecord(date: session.startedAt, exerciseID: id,
                                   weightKg: set.weightKg ?? 0, reps: set.reps,
                                   isWarmup: set.isWarmup,
-                                  bodyweightFraction: fractions[id] ?? 0)
+                                  bodyweightFraction: fractions[id] ?? 0,
+                                  rir: set.rir)
             }
         }
     }
