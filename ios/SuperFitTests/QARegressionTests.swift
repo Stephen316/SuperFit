@@ -90,7 +90,7 @@ struct QARegressionTests {
     /// under-read the effort.
     private static let loadedButAlsoBodyweight: Set<String> = [
         "Bulgarian Split Squat", "Split Squat", "Walking Lunge", "Reverse Lunge",
-        "Step-Up",
+        "Step-Up", "Curtsy Lunge",
     ]
 
     @Test func everyBodyweightCatalogEntryCarriesAFraction() {

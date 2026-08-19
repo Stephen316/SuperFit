@@ -60,6 +60,7 @@ private let usdaSearchJSON = """
         {"nutrientId": 1004, "value": 3.57},
         {"nutrientId": 1005, "value": 0},
         {"nutrientId": 1079, "value": 0},
+        {"nutrientId": 1051, "value": 65.3},
         {"nutrientId": 1089, "value": 1.04},
         {"nutrientId": 1092, "value": 256},
         {"nutrientId": 1093, "value": 74}
@@ -101,6 +102,40 @@ private let usdaSearchJSON = """
         #expect(f.source == .openFoodFacts)
     }
 
+    @Test func offLiquidMapsVolumeAndWaterContent() async throws {
+        let milkJSON = """
+        {
+          "status": 1,
+          "product": {
+            "code": "5000000000001",
+            "product_name": "Whole Milk",
+            "serving_quantity": 257.5,
+            "serving_size": "250 ml",
+            "product_quantity_unit": "ml",
+            "categories_tags": ["en:milks"],
+            "nutriments": {
+              "energy-kcal_100g": 61,
+              "proteins_100g": 3.2,
+              "carbohydrates_100g": 4.8,
+              "fat_100g": 3.3,
+              "water_100g": 87.7
+            }
+          }
+        }
+        """.data(using: .utf8)!
+        StubProtocol.responder = { _ in (200, milkJSON) }
+
+        let milk = try #require(try await OpenFoodFactsClient(session: StubProtocol.session())
+            .product(barcode: "5000000000001"))
+        #expect(milk.per100g.waterG == 87.7)
+        #expect(milk.gramsPerMillilitre == 1)
+        // OFF liquid nutriments are already per 100 ml, so a package mass must
+        // not apply physical density a second time.
+        #expect(milk.servingGrams == 250)
+        #expect(milk.portions.first?.millilitres == 250)
+        #expect(ServingOption.options(for: milk).contains { $0.kind == .fluidOunce })
+    }
+
     @Test func offRejectsShortOrNonNumericBarcodes() async throws {
         StubProtocol.responder = { _ in (200, offProductJSON) }
         let client = OpenFoodFactsClient(session: StubProtocol.session())
@@ -118,6 +153,7 @@ private let usdaSearchJSON = """
         let chicken = try #require(foods.first { $0.id == "fdc:171077" })
         #expect(chicken.per100g.kcal == 165)
         #expect(chicken.per100g.proteinG == 31.0)
+        #expect(chicken.per100g.waterG == 65.3)
         #expect(chicken.source == .usda)
         #expect(chicken.per100g.micros[Micronutrient.iron.rawValue] == 1.04)
         #expect(chicken.per100g.micros[Micronutrient.potassium.rawValue] == 256)

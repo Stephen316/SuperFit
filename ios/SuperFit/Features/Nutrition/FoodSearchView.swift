@@ -18,7 +18,7 @@ struct FoodSearchView: View {
                 .navigationTitle("Add to \(meal.rawValue.capitalized)")
                 .themedChrome()
                 .navigationBarTitleDisplayMode(.inline)
-                .themedList()
+                .featureList()
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel") { dismiss() }
@@ -77,9 +77,10 @@ struct LogFoodView: View {
                                              supplements: supplements)
     }
 
+
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     LabeledContent(resolved.name) {
                         if let brand = resolved.brand {
@@ -87,9 +88,11 @@ struct LogFoodView: View {
                         }
                     }
                     LabeledContent("Amount") {
-                        TextField("0", value: $quantity, format: .number)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        // 5000 g is the cap the Log button enforces; convert it
+                        // into the chosen unit so the pad cannot accept an
+                        // amount the button will silently refuse.
+                        AmountField(value: $quantity, unit: unit.label,
+                                    maximum: 5000 / max(unit.gramsPerUnit, 0.000_1))
                     }
                     Picker("Unit", selection: $unit) {
                         ForEach(options) { option in
@@ -108,18 +111,23 @@ struct LogFoodView: View {
                         }
                     }
                 }
+                .listRowBackground(Theme.surface)
                 Section("This portion") {
                     LabeledContent("Calories", value: "\(Int(scaled.kcal)) kcal")
                     LabeledContent("Protein", value: "\(Int(scaled.proteinG)) g")
                     LabeledContent("Carbs", value: "\(Int(scaled.carbsG)) g")
                     LabeledContent("Fat", value: "\(Int(scaled.fatG)) g")
                     LabeledContent("Fibre", value: "\(Int(scaled.fibreG)) g")
+                    if let water = scaled.waterG, water > 0 {
+                        LabeledContent("Hydration", value: "\(Int(water.rounded())) ml")
+                    }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Log food")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .task { await loadPortions() }
             .alert("Already taken today", isPresented: $confirmingDuplicate) {
@@ -155,18 +163,33 @@ struct LogFoodView: View {
         loadingPortions = true
         defer { loadingPortions = false }
         let detailed = await FoodResolver(context: context).withPortions(resolved)
-        guard !detailed.portions.isEmpty else { return }
-        let wasDefault = unit == .gram || unit == .ounce
+        guard !detailed.portions.isEmpty || detailed.effectiveGramsPerMillilitre != nil else {
+            return
+        }
+        let previousKind = unit.kind
         resolved = detailed
-        if wasDefault, quantity == 1 || quantity == 100 { applyDefaultUnit() }
+        if previousKind != .portion,
+           let matching = options.first(where: { $0.kind == previousKind }) {
+            unit = matching
+        } else if previousKind != .portion {
+            applyDefaultUnit()
+        }
     }
 
     /// Prefer a real portion; otherwise the unit that matches the user's
     /// measurement setting, with a sensible starting quantity for each.
     private func applyDefaultUnit() {
-        if let portion = options.first, portion != .gram, portion != .ounce {
+        if let portion = options.first(where: { $0.kind == .portion }) {
             unit = portion
             quantity = 1
+        } else if resolved.effectiveGramsPerMillilitre != nil, units == .imperial,
+                  let fluidOunce = options.first(where: { $0.kind == .fluidOunce }) {
+            unit = fluidOunce
+            quantity = 8
+        } else if resolved.effectiveGramsPerMillilitre != nil,
+                  let millilitre = options.first(where: { $0.kind == .millilitre }) {
+            unit = millilitre
+            quantity = 250
         } else if units == .imperial {
             unit = .ounce
             quantity = 3.5
@@ -188,6 +211,7 @@ struct LogFoodView: View {
         entry.carbsG = scaled.carbsG
         entry.fatG = scaled.fatG
         entry.fibreG = scaled.fibreG
+        entry.waterMl = max(scaled.waterG ?? 0, 0)
         entry.micros = Dictionary(uniqueKeysWithValues: scaled.micros.compactMap { key, value in
             Micronutrient(rawValue: key).map { ($0, value) }
         })

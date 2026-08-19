@@ -28,6 +28,9 @@ struct FoodPickerView: View {
     @State private var scanning = false
     @State private var creatingCustom = false
     @State private var buildingMeal = false
+    /// The food whose "Allergen safe" line is currently showing, if any.
+    @State private var safeNotice: String?
+    @AppStorage(AvoidedAllergens.storageKey) private var avoidedAllergens = ""
     @State private var searchTask: Task<Void, Never>?
     @State private var confirmingDelete: ResolvedFood?
     @State private var hasMore = false
@@ -107,8 +110,16 @@ struct FoodPickerView: View {
     @ViewBuilder
     private func foodRows(_ foods: [ResolvedFood]) -> some View {
         let ids = storedIDs
+        let avoiding = AvoidedAllergens.decode(avoidedAllergens)
         ForEach(foods) { food in
-            Button { onPick(food) } label: { row(food) }
+            HStack(spacing: 0) {
+                Button { onPick(food) } label: {
+                    row(food)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                safeTick(food, avoiding: avoiding)
+            }
                 // Swipe reveals a red bin; a full swipe removes it outright,
                 // matching the delete gesture everywhere else in iOS.
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -131,24 +142,31 @@ struct FoodPickerView: View {
 
     var body: some View {
         List {
-            if !matchingMeals.isEmpty && filter != .all || (showsMeals && !matchingMeals.isEmpty) {
-                mealsSection
-            }
-            if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
-                emptyRow
-            }
-            let sections = sections
-            if sections.count == 1 {
-                foodRows(sections[0].foods)
-            } else {
-                ForEach(sections) { section in
-                    Section(section.title ?? "") { foodRows(section.foods) }
+            // Every row here is content, so the surface is applied once around
+            // the whole body. Tagging sections individually left the rows built
+            // from computed properties — the creation and load-more rows — on
+            // the default grey.
+            Group {
+                if !matchingMeals.isEmpty && filter != .all || (showsMeals && !matchingMeals.isEmpty) {
+                    mealsSection
                 }
+                if visible.isEmpty && !searching && query.count >= FoodSearch.minimumQueryLength {
+                    emptyRow
+                }
+                let sections = sections
+                if sections.count == 1 {
+                    foodRows(sections[0].foods)
+                } else {
+                    ForEach(sections) { section in
+                        Section(section.title ?? "") { foodRows(section.foods) }
+                    }
+                }
+                if hasMore && filter == .all && !visible.isEmpty {
+                    loadMoreRow
+                }
+                creationRow
             }
-            if hasMore && filter == .all && !visible.isEmpty {
-                loadMoreRow
-            }
-            creationRow
+            .listRowBackground(Theme.surface)
         }
         .searchable(text: $query, prompt: "Search foods")
         .overlay { if searching { ProgressView() } }
@@ -181,16 +199,15 @@ struct FoodPickerView: View {
 
     private var filterBar: some View {
         VStack(spacing: 8) {
-            Picker("Filter", selection: $filter) {
-                ForEach(FoodFilter.allCases) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
+            FeatureTabControl(
+                options: FoodFilter.allCases.map { ($0, $0.label) },
+                selection: $filter)
             .padding(.horizontal, 16)
 
             if filter == .all && !stores.isEmpty { storeBar }
         }
         .padding(.bottom, 8)
-        .background(.bar)
+        .background(Theme.tabBar)
     }
 
     /// Own-brand filters for the local retailers.
@@ -209,18 +226,22 @@ struct FoodPickerView: View {
                         runSearch()
                     } label: {
                         Text(brand.displayName)
-                            .font(.caption.weight(selected ? .semibold : .regular))
+                            .font(Theme.text(13, selected ? .semibold : .regular))
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .frame(minHeight: 44)
                             .background(
-                                Capsule()
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(selected ? Theme.gold.opacity(0.25) : .clear)
-                                    .overlay(Capsule().stroke(
-                                        selected ? Theme.gold : Theme.hairline.opacity(0.4),
-                                        lineWidth: 1)))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .stroke(selected ? Theme.gold : Theme.hairline,
+                                                    lineWidth: 1)
+                                    )
+                            )
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(selected ? Theme.gold : .secondary)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 16)
@@ -231,10 +252,46 @@ struct FoodPickerView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(food.name).foregroundStyle(.primary)
             HStack(spacing: 6) {
-                if let brand = food.brand { Text(brand) }
-                Text("\(Int(food.per100g.kcal)) kcal · P \(Int(food.per100g.proteinG))g per 100g")
+                if safeNotice == food.id {
+                    // Replaces the macro line rather than pushing the row taller,
+                    // so a list of results doesn't jump when one is tapped.
+                    Text("Allergen safe")
+                        .foregroundStyle(Theme.safe)
+                } else {
+                    if let brand = food.brand { Text(brand) }
+                    Text("\(Int(food.per100g.kcal)) kcal · P \(Int(food.per100g.proteinG))g per 100g")
+                }
             }
             .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Shown only when the user avoids something *and* the label says enough to
+    /// clear this food. Anything unstated stays blank — see `AllergenCheck`.
+    @ViewBuilder
+    private func safeTick(_ food: ResolvedFood, avoiding: Set<Allergen>) -> some View {
+        let status = AllergenCheck.status(allergenTags: food.allergenTags,
+                                          traceTags: food.traceTags,
+                                          ingredientsText: food.ingredientsText,
+                                          avoiding: avoiding)
+        if status == .safe {
+            Button {
+                safeNotice = food.id
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    // Guarded so a second tap elsewhere isn't cut short by the
+                    // first one's timer landing after it.
+                    if safeNotice == food.id { safeNotice = nil }
+                }
+            } label: {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.safe)
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(food.name): none of your allergens listed")
         }
     }
 
@@ -315,7 +372,6 @@ struct FoodPickerView: View {
             .navigationTitle("Scan barcode")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
 

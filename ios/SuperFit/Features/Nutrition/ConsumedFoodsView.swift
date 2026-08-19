@@ -12,8 +12,18 @@ struct ConsumedFoodsView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var logs: [NutritionLog]
 
+    init(day: Date) {
+        self.day = day
+        let bounds = DayBounds(day)
+        let start = bounds.start
+        let end = bounds.end
+        _logs = Query(filter: #Predicate { $0.date >= start && $0.date < end },
+                      sort: \NutritionLog.loggedAt)
+    }
+
     private var dayLogs: [NutritionLog] {
-        logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+        let d = DayBounds(day)
+        return logs.filter { d.contains($0.date) }
     }
 
     private var total: Int { Int(dayLogs.reduce(0) { $0 + $1.kcal }.rounded()) }
@@ -32,7 +42,7 @@ struct ConsumedFoodsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 if dayLogs.isEmpty {
                     emptyState
                 } else {
@@ -54,7 +64,6 @@ struct ConsumedFoodsView: View {
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
@@ -74,10 +83,7 @@ struct ConsumedFoodsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private func mealCard(_ slot: MealSlot, _ entries: [NutritionLog]) -> some View {
@@ -115,10 +121,7 @@ struct ConsumedFoodsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var emptyState: some View {

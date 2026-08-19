@@ -236,11 +236,13 @@ final class FoodResolver {
         guard food.portions.isEmpty, food.source == .usda,
               let fdcID = Int(food.id.replacingOccurrences(of: "fdc:", with: "")),
               let detailed = try? await usda.detail(fdcID: fdcID),
-              !detailed.portions.isEmpty
+              !detailed.portions.isEmpty || detailed.effectiveGramsPerMillilitre != nil
         else { return food }
 
         if let cached = cachedFood(remoteID: food.id) {
             cached.portionsJSON = try? JSONEncoder().encode(detailed.portions)
+            cached.waterGPer100g = detailed.per100g.waterG
+            cached.gramsPerMillilitre = detailed.effectiveGramsPerMillilitre
             try? context.save()
         }
         return detailed
@@ -275,7 +277,31 @@ final class FoodResolver {
     /// Persist a remote result locally (dedupes by remoteID).
     @discardableResult
     func cache(_ resolved: ResolvedFood) -> Food {
-        if let existing = cachedFood(remoteID: resolved.id) { return existing }
+        if let existing = cachedFood(remoteID: resolved.id) {
+            // A previous build may have cached macros before water and liquid
+            // measures were supported. Enrich it from the fresh result instead
+            // of permanently returning the incomplete local copy.
+            if let water = resolved.per100g.waterG { existing.waterGPer100g = water }
+            if let density = resolved.effectiveGramsPerMillilitre {
+                existing.gramsPerMillilitre = density
+            }
+            if !resolved.portions.isEmpty {
+                existing.portionsJSON = try? JSONEncoder().encode(resolved.portions)
+            }
+            // Same reasoning for allergens: anything cached before this feature
+            // existed holds none, and would otherwise never gain them.
+            if !resolved.allergenTags.isEmpty {
+                existing.allergenTagsRaw = resolved.allergenTags.joined(separator: ",")
+            }
+            if !resolved.traceTags.isEmpty {
+                existing.traceTagsRaw = resolved.traceTags.joined(separator: ",")
+            }
+            if let ingredients = resolved.ingredientsText {
+                existing.ingredientsText = ingredients
+            }
+            try? context.save()
+            return existing
+        }
         let food = Food(name: resolved.name, source: resolved.source)
         food.remoteID = resolved.id
         food.brand = resolved.brand
@@ -284,12 +310,17 @@ final class FoodResolver {
         food.carbsPer100g = resolved.per100g.carbsG
         food.fatPer100g = resolved.per100g.fatG
         food.fibrePer100g = resolved.per100g.fibreG
+        food.waterGPer100g = resolved.per100g.waterG
+        food.gramsPerMillilitre = resolved.effectiveGramsPerMillilitre
         // Without this the cached copy returned by localMatches on the next
         // search would re-log the food with macros only.
         food.microsJSON = resolved.per100g.micros.isEmpty
             ? nil : try? JSONEncoder().encode(resolved.per100g.micros)
         food.portionsJSON = resolved.portions.isEmpty
             ? nil : try? JSONEncoder().encode(resolved.portions)
+        food.allergenTagsRaw = resolved.allergenTags.joined(separator: ",")
+        food.traceTagsRaw = resolved.traceTags.joined(separator: ",")
+        food.ingredientsText = resolved.ingredientsText
         context.insert(food)
         try? context.save()
         return food
@@ -377,6 +408,16 @@ extension Supplement {
 
 extension Food {
     var resolved: ResolvedFood {
+        var food = resolvedCore
+        // Without these the cached copy a second search returns would lose its
+        // allergen tags, and a food already seen would stop showing as safe.
+        food.allergenTags = allergenTagsRaw.split(separator: ",").map(String.init)
+        food.traceTags = traceTagsRaw.split(separator: ",").map(String.init)
+        food.ingredientsText = ingredientsText
+        return food
+    }
+
+    private var resolvedCore: ResolvedFood {
         ResolvedFood(id: remoteID ?? id.uuidString,
                      source: FoodSource(rawValue: sourceRaw) ?? .custom,
                      name: name, brand: brand,
@@ -385,10 +426,12 @@ extension Food {
                                               carbsG: carbsPer100g,
                                               fatG: fatPer100g,
                                               fibreG: fibrePer100g,
+                                              waterG: waterGPer100g,
                                               micros: microsJSON
                                                   .flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) } ?? [:]),
                      servingGrams: nil,
                      portions: portionsJSON
-                        .flatMap { try? JSONDecoder().decode([FoodPortion].self, from: $0) } ?? [])
+                        .flatMap { try? JSONDecoder().decode([FoodPortion].self, from: $0) } ?? [],
+                     gramsPerMillilitre: gramsPerMillilitre)
     }
 }

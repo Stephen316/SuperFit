@@ -2,14 +2,20 @@ import Foundation
 
 /// Body-recomposition goal. Drives target-calorie offset and default protein.
 enum FitnessGoal: String, Codable, CaseIterable, Sendable {
-    case fatLoss, maintenance, muscleGain, recomposition
+    case fatLoss, maintenance, muscleGain, recomposition, strength
 
     /// Fraction applied to TDEE to get the calorie target.
+    ///
+    /// Strength sits at a small surplus (+5%): strength is largely neural plus
+    /// moderate hypertrophy, so it gains on a slight surplus that supports lean
+    /// mass without the fat of a full bulk (Iraki et al. 2019) — deliberately
+    /// below muscleGain's +10%, which prioritises size over strength.
     var calorieOffset: Double {
         switch self {
         case .fatLoss: return -0.20
         case .recomposition: return -0.10
         case .maintenance: return 0
+        case .strength: return 0.05
         case .muscleGain: return 0.10
         }
     }
@@ -26,8 +32,8 @@ enum FitnessGoal: String, Codable, CaseIterable, Sendable {
         switch (self, perLeanMass) {
         case (.fatLoss, false), (.recomposition, false): return 2.0
         case (.fatLoss, true), (.recomposition, true): return 2.4
-        case (.maintenance, false), (.muscleGain, false): return 1.8
-        case (.maintenance, true), (.muscleGain, true): return 2.2
+        case (.maintenance, false), (.muscleGain, false), (.strength, false): return 1.8
+        case (.maintenance, true), (.muscleGain, true), (.strength, true): return 2.2
         }
     }
 }
@@ -222,7 +228,7 @@ struct MetabolismEngine: Sendable {
         return measurementStandardError(daily: dailyWeightSeries(window),
                                         intakes: window.compactMap(\.intakeKcal),
                                         windowDays: windowDays,
-                                        avgIntake: imputedAverageIntake(window))
+                                        avgIntake: imputedAverageIntake(window, asOf: asOf))
     }
 
     private func measurementStandardError(daily: [Point], intakes: [Double],
@@ -320,6 +326,20 @@ struct MetabolismEngine: Sendable {
             .filter { $0.date >= start && $0.date <= asOf }
             .sorted { $0.date < $1.date }
 
+        return estimatePrepared(records: window, windowDays: windowDays,
+                                prior: prior, asOf: asOf)
+    }
+
+    /// The same calculation as `estimate`, for callers that already maintain a
+    /// sorted trailing window. History charts advance that window one day at a
+    /// time; filtering and sorting the full year for every point was pure
+    /// duplicate work. Kept internal so ordinary callers cannot accidentally
+    /// pass records outside the requested window.
+    func estimatePrepared(records window: [DailyRecord],
+                          windowDays: Int,
+                          prior: Prior,
+                          asOf: Date) -> TDEEEstimate {
+
         // Slope from RAW daily means via Theil–Sen: smoothing first (EWMA→OLS)
         // lags the trend and biased TDEE ~11% low at 30d, ~30% at 14d in
         // validation. Theil–Sen is unbiased on clean trends and immune to
@@ -333,7 +353,7 @@ struct MetabolismEngine: Sendable {
         // Averaged over every day in the window, unlogged days imputed from the
         // intake trend — the weight slope it's differenced against covers all of
         // them, so the intake side has to as well.
-        let avgIntake = imputedAverageIntake(window)
+        let avgIntake = imputedAverageIntake(window, asOf: asOf)
 
         // Clamped before it becomes energy: see maxPlausibleWeeklyChangeFraction.
         let referenceWeight = smoothed.last?.value ?? daily.last?.value ?? 75
@@ -431,21 +451,40 @@ struct MetabolismEngine: Sendable {
     ///
     /// Theil–Sen again, for the same reason as the weight slope: a couple of
     /// outlier days (a blowout, a fast) shouldn't tilt the fitted line.
-    private func imputedAverageIntake(_ window: [DailyRecord]) -> Double {
+    ///
+    /// **The span is calendar days, not days that happen to hold a record.** It
+    /// used to average over every day carrying *any* record — which included
+    /// weigh-in days — so the number of gaps the trend was projected across was
+    /// set partly by how often the user stepped on the scale. Measured on this
+    /// engine with intake declining over a month and food logged for the first
+    /// fortnight: weighing daily gave 2590 kcal, weighing weekly 2644, a 61 kcal
+    /// difference in TDEE from identical eating. Weight logging was deciding the
+    /// food average.
+    ///
+    /// It runs from the first record to the end of the window rather than across
+    /// the nominal `windowDays`, so a user two weeks into using the app does not
+    /// have a fortnight of intake invented for them from before they arrived.
+    /// The denominator still varies with how much history exists — but on when
+    /// they started, which is real, rather than on a weighing habit, which is
+    /// not.
+    private func imputedAverageIntake(_ window: [DailyRecord], asOf: Date) -> Double {
         let cal = Calendar(identifier: .gregorian)
         var byDay: [Date: Double] = [:]
-        var allDays: Set<Date> = []
         for r in window {
-            let day = cal.startOfDay(for: r.date)
-            allDays.insert(day)
-            if let kcal = r.intakeKcal { byDay[day] = kcal }
+            if let kcal = r.intakeKcal { byDay[cal.startOfDay(for: r.date)] = kcal }
         }
         let observed = Array(byDay.values)
         guard !observed.isEmpty else { return 0 }
 
         let flatMean = observed.reduce(0, +) / Double(observed.count)
         // Under three logged days a trend is noise; fall back to the flat mean.
-        guard byDay.count >= 3, let origin = allDays.min() else { return flatMean }
+        guard byDay.count >= 3,
+              let origin = window.map({ cal.startOfDay(for: $0.date) }).min()
+        else { return flatMean }
+
+        let lastDay = cal.startOfDay(for: asOf)
+        let spanDays = Int((lastDay.timeIntervalSince(origin) / 86_400).rounded()) + 1
+        guard spanDays >= byDay.count else { return flatMean }
 
         let points = byDay
             .map { Point(day: $0.key.timeIntervalSince(origin) / 86_400, value: $0.value) }
@@ -480,30 +519,24 @@ struct MetabolismEngine: Sendable {
         let high = observed.max() ?? flatMean
 
         var total = 0.0
-        for day in allDays {
+        for offset in 0..<spanDays {
+            guard let day = cal.date(byAdding: .day, value: offset, to: origin) else { continue }
             if let logged = byDay[day] {
                 total += logged
             } else {
-                let x = day.timeIntervalSince(origin) / 86_400
-                total += (intercept + slope * x).clamped(to: low...high)
+                total += (intercept + slope * Double(offset)).clamped(to: low...high)
             }
         }
-        return total / Double(allDays.count)
+        return total / Double(spanDays)
     }
 
-    /// Raw daily weight means (multiple same-day weigh-ins averaged).
+    /// Raw daily weights — the lowest reading of each day. See `DailyWeight`.
     private func dailyWeightSeries(_ window: [DailyRecord]) -> [Point] {
-        let cal = Calendar(identifier: .gregorian)
-        var byDay: [Date: [Double]] = [:]
-        for r in window {
-            guard let w = r.weightKg else { continue }
-            byDay[cal.startOfDay(for: r.date), default: []].append(w)
-        }
+        let byDay = DailyWeight.byDay(window, date: \.date, weightKg: \.weightKg,
+                                      calendar: Calendar(identifier: .gregorian))
         guard let origin = byDay.keys.min() else { return [] }
         return byDay.keys.sorted().map { day in
-            let ws = byDay[day]!
-            return Point(day: day.timeIntervalSince(origin) / 86_400,
-                         value: ws.reduce(0, +) / Double(ws.count))
+            Point(day: day.timeIntervalSince(origin) / 86_400, value: byDay[day]!)
         }
     }
 
@@ -550,7 +583,11 @@ struct MetabolismEngine: Sendable {
     /// the calorie floor enough to block legitimate deficits. Unbiased noise beats
     /// biased noise.
     private func bmr(_ p: Prior, weightKg: Double) -> Double {
-        if let lean = p.leanMassKg, lean > 0, lean <= weightKg {
+        // Strict on both bounds, matching `BodyComposition` and
+        // `SyncCoordinator.upsertComposition`. A lean mass equal to bodyweight
+        // is 0% body fat, and taking it would inflate this by ~318 kcal at
+        // 80 kg — straight into the calorie floor below.
+        if let lean = p.leanMassKg, lean > 0, lean < weightKg {
             return 370 + 21.6 * lean
         }
         let base = 10 * weightKg + 6.25 * p.heightCm - 5 * p.ageYears

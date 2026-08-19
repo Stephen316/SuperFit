@@ -32,15 +32,14 @@ enum MetabolicRecordAssembler {
         }
         intakeByDay = intakeByDay.filter { $0.value >= minPlausibleIntake }
 
-        // Averaged, not last-one-wins. `metrics` arrives from an unsorted fetch,
-        // so overwriting per day let an arbitrary weigh-in win whenever someone
-        // logged twice — and since a pending insert can sort ahead of the rows
-        // already on disk, adding a second weigh-in could leave the estimate on
-        // the *older* number and look like nothing had recalculated at all.
-        // Averaging matches what the engine's own daily series does.
-        var weightsByDay: [Date: [Double]] = [:]
-        for m in metrics { weightsByDay[cal.startOfDay(for: m.date), default: []].append(m.weightKg) }
-        let weightByDay = weightsByDay.mapValues { $0.reduce(0, +) / Double($0.count) }
+        // Lowest per day, not last-one-wins. `metrics` arrives from an unsorted
+        // fetch, so overwriting per day let an arbitrary weigh-in win whenever
+        // someone logged twice — and since a pending insert can sort ahead of the
+        // rows already on disk, adding a second weigh-in could leave the estimate
+        // on the *older* number and look like nothing had recalculated at all.
+        // See `DailyWeight` for why the lowest rather than the mean.
+        let weightByDay = DailyWeight.byDay(metrics, date: \.date,
+                                            weightKg: \.weightKg, calendar: cal)
 
         return Set(intakeByDay.keys).union(weightByDay.keys).sorted().map {
             DailyRecord(date: $0, intakeKcal: intakeByDay[$0], weightKg: weightByDay[$0])
@@ -52,7 +51,12 @@ enum MetabolicRecordAssembler {
     static func avgActiveEnergy(energy: [DailyEnergy], days: Int = 30,
                                 asOf: Date = .now) -> Double? {
         let start = asOf.addingTimeInterval(-Double(days) * 86_400)
-        let window = energy.filter { $0.date >= start && $0.activeEnergyKcal > 0 }
+        // Bounded at both ends. Only the lower bound was applied, so `asOf` chose
+        // where the window began but not where it stopped — a caller asking for
+        // an estimate as of last month still averaged in every day since.
+        let window = energy.filter {
+            $0.date >= start && $0.date <= asOf && $0.activeEnergyKcal > 0
+        }
         guard window.count >= 7 else { return nil }
         return window.reduce(0) { $0 + $1.activeEnergyKcal } / Double(window.count)
     }

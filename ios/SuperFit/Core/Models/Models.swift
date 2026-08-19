@@ -7,48 +7,109 @@ import SwiftData
 enum MetricSource: String, Codable, Sendable { case manual, healthKit }
 enum MealSlot: String, Codable, CaseIterable, Sendable { case breakfast, lunch, dinner, snack }
 enum FoodSource: String, Codable, Sendable { case openFoodFacts, usda, custom, supplement }
-/// The muscles volume is tracked against.
+/// The muscles volume is tracked against — 37 of them, down to the head.
 ///
-/// Split finer than the obvious thirteen because the coarse version can't answer
-/// the questions the tracking exists for. "Shoulders" hides the single most
-/// common imbalance in a training week — pressing hammers the front delts while
-/// the rear delts get nothing — and one "back" figure can read as well-trained on
-/// pulldowns alone while the rhomboids and mid-traps go untouched.
+/// Split this finely because the coarse version can't answer the questions the
+/// tracking exists for. "Shoulders" hides the single most common imbalance in a
+/// training week — pressing hammers the front delts while the rear delts get
+/// nothing — and one "back" figure can read as well-trained on pulldowns alone
+/// while the rhomboids and mid-traps go untouched.
 ///
-/// Not split further than this on purpose. Gastrocnemius versus soleus, or upper
-/// versus lower lats, are real distinctions that almost nobody programmes around,
-/// and every extra case is another judgement call on all 130 catalogued lifts.
+/// The rule for splitting is whether an exercise can bias one head over its
+/// neighbour. Overhead work favours the triceps long head; a bent knee shifts
+/// calf work from gastrocnemius to soleus; hip extension loads adductor magnus
+/// where adduction loads longus. Each of those is a programming decision someone
+/// can act on, so each earns a case.
+///
+/// **The two gastrocnemius heads are the deliberate exception.** Nothing biases
+/// the medial against the lateral — foot rotation is often claimed to, and the
+/// effect does not survive measurement — so splitting them would add a row
+/// nobody could ever act on. They share `.gastrocnemius`.
+///
+/// The cost of every case is a judgement call on all 130 catalogued lifts, which
+/// is the reason the rule is "can it change what you do" rather than "is it
+/// anatomically distinct".
 enum MuscleGroup: String, Codable, CaseIterable, Sendable {
-    case upperChest, chest
+    case upperChest, chest, serratus
     case frontDelts, sideDelts, rearDelts
-    case lats, upperBack, traps, lowerBack
-    case biceps, triceps, forearms
-    case abs, obliques
-    case quads, hamstrings, glutes, adductors, abductors
-    case calves
+    case upperTraps, middleTraps, lowerTraps, rhomboids, lats, erectorSpinae
+    case biceps, tricepsLong, tricepsLateral, tricepsMedial
+    case brachioradialis, wristFlexors, wristExtensors
+    case upperAbs, lowerAbs, obliques
+    case rectusFemoris, vastusLateralis, vastusMedialis
+    case bicepsFemoris, semitendinosus
+    case gluteusMaximus, gluteusMedius
+    case adductorLongus, adductorMagnus, pectineus, sartorius
+    case gastrocnemius, soleus, tibialisAnterior, peroneals
 
     var displayName: String {
         switch self {
-        case .upperChest: return "Upper chest"
-        case .frontDelts: return "Front delts"
-        case .sideDelts:  return "Side delts"
-        case .rearDelts:  return "Rear delts"
-        case .upperBack:  return "Upper back"
-        case .lowerBack:  return "Lower back"
-        default:          return rawValue.capitalized
+        case .upperChest:      return "Upper chest"
+        // Both heads of pec major. Named by position because that is how the
+        // bench angle addresses them; the serratus is next door, not chest.
+        case .chest:           return "Lower chest"
+        case .serratus:        return "Serratus"
+        case .frontDelts:      return "Front delts"
+        case .sideDelts:       return "Side delts"
+        case .rearDelts:       return "Rear delts"
+        case .upperTraps:      return "Upper traps"
+        case .middleTraps:     return "Mid traps"
+        case .lowerTraps:      return "Lower traps"
+        case .rhomboids:       return "Rhomboids"
+        case .lats:            return "Lats"
+        case .erectorSpinae:   return "Lower back"
+        case .biceps:          return "Biceps"
+        case .tricepsLong:     return "Triceps long head"
+        case .tricepsLateral:  return "Triceps lateral head"
+        case .tricepsMedial:   return "Triceps medial head"
+        case .brachioradialis: return "Brachioradialis"
+        case .wristFlexors:    return "Wrist flexors"
+        case .wristExtensors:  return "Wrist extensors"
+        case .upperAbs:        return "Upper abs"
+        case .lowerAbs:        return "Lower abs"
+        case .obliques:        return "Obliques"
+        case .rectusFemoris:   return "Rectus femoris"
+        case .vastusLateralis: return "Vastus lateralis"
+        case .vastusMedialis:  return "Vastus medialis"
+        case .bicepsFemoris:   return "Biceps femoris"
+        case .semitendinosus:  return "Medial hamstrings"
+        case .gluteusMaximus:  return "Glute max"
+        case .gluteusMedius:   return "Glute med"
+        case .adductorLongus:  return "Adductors"
+        case .adductorMagnus:  return "Adductor magnus"
+        case .pectineus:       return "Pectineus"
+        case .sartorius:       return "Sartorius"
+        case .gastrocnemius:   return "Gastrocnemius"
+        case .soleus:          return "Soleus"
+        case .tibialisAnterior: return "Tibialis anterior"
+        case .peroneals:       return "Peroneals"
         }
     }
 
-    /// Raw values written before the split, mapped to their closest new case.
+    /// Raw values written before the heads were split, mapped to the reading the
+    /// old label most often meant.
     ///
-    /// Only reachable through custom exercises — built-ins are re-synced from the
-    /// catalogue. Each maps to the reading the old label most often meant:
-    /// "shoulders" was usually lateral work, "back" usually lats, "core" usually
-    /// the rectus rather than the obliques.
+    /// Only reachable through custom exercises and stored logs — built-ins are
+    /// re-synced from the catalogue on launch. A coarse label becomes the head
+    /// that dominates it rather than being dropped: "quads" was nearly always
+    /// squat or press work, which is vastus-led, and "triceps" without further
+    /// detail is most often pressing, where the lateral head leads.
     static let legacyNames: [String: MuscleGroup] = [
         "shoulders": .sideDelts,
         "back": .lats,
-        "core": .abs,
+        "core": .upperAbs,
+        "abs": .upperAbs,
+        "forearms": .wristFlexors,
+        "traps": .upperTraps,
+        "upperBack": .rhomboids,
+        "lowerBack": .erectorSpinae,
+        "quads": .vastusLateralis,
+        "hamstrings": .bicepsFemoris,
+        "glutes": .gluteusMaximus,
+        "calves": .gastrocnemius,
+        "adductors": .adductorLongus,
+        "abductors": .gluteusMedius,
+        "triceps": .tricepsLateral,
     ]
 
     /// Decodes a stored raw value, falling back to the pre-split names.
@@ -63,7 +124,20 @@ enum ExerciseCategory: String, Codable, Sendable { case barbell, dumbbell, machi
 @Model
 final class UserProfile {
     var id: UUID = UUID()
-    var birthDate: Date = Date(timeIntervalSince1970: 0)
+    /// 1 January 2000, until the user says otherwise.
+    ///
+    /// The epoch was the old default, which made every untouched profile 56
+    /// years old. That is not a neutral placeholder: age is a term in
+    /// Mifflin-St Jeor (−5 kcal per year) and in the Tanaka max-heart-rate
+    /// estimate, so it was quietly costing a new user ~130 kcal on their basal
+    /// estimate and shifting their cardio load bands, before they had entered
+    /// anything at all.
+    ///
+    /// Anchored at **noon UTC**, not midnight. Stored as an instant but shown as
+    /// a date, so a midnight anchor reads as 31 December 1999 anywhere west of
+    /// Greenwich — the default would look wrong in the picker for every user in
+    /// the Americas. Noon holds the date from UTC−12 to UTC+11.
+    var birthDate: Date = Date(timeIntervalSince1970: 946_728_000)
     var sexRaw: String = BiologicalSex.other.rawValue
     var heightCm: Double = 175
     var goalRaw: String = FitnessGoal.recomposition.rawValue
@@ -127,10 +201,21 @@ final class Food {
     var carbsPer100g: Double = 0
     var fatPer100g: Double = 0
     var fibrePer100g: Double = 0
+    /// nil means unknown; zero is a measured food with no water.
+    var waterGPer100g: Double?
+    /// Optional liquid density used to convert ml/fl oz into the gram basis
+    /// nutrition values use. Volume-labelled portions can also provide this.
+    var gramsPerMillilitre: Double?
     var microsJSON: Data?                  // [String: Double] per 100 g
     /// USDA household measures, JSON [FoodPortion]. Cached so a food logged
     /// once keeps its "1 medium" option offline and without a second request.
     var portionsJSON: Data?
+    /// Declared allergens and "may contain", comma separated and unprefixed.
+    /// Defaulted rather than optional so CloudKit accepts them; an empty string
+    /// means the source published nothing, not that the food is free of them.
+    var allergenTagsRaw: String = ""
+    var traceTagsRaw: String = ""
+    var ingredientsText: String?
     var isFavorite: Bool = false
 
     init(name: String, source: FoodSource = .custom) {
@@ -151,6 +236,9 @@ final class NutritionLog {
     var carbsG: Double = 0
     var fatG: Double = 0
     var fibreG: Double = 0
+    /// Water contributed by this exact logged portion. Snapshotted like the
+    /// macros so later edits to the source food cannot rewrite hydration history.
+    var waterMl: Double = 0
     var mealRaw: String = MealSlot.snack.rawValue
     /// Micronutrients snapshotted at log time, "key:amount" (CloudKit-safe).
     /// Absent keys mean the source had no value — not zero.
@@ -383,20 +471,33 @@ final class Exercise {
         }
     }
 
-    var primaryMuscle: MuscleGroup {
-        tension.max { $0.value < $1.value }?.key ?? .abs
+    /// The muscle this lift is for, or nil when it has no tension map.
+    ///
+    /// Optional rather than defaulting. It used to fall back to `.upperAbs`,
+    /// which is not a safe default but a wrong answer: a lift with no scores
+    /// would report itself as an ab exercise, and nothing downstream could tell
+    /// that apart from one that genuinely is. Nothing calls this today, so the
+    /// wrongness was latent — which is exactly when it is cheapest to fix.
+    var primaryMuscle: MuscleGroup? {
+        tension.max { $0.value < $1.value }?.key
     }
 }
 
 /// User-saved reusable workout (built-ins live in ExerciseLibrary.templates).
 @Model
 final class WorkoutTemplate {
+    static let maximumSaved = 8
+
     var id: UUID = UUID()
     var name: String = ""
     var createdAt: Date = Date()
     @Relationship(deleteRule: .cascade) var items: [WorkoutTemplateItem]? = []
 
     init(name: String) { self.name = name }
+
+    static func canCreate(savedCount: Int) -> Bool {
+        savedCount < maximumSaved
+    }
 
     var orderedExerciseIDs: [UUID] {
         (items ?? []).sorted { $0.order < $1.order }.compactMap(\.exerciseID)
@@ -463,6 +564,11 @@ final class WorkoutRecord {
     /// Laps as JSON — a handful of values per lap, only ever read as a whole,
     /// and a relationship would add a CloudKit-synced table for no query benefit.
     var lapsJSON: Data?
+    /// Minute-level heart rate as compact JSON. Imported workouts without a
+    /// time series continue to use their session average.
+    var heartRateSegmentsJSON: Data?
+    /// 0 means the user has not rated the session; valid ratings are 1...10.
+    var perceivedExertion: Int = 0
     var notes: String?
 
     init(startedAt: Date = .now, endedAt: Date = .now,
@@ -488,6 +594,22 @@ final class WorkoutRecord {
         set { lapsJSON = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
     }
 
+    var heartRateSegments: [HeartRateSegment] {
+        get {
+            heartRateSegmentsJSON.flatMap {
+                try? JSONDecoder().decode([HeartRateSegment].self, from: $0)
+            } ?? []
+        }
+        set {
+            heartRateSegmentsJSON = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
+        }
+    }
+
+    var sessionRPE: Int? {
+        get { (1...10).contains(perceivedExertion) ? perceivedExertion : nil }
+        set { perceivedExertion = min(max(newValue ?? 0, 0), 10) }
+    }
+
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
 
     /// Metres per second, or nil when the activity carries no distance. Guarded
@@ -505,11 +627,19 @@ final class TrainingSession {
     var endedAt: Date?
     var templateName: String?
     var bodyweightSnapshotKg: Double?
+    /// 0 means unrated; valid session-RPE ratings are 1...10.
+    var perceivedExertion: Int = 0
     @Relationship(deleteRule: .cascade) var sets: [SetEntry]? = []
 
     init(startedAt: Date = .now, templateName: String? = nil) {
         self.startedAt = startedAt
         self.templateName = templateName
+    }
+
+
+    var sessionRPE: Int? {
+        get { (1...10).contains(perceivedExertion) ? perceivedExertion : nil }
+        set { perceivedExertion = min(max(newValue ?? 0, 0), 10) }
     }
 }
 
@@ -517,7 +647,10 @@ final class TrainingSession {
 final class SetEntry {
     var order: Int = 0
     var exerciseID: UUID?
-    var weightKg: Double = 0
+    /// nil until the user enters a number. 0 is a value they typed, never the
+    /// default — the row shows "—" while this is nil, so an untouched set can't
+    /// masquerade as a real 0 kg lift.
+    var weightKg: Double?
     var reps: Int = 0
     var rir: Int?
     var restSeconds: Int?
@@ -525,14 +658,16 @@ final class SetEntry {
     var isWarmup: Bool = false
     var session: TrainingSession?
 
-    init(order: Int, exerciseID: UUID, weightKg: Double, reps: Int) {
+    init(order: Int, exerciseID: UUID, weightKg: Double? = nil, reps: Int) {
         self.order = order
         self.exerciseID = exerciseID
         self.weightKg = weightKg
         self.reps = reps
     }
 
-    var volumeKg: Double { isWarmup ? 0 : weightKg * Double(reps) }
+    /// Zero when the weight hasn't been entered — an unlogged set contributes no
+    /// tonnage rather than being undefined.
+    var volumeKg: Double { isWarmup ? 0 : (weightKg ?? 0) * Double(reps) }
 }
 
 @Model
@@ -582,6 +717,25 @@ final class RecoveryScoreRecord {
 
     init(date: Date, score: Double, recommendation: String) {
         self.date = date; self.score = score; self.recommendationRaw = recommendation
+    }
+}
+
+/// Daily cardiovascular strain, the exertion sibling of the recovery score.
+/// Derived from workouts by `StrainEngine` and rebuilt on each aggregation pass,
+/// so like `RecoveryScoreRecord` it is not archived — a restore recomputes it.
+@Model
+final class StrainRecord {
+    var date: Date = Date()
+    var strain: Double = 0            // 0…100
+    var rawTrimp: Double = 0
+    var bandRaw: String = ""
+    /// Fraction of the day's workouts that carried heart rate. 0 means no
+    /// heart-rate-carrying workout, so the strain is "no data", not a real zero.
+    var dataCompleteness: Double = 0
+
+    init(date: Date, strain: Double, rawTrimp: Double, bandRaw: String, dataCompleteness: Double) {
+        self.date = date; self.strain = strain; self.rawTrimp = rawTrimp
+        self.bandRaw = bandRaw; self.dataCompleteness = dataCompleteness
     }
 }
 

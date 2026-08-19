@@ -1,0 +1,30 @@
+# Edit notification copy here. Each section must have a title, followed by any
+# number of message lines. Blank lines and lines beginning with # are ignored.
+
+[morning]
+title=Start strong
+You're clearly not a morning person - log your weight before its too late!
+You must be hungry...
+So you want to lose all your progress, huh?
+Get out of bed and onto the scale or I wont be happy.
+
+[lunch]
+title=Lunch check-in
+Don't make me angry, log your lunch!
+Your afternoon runs better on good food, or any food.
+You know what time it is.
+Was it yum? You better tell me.
+
+[workout]
+title=Time to train
+No pain, no gain.
+Get going, you're gonna lose your muscles!
+Eat, sleep, train, log, repeat.
+You wanna be stronger tomorrow? Lock in now.
+
+[dinner]
+title=Dinner time
+Almost there! One last log and I'll be happy.
+I hope you had a lovely dinner. I wouldn't know.
+Log that dinner ASAP to keep me happy.
+Don't forget food is fuel for the brain, and body!

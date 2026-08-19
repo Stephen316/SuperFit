@@ -36,9 +36,68 @@ actor HealthKitManager: HealthProvider {
         return t
     }
 
+    /// What the app writes back: the workout itself plus the energy and distance
+    /// samples that make it read as a real session in Apple Fitness. Kept as
+    /// narrow as the write path actually uses — no HR, since an iPhone-only
+    /// session records none.
+    private var shareTypes: Set<HKSampleType> {
+        var t: Set<HKSampleType> = [HKObjectType.workoutType()]
+        func q(_ id: HKQuantityTypeIdentifier) { if let x = HKQuantityType.quantityType(forIdentifier: id) { t.insert(x) } }
+        q(.activeEnergyBurned)
+        q(.distanceWalkingRunning); q(.distanceCycling); q(.distanceSwimming)
+        return t
+    }
+
     func requestAuthorization() async throws {
         guard isAvailable else { throw HealthError.unavailable }
-        try await store.requestAuthorization(toShare: [], read: readTypes)
+        try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
+    }
+
+    // MARK: Write-back
+
+    /// Saves a SuperFit-tracked workout to HealthKit via `HKWorkoutBuilder`, so a
+    /// run or ride started in the app lands in Apple Health and Fitness alongside
+    /// watch workouts. Returns quietly when HealthKit is unavailable, the
+    /// interval is empty, or the user hasn't granted write access — the builder
+    /// throws in the last case and the caller treats a failed write as best-effort.
+    func saveWorkout(_ write: WorkoutWrite) async throws {
+        guard isAvailable, write.end > write.start else { return }
+
+        let config = HKWorkoutConfiguration()
+        config.activityType = write.activity.healthKitType
+
+        let builder = HKWorkoutBuilder(healthStore: store, configuration: config, device: .local())
+        try await builder.beginCollection(at: write.start)
+
+        var samples: [HKSample] = []
+        if let kcal = write.activeEnergyKcal, kcal > 0,
+           let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+            let qty = HKQuantity(unit: .kilocalorie(), doubleValue: kcal)
+            samples.append(HKQuantitySample(type: energyType, quantity: qty,
+                                            start: write.start, end: write.end))
+        }
+        if let metres = write.distanceMetres, metres > 0,
+           let distanceID = distanceIdentifier(for: config.activityType),
+           let distanceType = HKQuantityType.quantityType(forIdentifier: distanceID) {
+            let qty = HKQuantity(unit: .meter(), doubleValue: metres)
+            samples.append(HKQuantitySample(type: distanceType, quantity: qty,
+                                            start: write.start, end: write.end))
+        }
+        if !samples.isEmpty { try await builder.addSamples(samples) }
+
+        try await builder.endCollection(at: write.end)
+        _ = try await builder.finishWorkout()
+    }
+
+    /// Distance is a per-modality quantity type in HealthKit; only the activities
+    /// SuperFit can measure a distance for map to one.
+    private func distanceIdentifier(for type: HKWorkoutActivityType) -> HKQuantityTypeIdentifier? {
+        switch type {
+        case .running, .walking, .hiking: return .distanceWalkingRunning
+        case .cycling: return .distanceCycling
+        case .swimming: return .distanceSwimming
+        default: return nil
+        }
     }
 
     // MARK: Body
@@ -105,11 +164,34 @@ actor HealthKitManager: HealthProvider {
             }
             store.execute(q)
         }
-        var out: [WorkoutSample] = []
-        for workout in workouts {
-            out.append(await sample(from: workout))
+        // Each workout needs a separate server-side heart-rate statistics
+        // query. Running those strictly one after another made a 90-day import
+        // pay the HealthKit round-trip once per workout. Keep four in flight —
+        // enough to hide query latency without flooding HKHealthStore — and
+        // restore the source order before returning.
+        return await withTaskGroup(of: (Int, WorkoutSample).self) { group in
+            let limit = min(4, workouts.count)
+            var next = 0
+            for _ in 0..<limit {
+                let index = next
+                let workout = workouts[index]
+                group.addTask { (index, await self.sample(from: workout)) }
+                next += 1
+            }
+
+            var results: [(Int, WorkoutSample)] = []
+            results.reserveCapacity(workouts.count)
+            while let result = await group.next() {
+                results.append(result)
+                if next < workouts.count {
+                    let index = next
+                    let workout = workouts[index]
+                    group.addTask { (index, await self.sample(from: workout)) }
+                    next += 1
+                }
+            }
+            return results.sorted { $0.0 < $1.0 }.map(\.1)
         }
-        return out
     }
 
     /// Assembles everything HealthKit knows about one workout.
@@ -147,16 +229,17 @@ actor HealthKitManager: HealthProvider {
         s.distanceMetres = distance
         s.swimStrokeCount = stat(.swimmingStrokeCount, .count())
         s.sourceName = workout.sourceRevision.source.name
+        s.sourceBundleID = workout.sourceRevision.source.bundleIdentifier
         s.elevationGainMetres = (meta[HKMetadataKeyElevationAscended] as? HKQuantity)?
             .doubleValue(for: .meter())
         s.swimStrokeStyle = (meta[HKMetadataKeySwimmingStrokeStyle] as? Int)
             .flatMap(strokeStyleName)
 
-        if let hr = try? await heartRateStatistics(in: DateInterval(start: workout.startDate,
-                                                                   end: workout.endDate)) {
+        if let hr = try? await heartRateStatistics(for: workout) {
             s.avgHeartRate = hr.average
             s.maxHeartRate = hr.maximum
             s.minHeartRate = hr.minimum
+            s.heartRateSegments = hr.segments
         }
 
         // Cadence as a rate can't be summed, so derive it from step count over
@@ -196,25 +279,63 @@ actor HealthKitManager: HealthProvider {
         }
     }
 
-    /// Average, max and min heart rate over an interval.
-    ///
-    /// `HKStatisticsQuery` with `.discreteAverage` does this server-side rather
-    /// than pulling every beat sample across the whole workout.
+    /// Average, max and min heart rate over an interval, plus minute buckets for
+    /// load calculations. The workout-association predicate is essential: a
+    /// time-only query mixes concurrent streams from other devices and apps.
     private func heartRateStatistics(
-        in range: DateInterval
-    ) async throws -> (average: Double?, maximum: Double?, minimum: Double?) {
+        for workout: HKWorkout
+    ) async throws -> (average: Double?, maximum: Double?, minimum: Double?,
+                       segments: [HeartRateSegment]) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
             throw HealthError.unsupportedType
         }
-        let predicate = HKQuery.predicateForSamples(withStart: range.start, end: range.end)
+        let time = HKQuery.predicateForSamples(withStart: workout.startDate, end: workout.endDate)
+        let associated = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            time, HKQuery.predicateForObjects(from: workout)
+        ])
+        var samples = try await heartRateSamples(type: type, predicate: associated)
+
+        // Some third-party stores do not attach their HR samples to the workout.
+        // Fall back only to the workout's own source/device, never every stream
+        // that happened to overlap in time.
+        if samples.isEmpty {
+            var predicates: [NSPredicate] = [
+                time, HKQuery.predicateForObjects(from: workout.sourceRevision.source)
+            ]
+            if let device = workout.device {
+                predicates.append(HKQuery.predicateForObjects(from: Set([device])))
+            }
+            samples = try await heartRateSamples(
+                type: type,
+                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates))
+        }
+
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let values = samples.map { $0.quantity.doubleValue(for: unit) }
+        guard !values.isEmpty else { return (nil, nil, nil, []) }
+        let calendar = Calendar(identifier: .gregorian)
+        let buckets = Dictionary(grouping: samples) {
+            calendar.dateInterval(of: .minute, for: $0.startDate)?.start ?? $0.startDate
+        }
+        let segments = buckets.keys.sorted().compactMap { minute -> HeartRateSegment? in
+            guard let bucket = buckets[minute], !bucket.isEmpty else { return nil }
+            let average = bucket.reduce(0.0) {
+                $0 + $1.quantity.doubleValue(for: unit)
+            } / Double(bucket.count)
+            return HeartRateSegment(durationMinutes: 1, avgHeartRate: average)
+        }
+        return (values.reduce(0, +) / Double(values.count), values.max(), values.min(), segments)
+    }
+
+    private func heartRateSamples(type: HKQuantityType,
+                                  predicate: NSPredicate) async throws -> [HKQuantitySample] {
         return try await withCheckedThrowingContinuation { cont in
-            let q = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate,
-                                      options: [.discreteAverage, .discreteMax, .discreteMin]) { _, stats, error in
+            let q = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit,
+                                  sortDescriptors: [.init(key: HKSampleSortIdentifierStartDate,
+                                                          ascending: true)]) { _, raw, error in
                 if let error { cont.resume(throwing: error); return }
-                let unit = HKUnit.count().unitDivided(by: .minute())
-                cont.resume(returning: (stats?.averageQuantity()?.doubleValue(for: unit),
-                                        stats?.maximumQuantity()?.doubleValue(for: unit),
-                                        stats?.minimumQuantity()?.doubleValue(for: unit)))
+                cont.resume(returning: (raw as? [HKQuantitySample]) ?? [])
             }
             store.execute(q)
         }
@@ -236,15 +357,23 @@ actor HealthKitManager: HealthProvider {
             store.execute(q)
         }
 
-        let cal = Calendar(identifier: .gregorian)
-        var byDay: [Date: SleepSampleBuilder] = [:]
-        for s in samples {
-            let day = cal.startOfDay(for: s.endDate)
-            let minutes = Int(s.endDate.timeIntervalSince(s.startDate) / 60)
-            byDay[day, default: SleepSampleBuilder()].add(value: s.value, minutes: minutes,
-                                                          start: s.startDate, end: s.endDate)
+        let intervals = samples.compactMap { sample -> SleepStageInterval? in
+            let stage: SleepStageKind
+            switch HKCategoryValueSleepAnalysis(rawValue: sample.value) {
+            case .inBed: stage = .inBed
+            case .asleepDeep: stage = .deep
+            case .asleepREM: stage = .rem
+            case .asleepCore: stage = .core
+            case .asleepUnspecified, .asleep: stage = .asleepUnspecified
+            default: return nil
+            }
+            let device = sample.device?.localIdentifier ?? sample.device?.name ?? "unknown-device"
+            let source = sample.sourceRevision.source.bundleIdentifier
+            return SleepStageInterval(start: sample.startDate, end: sample.endDate,
+                                      stage: stage, sourceID: "\(source)|\(device)")
         }
-        return byDay.map { $0.value.build(day: $0.key) }.sorted { $0.day < $1.day }
+        return SleepIntervalReconciler.reconcile(
+            intervals, calendar: Calendar(identifier: .gregorian))
     }
 
     // MARK: - Query helpers
@@ -291,36 +420,6 @@ actor HealthKitManager: HealthProvider {
         }
     }
 }
-
-private struct SleepSampleBuilder {
-    var inBed = 0, asleep = 0, deep = 0, rem = 0, core = 0
-    /// Bounds of the asleep segments only — `inBed` brackets the night more
-    /// loosely (reading, lying awake) and would blur bedtime consistency.
-    var firstAsleep: Date?
-    var lastAsleep: Date?
-
-    mutating func add(value: Int, minutes: Int, start: Date, end: Date) {
-        switch HKCategoryValueSleepAnalysis(rawValue: value) {
-        case .inBed:
-            inBed += minutes
-            return
-        case .asleepDeep: deep += minutes; asleep += minutes
-        case .asleepREM: rem += minutes; asleep += minutes
-        case .asleepCore: core += minutes; asleep += minutes
-        case .asleepUnspecified, .asleep: asleep += minutes
-        default: return
-        }
-        firstAsleep = min(start, firstAsleep ?? start)
-        lastAsleep = max(end, lastAsleep ?? end)
-    }
-
-    func build(day: Date) -> SleepSample {
-        SleepSample(day: day, inBedMinutes: max(inBed, asleep),
-                    asleepMinutes: asleep, deepMinutes: deep, remMinutes: rem, coreMinutes: core,
-                    bedtime: firstAsleep, wakeTime: lastAsleep)
-    }
-}
-
 
 #else
 

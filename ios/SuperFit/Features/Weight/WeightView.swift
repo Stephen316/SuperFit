@@ -4,10 +4,10 @@ import Charts
 
 struct WeightView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
+    @State private var metrics: [BodyMetrics] = []
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
-    @State private var entry = ""
+    @State private var loggingWeight = false
     /// The row being corrected. A mistyped weigh-in skews the trend and the TDEE
     /// estimate built on it, so fixing one has to be possible without deleting
     /// and re-adding at today's date — which would move it to the wrong day.
@@ -19,11 +19,25 @@ struct WeightView: View {
     @State private var confirmingDelete: BodyMetrics?
     @State private var confirmingEdit: PendingEdit?
     @State private var syncing = false
+    @State private var storageFailure: String?
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
+    /// One point per day — the lowest reading of it, matching what every
+    /// calculation uses.
+    ///
+    /// Plotting every reading drew the same day twice, and the higher of the two
+    /// was food, fluid or clothing rather than a different weight. The list
+    /// below still shows every row, because that is where a bad entry gets
+    /// found and corrected.
     private var chartData: [BodyMetrics] {
-        metrics.sorted { $0.date < $1.date }.suffix(90)
+        var lowest: [Date: BodyMetrics] = [:]
+        for m in metrics {
+            let day = Calendar.current.startOfDay(for: m.date)
+            if let existing = lowest[day], existing.weightKg <= m.weightKg { continue }
+            lowest[day] = m
+        }
+        return lowest.values.sorted { $0.date < $1.date }.suffix(90)
     }
 
     /// Anchoring the axis to zero makes the chart useless: 5 kg on a 100 kg body
@@ -86,7 +100,7 @@ struct WeightView: View {
                         ForEach(chartData) { m in
                             PointMark(x: .value("Date", m.date),
                                       y: .value("Weight", units.displayWeight(m.weightKg)))
-                                .foregroundStyle(Color.white.opacity(0.30))
+                                .foregroundStyle(Theme.textSecondary.opacity(0.7))
                                 .symbolSize(18)
                             if let t = m.trendWeightKg {
                                 LineMark(x: .value("Date", m.date),
@@ -111,7 +125,7 @@ struct WeightView: View {
                     .listRowInsets(.init(top: 12, leading: 12, bottom: 12, trailing: 12))
                 } else {
                     Text("Log a few days to see your trend.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
     }
 
@@ -120,28 +134,35 @@ struct WeightView: View {
     /// checker could not solve inside its time limit.
     private var entries: some View {
             List {
+                Group {
+                FeatureCategoryBar("Weight trend")
                 Section { trendChart }
 
+                FeatureCategoryBar("Weekly change")
                 Section {
                     HStack {
                         Text(trendLabel).font(.subheadline)
                         Spacer()
                         Text(units.weightDeltaString(trendSlopePerWeek))
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
 
-                Section("Log weight") {
-                    HStack {
-                        TextField("Weight in \(units.weightUnit)", text: $entry)
-                            .keyboardType(.decimalPad)
-                        Text(units.weightUnit).foregroundStyle(.secondary)
-                        Button("Add", action: addEntry)
-                            .disabled(Double(entry) == nil)
+                FeatureCategoryBar("Log weight")
+                Section {
+                    Button { loggingWeight = true } label: {
+                        HStack {
+                            Text("Add a weigh-in")
+                            Spacer()
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Theme.gold)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
 
+                FeatureCategoryBar("Weigh-ins")
                 Section {
                     ForEach(metrics.prefix(30)) { m in
                         HStack {
@@ -149,11 +170,10 @@ struct WeightView: View {
                             Spacer()
                             Text(units.weightString(m.weightKg)).monospacedDigit()
                         }
-                        // Tappable as well as swipeable: a swipe is invisible
-                        // until you try it, and this is the only way to fix a
-                        // number that is quietly skewing every calorie target.
-                        .contentShape(Rectangle())
-                        .onTapGesture { options = m }
+                        // Swipe only. A tap used to open the same menu, which
+                        // made the row feel like a button that led somewhere and
+                        // put a destructive action one stray touch away while
+                        // scrolling. The footer carries the affordance instead.
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             // One button rather than separate edit and delete
                             // actions: a full-swipe delete is too easy to trigger
@@ -166,12 +186,16 @@ struct WeightView: View {
                     }
                 } footer: {
                     if !metrics.isEmpty {
-                        Text("Swipe or tap a weigh-in to correct or remove it. A wrong "
+                        Text("Swipe a weigh-in left to correct or remove it. A wrong "
                              + "number pulls the trend, and your calorie targets are "
                              + "built on that trend.")
                     }
                 }
+                }
+                .listRowBackground(Theme.surface)
             }
+            .refreshable { await syncFromHealth() }
+            .task { loadRecentMetrics() }
     }
 
     var body: some View {
@@ -191,7 +215,8 @@ struct WeightView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
+            .stickyCategoryHeaders(["Weight trend", "Weekly change", "Log weight", "Weigh-ins"])
             .settingsToolbar()
             .confirmationDialog("Weigh-in", isPresented: Binding(
                 get: { options != nil },
@@ -240,6 +265,17 @@ struct WeightView: View {
             } message: {
                 Text(rejected ?? "")
             }
+            .alert("Couldn't save", isPresented: Binding(
+                get: { storageFailure != nil },
+                set: { if !$0 { storageFailure = nil } })) {
+                Button("OK", role: .cancel) { storageFailure = nil }
+            } message: {
+                Text(storageFailure ?? "")
+            }
+            .fullScreenCover(isPresented: $loggingWeight) {
+                NumberEntrySheet(title: "Weigh-in", unit: units.weightUnit,
+                                 allowsDecimal: true, onCommit: addWeight)
+            }
         }
     }
 
@@ -253,19 +289,19 @@ struct WeightView: View {
     /// or pounds typed while set to kilograms.
     private static let acceptedKg = 30.0...300.0
 
-    private func addEntry() {
-        guard let value = Double(entry) else { return }
-        let kg = units.storeWeight(value)
+    /// Records a weigh-in from the entry sheet. Blank is a no-op — the sheet was
+    /// opened and dismissed without a number.
+    private func addWeight(_ display: Double?) {
+        guard let display else { return }
+        let kg = units.storeWeight(display)
         guard Self.acceptedKg.contains(kg) else {
-            // Was a silent no-op: the button appeared to do nothing and the entry
-            // stayed in the field with no reason given.
             rejected = outOfRangeMessage
             return
         }
         context.insert(BodyMetrics(date: .now, weightKg: kg, source: .manual))
         recomputeTrend()
-        try? context.save()
-        entry = ""
+        guard saveChanges() else { return }
+        loadRecentMetrics()
     }
 
     private var outOfRangeMessage: String {
@@ -322,13 +358,15 @@ struct WeightView: View {
         // rebuilt — otherwise the correction shows in the list while every
         // estimate keeps using the old number.
         recomputeTrend()
-        try? context.save()
+        guard saveChanges() else { return }
+        loadRecentMetrics()
     }
 
     private func applyDelete(_ row: BodyMetrics) {
         context.delete(row)
         recomputeTrend()
-        try? context.save()
+        guard saveChanges() else { return }
+        loadRecentMetrics()
     }
 
     private func recomputeTrend() {
@@ -338,7 +376,58 @@ struct WeightView: View {
     private func syncFromHealth() async {
         syncing = true
         defer { syncing = false }
-        await SyncCoordinator(context: context).syncAll(days: 365)
-        AggregationService(context: context).runAll()
+        let changes = await SyncCoordinator(context: context).syncAll(days: 365)
+        storageFailure = changes.failureMessage
+        AggregationService(context: context)
+            .runAll(refreshWeightTrend: changes.weightTrendNeedsRefresh)
+        loadRecentMetrics()
+    }
+
+    @discardableResult
+    private func saveChanges() -> Bool {
+        do {
+            try context.save()
+            return true
+        } catch {
+            storageFailure = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Loads exactly the history this screen can display: every reading on the
+    /// latest 90 distinct days. Paging to the boundary avoids materialising an
+    /// unlimited weight history, while the final range fetch retains duplicate
+    /// readings on the oldest displayed day so its daily-low calculation stays
+    /// identical to the previous all-store query.
+    private func loadRecentMetrics() {
+        let calendar = Calendar.current
+        let pageSize = 128
+        var offset = 0
+        var scanned: [BodyMetrics] = []
+        var distinctDays = Set<Date>()
+
+        while distinctDays.count < 90 {
+            var page = FetchDescriptor<BodyMetrics>(
+                sortBy: [SortDescriptor(\BodyMetrics.date, order: .reverse)])
+            page.fetchLimit = pageSize
+            page.fetchOffset = offset
+            guard let rows = try? context.fetch(page), !rows.isEmpty else { break }
+            scanned.append(contentsOf: rows)
+            rows.forEach { distinctDays.insert(calendar.startOfDay(for: $0.date)) }
+            guard rows.count == pageSize else { break }
+            offset += pageSize
+        }
+
+        guard distinctDays.count >= 90,
+              let oldest = distinctDays.sorted(by: >).prefix(90).last
+        else {
+            metrics = scanned
+            return
+        }
+
+        let recent = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= oldest },
+            sortBy: [SortDescriptor(\BodyMetrics.date, order: .reverse)])
+        metrics = (try? context.fetch(recent)) ?? scanned
     }
 }

@@ -5,22 +5,31 @@ import SwiftData
 /// targets. The Diary tab stays the logging surface; this is the analysis.
 struct NutritionView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     @Query private var profiles: [UserProfile]
-    @Query private var logs: [NutritionLog]
-    @Query(sort: \BodyMetrics.date, order: .reverse) private var metrics: [BodyMetrics]
-    @Query(sort: \MetabolicEstimateRecord.date, order: .reverse) private var estimates: [MetabolicEstimateRecord]
-    @Query(sort: \TrainingSession.startedAt, order: .reverse) private var sessions: [TrainingSession]
+    @Query private var sessions: [TrainingSession]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
+
+    @State private var logs: [NutritionLog] = []
+    @State private var metrics: [BodyMetrics] = []
+    @State private var estimates: [MetabolicEstimateRecord] = []
 
     @State private var day = Calendar.current.startOfDay(for: .now)
     @State private var averaging = false
     @State private var showingProtein = false
 
+    init() {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -28, to: .now) ?? .now
+        _sessions = Query(filter: #Predicate { $0.startedAt >= cutoff },
+                          sort: \TrainingSession.startedAt, order: .reverse)
+    }
+
     private var profile: UserProfile? { profiles.first }
 
     private var dayLogs: [NutritionLog] {
-        logs.filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+        let d = DayBounds(day)
+        return logs.filter { d.contains($0.date) }
     }
 
     /// Averaging window smooths the day-to-day swings micronutrients naturally
@@ -57,7 +66,7 @@ struct NutritionView: View {
         let kcal = MetabolismEngine().calorieTarget(tdee: tdee, goal: profile.goal, bodyweightKg: w)
         let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
         return MacroCalculator().targets(kcal: kcal, goal: profile.goal, bodyweightKg: w,
-                                         leanMassKg: metrics.first?.leanMassKg,
+                                         leanMassKg: BodyComposition.recentLeanMassKg(metrics),
                                          proteinPerKg: override)
     }
 
@@ -87,9 +96,9 @@ struct NutritionView: View {
     /// Supplements summed across the window. Counted the same as food: a whey
     /// shake is 25 g of protein whichever screen it was entered on.
     private var supplementTotal: NutrientProfile {
-        windowDays.reduce(into: NutrientProfile()) { sum, d in
-            let t = SupplementIntake.total(on: d, entries: supplementEntries,
-                                           supplements: supplements)
+        let totals = SupplementIntake.totals(
+            on: windowDays, entries: supplementEntries, supplements: supplements)
+        return totals.values.reduce(into: NutrientProfile()) { sum, t in
             sum.kcal += t.kcal; sum.proteinG += t.proteinG
             sum.carbsG += t.carbsG; sum.fatG += t.fatG; sum.fibreG += t.fibreG
             for (k, v) in t.micros { sum.micros[k, default: 0] += v }
@@ -130,20 +139,25 @@ struct NutritionView: View {
     var body: some View {
         NavigationStack {
             List {
-                if windowLogs.isEmpty && supplementTotal.kcal == 0
-                    && supplementTotal.micros.isEmpty {
-                    emptySection
-                } else {
-                    macroSection
-                    if microTargets.isEmpty {
-                        needsProfileSection
+                // These sections are declared as computed properties, so the
+                // surface is opted into here, where they enter the list.
+                Group {
+                    if windowLogs.isEmpty && supplementTotal.kcal == 0
+                        && supplementTotal.micros.isEmpty {
+                        emptySection
                     } else {
-                        ForEach(Micronutrient.Group.allCases, id: \.self) { group in
-                            microSection(group)
+                        macroSection
+                        if microTargets.isEmpty {
+                            needsProfileSection
+                        } else {
+                            ForEach(Micronutrient.Group.allCases, id: \.self) { group in
+                                microSection(group)
+                            }
+                            coverageFooter
                         }
-                        coverageFooter
                     }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(averaging ? "Nutrition — 7-day average" : "Nutrition")
             .themedChrome()
@@ -165,8 +179,10 @@ struct NutritionView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
             .sheet(isPresented: $showingProtein) { ProteinAdherenceView() }
+            .task { loadNutritionData() }
+            .onChange(of: day) { _, _ in loadNutritionData() }
         }
     }
 
@@ -260,7 +276,7 @@ struct NutritionView: View {
     /// number than bodyweight — two people at 82 kg with 15% and 30% body fat
     /// need different amounts — but it's silently different, so it's named.
     private func proteinBasisExplanation(_ goal: FitnessGoal) -> String {
-        let lean = metrics.first?.leanMassKg
+        let lean = BodyComposition.recentLeanMassKg(metrics)
         let usingLean = lean != nil
         let gPerKg = profile?.proteinPerKgOverride ?? 0 > 0
             ? profile!.proteinPerKgOverride
@@ -284,11 +300,43 @@ struct NutritionView: View {
             return "Protein is set at the upper end to build muscle while calories run slightly below expenditure."
         case .maintenance:
             return "Calories match your measured expenditure, with protein set to maintain lean mass."
+        case .strength:
+            return "Calories sit slightly above your measured expenditure to fuel heavy, low-rep training, with protein set to support recovery."
         }
     }
 
     private func shift(_ days: Int) {
         day = Calendar.current.date(byAdding: .day, value: days, to: day) ?? day
+    }
+
+    private func loadNutritionData() {
+        let cal = Calendar.current
+        let selectedEnd = DayBounds(day, calendar: cal).end
+        let selectedStart = cal.date(byAdding: .day, value: -6,
+                                     to: cal.startOfDay(for: day)) ?? day
+        let logQuery = FetchDescriptor<NutritionLog>(predicate: #Predicate {
+            $0.date >= selectedStart && $0.date < selectedEnd
+        })
+        logs = (try? context.fetch(logQuery)) ?? []
+
+        let recent = cal.date(byAdding: .day, value: -30, to: .now) ?? .now
+        let metricQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= recent },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        var loadedMetrics = (try? context.fetch(metricQuery)) ?? []
+        if loadedMetrics.isEmpty {
+            var latest = FetchDescriptor<BodyMetrics>(
+                sortBy: [SortDescriptor(\.date, order: .reverse)])
+            latest.fetchLimit = 1
+            loadedMetrics = (try? context.fetch(latest)) ?? []
+        }
+        metrics = loadedMetrics
+
+        var estimateQuery = FetchDescriptor<MetabolicEstimateRecord>(
+            predicate: #Predicate { $0.windowDays == 30 },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        estimateQuery.fetchLimit = 1
+        estimates = (try? context.fetch(estimateQuery)) ?? []
     }
 }
 
@@ -321,7 +369,7 @@ struct NutrientBar: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Theme.track)
                     Capsule().fill(tint).frame(width: geo.size.width * fraction)
                 }
             }

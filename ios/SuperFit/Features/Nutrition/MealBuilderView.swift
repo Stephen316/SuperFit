@@ -42,14 +42,21 @@ struct MealBuilderView: View {
                     TextField("e.g. Overnight oats", text: $name)
                         .onChange(of: name) { meal?.name = trimmedName; save() }
                 }
+                .listRowBackground(Theme.surface)
 
-                if !ingredients.resolved.isEmpty { totalsSection }
-                ingredientsSection
+                // Applied here rather than inside each computed section: these
+                // are declared outside the List body, so the surface has to be
+                // opted into where they are placed into it.
+                Group {
+                    if !ingredients.resolved.isEmpty { totalsSection }
+                    ingredientsSection
+                }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle(existing == nil ? "New meal" : "Edit meal")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -186,6 +193,7 @@ struct MealBuilderView: View {
             entry.carbsG = scaled.carbsG
             entry.fatG = scaled.fatG
             entry.fibreG = scaled.fibreG
+            entry.waterMl = max(scaled.waterG ?? 0, 0)
             entry.micros = Dictionary(uniqueKeysWithValues: scaled.micros.compactMap { key, value in
                 Micronutrient(rawValue: key).map { ($0, value) }
             })
@@ -223,19 +231,20 @@ private struct MealIngredientView: View {
     private var options: [ServingOption] { ServingOption.options(for: food) }
     private var grams: Double { quantity * unit.gramsPerUnit }
 
+
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section(food.name) {
                     LabeledContent("Amount") {
-                        TextField("0", value: $quantity, format: .number)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        AmountField(value: $quantity, unit: unit.label,
+                                    maximum: 5000 / max(unit.gramsPerUnit, 0.000_1))
                     }
                     Picker("Unit", selection: $unit) {
                         ForEach(options) { Text($0.label).tag($0) }
                     }
                 }
+                .listRowBackground(Theme.surface)
                 Section("This amount") {
                     let scaled = food.scaled(grams: grams)
                     LabeledContent("Calories", value: "\(Int(scaled.kcal)) kcal")
@@ -243,11 +252,12 @@ private struct MealIngredientView: View {
                     LabeledContent("Carbs", value: "\(Int(scaled.carbsG)) g")
                     LabeledContent("Fat", value: "\(Int(scaled.fatG)) g")
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Add ingredient")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList()
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
@@ -262,9 +272,17 @@ private struct MealIngredientView: View {
                 .withoutGlassBackground()
             }
             .task {
-                if let portion = options.first, portion != .gram, portion != .ounce {
+                if let portion = options.first(where: { $0.kind == .portion }) {
                     unit = portion
                     quantity = 1
+                } else if food.effectiveGramsPerMillilitre != nil, units == .imperial,
+                          let fluidOunce = options.first(where: { $0.kind == .fluidOunce }) {
+                    unit = fluidOunce
+                    quantity = 8
+                } else if food.effectiveGramsPerMillilitre != nil,
+                          let millilitre = options.first(where: { $0.kind == .millilitre }) {
+                    unit = millilitre
+                    quantity = 250
                 } else if units == .imperial {
                     unit = .ounce
                     quantity = 3.5

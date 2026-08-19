@@ -9,9 +9,15 @@ import Charts
 /// figure — hence bars per day with a trailing mean laid over them.
 struct StepsHistoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \DailyEnergy.date) private var energy: [DailyEnergy]
+    @Query private var energy: [DailyEnergy]
 
     @State private var range = HistoryRange.quarter
+
+    init() {
+        let cutoff = HistoryRange.year.start
+        _energy = Query(filter: #Predicate { $0.date >= cutoff },
+                        sort: \DailyEnergy.date)
+    }
 
     private var points: [HistoryPoint] {
         energy.filter { $0.date >= range.start && $0.steps > 0 }
@@ -21,10 +27,10 @@ struct StepsHistoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
                     VStack(spacing: 14) {
-                        ThemeSegmentedControl(
+                        FeatureTabControl(
                             options: HistoryRange.allCases.map { ($0, $0.label) },
                             selection: $range)
 
@@ -40,7 +46,6 @@ struct StepsHistoryView: View {
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
@@ -62,10 +67,7 @@ struct StepsHistoryView: View {
             stat("Total", all.isEmpty ? "—" : compact(total))
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     /// Step totals run to six figures over a quarter, which doesn't fit the

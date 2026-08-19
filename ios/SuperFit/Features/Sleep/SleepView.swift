@@ -3,10 +3,21 @@ import SwiftData
 import Charts
 
 struct SleepView: View {
-    @Query(sort: \SleepData.date, order: .reverse) private var sleep: [SleepData]
-    @Query(sort: \DailyVitals.date, order: .reverse) private var vitals: [DailyVitals]
+    @Environment(\.modelContext) private var context
+    @Query private var sleep: [SleepData]
+    @Query private var vitals: [DailyVitals]
 
     @State private var window = 30
+
+    init() {
+        // The picker cannot show more than 90 days. Asking SwiftData for that
+        // same window avoids faulting years of daily Health rows first.
+        let cutoff = Calendar.current.date(byAdding: .day, value: -90, to: .now) ?? .now
+        _sleep = Query(filter: #Predicate { $0.date >= cutoff },
+                       sort: \SleepData.date, order: .reverse)
+        _vitals = Query(filter: #Predicate { $0.date >= cutoff },
+                        sort: \DailyVitals.date, order: .reverse)
+    }
 
     private var nights: [SleepNight] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -window, to: .now) ?? .now
@@ -31,15 +42,18 @@ struct SleepView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let summary {
-                    summarySection(summary)
-                    durationSection
-                    if nights.contains(where: \.hasStages) { stagesSection }
-                    if let impact { impactSection(impact) }
-                    nightsSection
-                } else {
-                    emptySection
+                Group {
+                    if let summary {
+                        summarySection(summary)
+                        durationSection
+                        if nights.contains(where: \.hasStages) { stagesSection }
+                        if let impact { impactSection(impact) }
+                        nightsSection
+                    } else {
+                        emptySection
+                    }
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Sleep")
             .themedChrome()
@@ -56,14 +70,18 @@ struct SleepView: View {
                 }
                 .withoutGlassBackground()
             }
-            .themedList()
+            .featureList()
+            .refreshable { await FeatureRefresh.syncAndAggregate(context: context) }
+            .stickyCategoryHeaders(["Summary", "Duration", "Stages — nightly average", "What sleep does for you", "Nights", "Sleep"])
             .settingsToolbar()
         }
     }
 
     // MARK: - Sections
 
+    @ViewBuilder
     private func summarySection(_ s: SleepSummary) -> some View {
+        FeatureCategoryBar("Summary")
         Section {
             HStack {
                 stat("Average", duration(s.averageAsleepMinutes))
@@ -83,22 +101,24 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private var durationSection: some View {
-        Section("Duration") {
+        FeatureCategoryBar("Duration")
+        Section {
             Chart {
                 ForEach(nights, id: \.date) { n in
                     BarMark(x: .value("Date", n.date, unit: .day),
                             y: .value("Hours", Double(n.asleepMinutes) / 60))
                         .foregroundStyle(n.asleepMinutes >= SleepAnalytics.defaultNeedMinutes
-                                         ? Theme.gold : Color.white.opacity(0.25))
+                                         ? Theme.gold : Theme.textSecondary.opacity(0.6))
                 }
                 RuleMark(y: .value("Need", Double(SleepAnalytics.defaultNeedMinutes) / 60))
                     .lineStyle(.init(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 ForEach(SleepAnalytics().rollingAverage(nights), id: \.date) { point in
                     LineMark(x: .value("Date", point.date, unit: .day),
                              y: .value("7-day average", point.minutes / 60))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Theme.textPrimary)
                         .interpolationMethod(.monotone)
                 }
             }
@@ -115,18 +135,18 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private var stagesSection: some View {
         let staged = nights.filter(\.hasStages)
         let deep = staged.reduce(0) { $0 + $1.deepMinutes }
         let rem = staged.reduce(0) { $0 + $1.remMinutes }
         let core = staged.reduce(0) { $0 + $1.coreMinutes }
         let total = Double(max(1, deep + rem + core))
-        return Section {
+        FeatureCategoryBar("Stages — nightly average")
+        Section {
             stageRow("Deep", minutes: deep / staged.count, share: Double(deep) / total, tint: Theme.gold)
             stageRow("REM", minutes: rem / staged.count, share: Double(rem) / total, tint: Theme.gold.opacity(0.65))
-            stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Color.white.opacity(0.35))
-        } header: {
-            Text("Stages — nightly average")
+            stageRow("Core", minutes: core / staged.count, share: Double(core) / total, tint: Theme.textSecondary)
         } footer: {
             Text(staged.count < nights.count
                  ? "\(staged.count) of \(nights.count) nights have stage data. Stages need a watch worn overnight."
@@ -134,7 +154,9 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private func impactSection(_ i: SleepImpact) -> some View {
+        FeatureCategoryBar("What sleep does for you")
         Section {
             VStack(alignment: .leading, spacing: 6) {
                 Text(i.hrvDeltaPercent >= 0
@@ -142,24 +164,24 @@ struct SleepView: View {
                      : "HRV runs \(Int(abs(i.hrvDeltaPercent).rounded()))% lower after longer nights")
                     .font(.subheadline.weight(.medium))
                 Text("\(Int(i.longNightHRV)) ms after \(duration(Double(i.thresholdMinutes)))+ (\(i.longNights) nights) vs \(Int(i.shortNightHRV)) ms below it (\(i.shortNights) nights).")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
             }
-        } header: {
-            Text("What sleep does for you")
         } footer: {
             Text("Observed in your own data. Correlation, not proof — but it's the clearest signal available.")
         }
     }
 
+    @ViewBuilder
     private var nightsSection: some View {
-        Section("Nights") {
+        FeatureCategoryBar("Nights")
+        Section {
             ForEach(nights.sorted { $0.date > $1.date }.prefix(30), id: \.date) { n in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(n.date, format: .dateTime.weekday(.abbreviated).month().day())
                         if let bed = n.bedtime, let wake = n.wakeTime {
                             Text("\(bed, format: .dateTime.hour().minute()) – \(wake, format: .dateTime.hour().minute())")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                     }
                     Spacer()
@@ -167,7 +189,7 @@ struct SleepView: View {
                         Text(duration(Double(n.asleepMinutes))).monospacedDigit()
                         if let eff = n.efficiency {
                             Text("\(Int(eff * 100))%")
-                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                .font(.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
                         }
                     }
                 }
@@ -175,12 +197,15 @@ struct SleepView: View {
         }
     }
 
+    @ViewBuilder
     private var emptySection: some View {
+        FeatureCategoryBar("Sleep")
         Section {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("No sleep data yet").font(.headline)
                 Text("Sleep syncs from Apple Health. Wear your watch overnight, or track sleep with your iPhone, and nights will appear here.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(Theme.textSecondary)
+                WatchHelpLink()
             }
             .padding(.vertical, 6)
         }
@@ -191,7 +216,7 @@ struct SleepView: View {
     private func stat(_ label: String, _ value: String) -> some View {
         VStack(spacing: 3) {
             Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.caption).foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -201,14 +226,14 @@ struct SleepView: View {
             HStack {
                 Text(name).font(.subheadline)
                 Spacer()
-                Text(duration(Double(minutes))).monospacedDigit().foregroundStyle(.secondary)
+                Text(duration(Double(minutes))).monospacedDigit().foregroundStyle(Theme.textSecondary)
                 Text("\(Int(share * 100))%")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    .font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
                     .frame(width: 34, alignment: .trailing)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Theme.track)
                     Capsule().fill(tint).frame(width: geo.size.width * share)
                 }
             }

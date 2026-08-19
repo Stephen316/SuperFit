@@ -14,6 +14,10 @@ name: SuperFit
 options:
   bundleIdPrefix: com.stephenh
   createIntermediateGroups: true
+  # Keeps Xcode's recommended-settings state in the generated project. Without
+  # this, XcodeGen writes an old LastUpgradeCheck and Xcode 26 offers the same
+  # one-time migration every time the project is regenerated.
+  xcodeVersion: "26.6"
   # iOS 17 is a hard floor, not a preference: @Observable, safeAreaPadding and
   # scrollContentBackground are all 17-only. Below it the app will not compile.
   deploymentTarget:
@@ -21,6 +25,8 @@ options:
 
 settings:
   base:
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
     SWIFT_STRICT_CONCURRENCY: complete
     # SE-0418. Without it every `#Predicate` on a @Model type warns that its
     # key path literal isn't Sendable — `KeyPath<Food, UUID>` can't be, because
@@ -40,6 +46,13 @@ configFiles:
   Debug: Signing.xcconfig
   Release: Signing.xcconfig
 
+packages:
+  # Auth and the per-account backup row. Pinned by minor rather than exact so
+  # security fixes arrive without a manual bump; `xcodegen generate` resolves it.
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.0.0
+
 targets:
   SuperFit:
     type: application
@@ -50,18 +63,77 @@ targets:
       - path: ios/SuperFit
         excludes:
           - "**/.DS_Store"
+      # Compiled into both targets: the app starts the Live Activity, the
+      # extension draws it, and they must agree on its shape.
+      - path: ios/Shared
     settings:
       base:
         INFOPLIST_FILE: ios/SuperFit/SupportingFiles/Info.plist
         CODE_SIGN_ENTITLEMENTS: ios/SuperFit/SupportingFiles/SuperFit.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.stephenh.superfit
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_EMIT_LOC_STRINGS: YES
+    dependencies:
+      - package: Supabase
+        product: Supabase
+      - target: SuperFitWidgets
+      # The watch app is NOT embedded. With no Apple Watch paired, Xcode builds
+      # SuperFitWatch.app as an executable-less placeholder, and iOS install then
+      # rejects the whole app ("InvalidWatchKitApp / MissingBundleExecutable").
+      # The watch target still builds on its own; to ship/pair it, re-add:
+      #   - target: SuperFitWatch
+      #     embed: true
+      # then `xcodegen generate` — do that once a watch is paired to test on.
     # The entitlements file is hand-maintained and referenced by
     # CODE_SIGN_ENTITLEMENTS above. Do not add an `entitlements:` block here —
     # that makes XcodeGen *generate* the file from `properties:`, and with none
     # given it overwrites HealthKit, CloudKit and Sign in with Apple with an
     # empty dict on every `xcodegen generate`.
+
+  # Live Activities need their own bundle: a widget extension is a separate
+  # binary the system runs, so it cannot live inside the app's source glob.
+  SuperFitWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ios/SuperFitWidgets
+        excludes:
+          - "**/.DS_Store"
+          - Info.plist
+      - path: ios/Shared
+    settings:
+      base:
+        INFOPLIST_FILE: ios/SuperFitWidgets/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.stephenh.superfit.widgets
+        # Must sit inside the app's identifier or the extension will not embed.
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+
+  # Companion watchOS app: runs a strength HKWorkoutSession, streams live HR to
+  # the phone via session mirroring, and times rest between sets by HR recovery
+  # (#26). Single-target SwiftUI watch app. The pure rest-decision logic lives in
+  # ios/Shared/HRRestAdvisor.swift (also compiled into the app + its tests).
+  SuperFitWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: ios/SuperFitWatch
+        excludes:
+          - "**/.DS_Store"
+          - Info.plist
+      - path: ios/Shared/HRRestAdvisor.swift
+    settings:
+      base:
+        INFOPLIST_FILE: ios/SuperFitWatch/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ios/SuperFitWatch/SuperFitWatch.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.stephenh.superfit.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    # No `entitlements:` block — same rule as the app: it would make XcodeGen
+    # generate and overwrite the hand-maintained HealthKit entitlements.
 
   SuperFitTests:
     type: bundle.unit-test

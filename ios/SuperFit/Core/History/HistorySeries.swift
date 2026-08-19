@@ -16,6 +16,14 @@ struct HistoryBand: Sendable, Identifiable {
     var id: Date { date }
 }
 
+/// A distance-bearing workout reduced to what a distance trend needs — the
+/// value-type input to `HistorySeries`, so the shaping stays free of SwiftData.
+struct CardioDistanceRecord: Sendable {
+    let date: Date
+    let activity: WorkoutActivity
+    let distanceMetres: Double
+}
+
 /// Turns stored records into chartable series.
 ///
 /// Pure and Sendable — no SwiftData, no I/O — so the shaping is testable without
@@ -41,29 +49,20 @@ struct HistorySeries: Sendable {
                      from start: Date,
                      to end: Date,
                      calendar: Calendar = .current) -> [HistoryBand] {
-        let engine = MetabolismEngine()
-        var out: [HistoryBand] = []
-        var day = calendar.startOfDay(for: start)
-        let last = calendar.startOfDay(for: end)
-
-        while day <= last {
-            let estimate = engine.estimate(records: records, windowDays: windowDays,
-                                           prior: prior, asOf: day)
+        metabolismEstimates(records: records, windowDays: windowDays,
+                            from: start, to: end, calendar: calendar) { _ in prior }
+            .compactMap { day, estimate in
             // Nothing to say until some intake has actually been logged.
-            if estimate.confidence > 0 {
+            guard estimate.confidence > 0 else { return nil }
                 // ±15% at zero confidence narrowing to ±3% at full — the residual
                 // spread the DLW validation measured, widened by how much of the
                 // number is still prior rather than measurement.
                 let spread = estimate.tdeeKcal * (0.03 + 0.12 * (1 - estimate.confidence))
-                out.append(HistoryBand(date: day,
-                                       value: estimate.tdeeKcal,
-                                       lower: estimate.tdeeKcal - spread,
-                                       upper: estimate.tdeeKcal + spread))
+                return HistoryBand(date: day,
+                                   value: estimate.tdeeKcal,
+                                   lower: estimate.tdeeKcal - spread,
+                                   upper: estimate.tdeeKcal + spread)
             }
-            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-            day = next
-        }
-        return out
     }
 
     /// Daily calories in, from food and supplements.
@@ -109,20 +108,69 @@ struct HistorySeries: Sendable {
                              from start: Date,
                              to end: Date,
                              calendar: Calendar = .current) -> [HistoryPoint] {
-        let engine = MetabolismEngine()
-        var out: [HistoryPoint] = []
-        var day = calendar.startOfDay(for: start)
-        let last = calendar.startOfDay(for: end)
-
-        while day <= last {
-            let estimate = engine.estimate(records: records, windowDays: windowDays,
-                                           prior: prior, asOf: day)
+        metabolismEstimates(records: records, windowDays: windowDays,
+                            from: start, to: end, calendar: calendar) { _ in prior }
+            .compactMap { day, estimate in
             // The slope needs weigh-ins, not intake, so it stands on its own.
-            if estimate.smoothedWeightKg > 0 {
-                out.append(HistoryPoint(date: day, value: estimate.trendSlopeKgPerWeek))
+                guard estimate.smoothedWeightKg > 0 else { return nil }
+                return HistoryPoint(date: day, value: estimate.trendSlopeKgPerWeek)
             }
+    }
+
+    /// Estimates a date range in one pass. The old chart path filtered and
+    /// sorted every stored record once per plotted day (365 full scans for the
+    /// year view). Two moving indices keep the same inclusive window semantics
+    /// while touching each record only as it enters or leaves the window.
+    static func metabolismEstimates(
+        records: [DailyRecord],
+        windowDays: Int,
+        from start: Date,
+        to end: Date,
+        calendar: Calendar = .current,
+        prior: (Date) -> MetabolismEngine.Prior?
+    ) -> [(date: Date, estimate: TDEEEstimate)] {
+        let last = calendar.startOfDay(for: end)
+        var day = calendar.startOfDay(for: start)
+        var days: [Date] = []
+        while day <= last {
+            days.append(day)
             guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
             day = next
+        }
+        return metabolismEstimates(records: records, windowDays: windowDays,
+                                   on: days, calendar: calendar, prior: prior)
+    }
+
+    /// Sparse-date form used by adherence charts, which only need estimates on
+    /// days that actually contain a food log.
+    static func metabolismEstimates(
+        records: [DailyRecord],
+        windowDays: Int,
+        on days: [Date],
+        calendar: Calendar = .current,
+        prior: (Date) -> MetabolismEngine.Prior?
+    ) -> [(date: Date, estimate: TDEEEstimate)] {
+        let sorted = records.sorted { $0.date < $1.date }
+        let requestedDays = Set(days.map { calendar.startOfDay(for: $0) }).sorted()
+        let engine = MetabolismEngine()
+        let gregorian = Calendar(identifier: .gregorian)
+        var lower = 0
+        var upper = 0
+        var out: [(Date, TDEEEstimate)] = []
+
+        for day in requestedDays {
+            let windowStart = gregorian.date(byAdding: .day, value: -windowDays,
+                                             to: day) ?? day
+            while lower < sorted.count, sorted[lower].date < windowStart { lower += 1 }
+            if upper < lower { upper = lower }
+            while upper < sorted.count, sorted[upper].date <= day { upper += 1 }
+
+            if let dayPrior = prior(day) {
+                let window = Array(sorted[lower..<upper])
+                out.append((day, engine.estimatePrepared(
+                    records: window, windowDays: windowDays,
+                    prior: dayPrior, asOf: day)))
+            }
         }
         return out
     }
@@ -212,6 +260,94 @@ struct HistorySeries: Sendable {
     /// Trailing mean, for laying a readable line over noisy daily points.
     /// Returns nothing until a full window exists rather than showing a partial
     /// average that looks like a trend.
+    // MARK: Cardio
+
+    /// Per-session distance (metres) for one activity within a range,
+    /// chronological. Only sessions that actually recorded a distance count — a
+    /// GPS-less run or a strength session reads as no data, never a zero, so the
+    /// trend can't be dragged down by an unmeasured session.
+    static func distanceTrend(_ records: [CardioDistanceRecord],
+                              activity: WorkoutActivity,
+                              from start: Date, to end: Date) -> [HistoryPoint] {
+        records
+            .filter { $0.activity == activity && $0.date >= start && $0.date <= end
+                      && $0.distanceMetres > 0 }
+            .sorted { $0.date < $1.date }
+            .map { HistoryPoint(date: $0.date, value: $0.distanceMetres) }
+    }
+
+    /// Distance activities the user actually logged in the range, most-frequent
+    /// first — the picker's options, so it never offers one with no data.
+    static func loggedDistanceActivities(_ records: [CardioDistanceRecord],
+                                         from start: Date, to end: Date) -> [WorkoutActivity] {
+        var counts: [WorkoutActivity: Int] = [:]
+        for record in records
+        where record.date >= start && record.date <= end && record.distanceMetres > 0 {
+            counts[record.activity, default: 0] += 1
+        }
+        return counts.sorted {
+            $0.value != $1.value ? $0.value > $1.value : $0.key.rawValue < $1.key.rawValue
+        }.map(\.key)
+    }
+
+    // MARK: Load
+
+    /// Weekly tonnage — Σ(weight × reps) over working sets, ISO weeks. Warm-ups
+    /// and bodyweight-only work (weight 0) don't count: tonnage is external load
+    /// moved, so a calisthenics session reads as 0 here even though it trained you.
+    static func weeklyTonnage(records: [LiftRecord],
+                              from start: Date, to end: Date) -> [HistoryPoint] {
+        weeklyReduce(from: start, to: end) { week in
+            records.filter { !$0.isWarmup && week.contains($0.date) }
+                .reduce(0.0) { $0 + $1.weightKg * Double($1.reps) }
+        }
+    }
+
+    /// Distinct training sessions per ISO week — frequency. Keyed by each
+    /// session's start instant (every set of a session shares it), so this counts
+    /// sessions, not sets.
+    static func weeklySessionCount(records: [LiftRecord],
+                                   from start: Date, to end: Date) -> [HistoryPoint] {
+        weeklyReduce(from: start, to: end) { week in
+            Double(Set(records.filter { week.contains($0.date) }.map(\.date)).count)
+        }
+    }
+
+    private static func weeklyReduce(from start: Date, to end: Date,
+                                     _ value: (DateInterval) -> Double) -> [HistoryPoint] {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.firstWeekday = 2
+        var out: [HistoryPoint] = []
+        var cursor = calendar.dateInterval(of: .weekOfYear, for: start)?.start ?? start
+        while cursor <= end {
+            guard let week = calendar.dateInterval(of: .weekOfYear, for: cursor) else { break }
+            out.append(HistoryPoint(date: week.start, value: value(week)))
+            cursor = week.end
+        }
+        return out
+    }
+
+    // MARK: Sleep
+
+    /// Bedtime as minutes relative to midnight, evening negative, so 23:50 and
+    /// 00:10 sit 20 minutes apart rather than a day — the continuous axis the
+    /// consistency SD is measured on.
+    static func bedtimeOffsetMinutes(_ bedtime: Date, calendar: Calendar = .current) -> Double {
+        let c = calendar.dateComponents([.hour, .minute], from: bedtime)
+        let hour = c.hour ?? 0
+        let minutes = Double(hour * 60 + (c.minute ?? 0))
+        return hour >= 12 ? minutes - 1440 : minutes
+    }
+
+    /// Population standard deviation of a set of values; nil below two. The
+    /// bedtime-consistency number, computed over a range rather than one night.
+    static func standardDeviation(_ values: [Double]) -> Double? {
+        guard values.count >= 2 else { return nil }
+        let mean = values.reduce(0, +) / Double(values.count)
+        let variance = values.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
+        return variance.squareRoot()
+    }
+
     static func rollingMean(_ points: [HistoryPoint], window: Int = 7) -> [HistoryPoint] {
         guard points.count >= window else { return [] }
         let sorted = points.sorted { $0.date < $1.date }

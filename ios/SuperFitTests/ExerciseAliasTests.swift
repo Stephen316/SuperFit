@@ -67,6 +67,42 @@ struct ExerciseAliasTests {
         #expect(Set(names).count == names.count)
     }
 
+    @Test func theCatalogueIncludesExpandedMachineFamilies() {
+        let names = Set(ExerciseLibrary.catalog.map(\.name))
+        let expected = [
+            "Incline Machine Chest Press", "Neutral-Grip Machine Chest Press",
+            "Machine High Row", "Machine Low Row", "Neutral-Grip Machine Row",
+            "Plate-Loaded Pulldown", "V-Squat Machine", "Reverse Hack Squat",
+            "Kneeling Leg Curl", "Machine Glute Kickback", "Machine Crunch",
+        ]
+        for name in expected { #expect(names.contains(name), "missing \(name)") }
+
+        #expect(exercise("Incline Machine Chest Press")
+            .matches("incline chest press machine"))
+        #expect(exercise("Neutral-Grip Machine Chest Press")
+            .matches("neutral grip chest press machine"))
+    }
+
+    /// Machine names are not cosmetic duplicates when the movement path changes.
+    /// The incline path biases clavicular pec, a neutral press remains chest-led
+    /// with more elbow-extension demand, and an elbows-out row shifts credit from
+    /// lats toward scapular retractors and rear delts.
+    @Test func expandedMachineTensionMapsReflectMovementPath() {
+        let incline = entry("Incline Machine Chest Press").tension
+        #expect(incline[.upperChest] == 5)
+        #expect(incline[.chest] == 3)
+
+        let neutralPress = entry("Neutral-Grip Machine Chest Press").tension
+        #expect(neutralPress[.chest] == 5)
+        #expect(neutralPress[.tricepsLong] == 4)
+
+        let neutralRow = entry("Neutral-Grip Machine Row").tension
+        let wideRow = entry("Wide-Grip Machine Row").tension
+        #expect(neutralRow[.lats] == 5)
+        #expect(wideRow[.rhomboids] == 5)
+        #expect(wideRow[.rearDelts] == 4)
+    }
+
     /// An alias pointing at two different lifts would make one of them
     /// unreachable by that term, which is worse than having no alias.
     @Test func noAliasIsSharedByTwoExercises() {
@@ -114,7 +150,7 @@ struct ExerciseAliasTests {
     @Test func preSplitMuscleNamesStillDecode() {
         #expect(MuscleGroup(stored: "shoulders") == .sideDelts)
         #expect(MuscleGroup(stored: "back") == .lats)
-        #expect(MuscleGroup(stored: "core") == .abs)
+        #expect(MuscleGroup(stored: "core") == .upperAbs)
         // Current names keep working, and nonsense still fails.
         #expect(MuscleGroup(stored: "rearDelts") == .rearDelts)
         #expect(MuscleGroup(stored: "elbow") == nil)
@@ -125,7 +161,7 @@ struct ExerciseAliasTests {
         let old = Exercise(name: "Legacy Press", category: .barbell, tension: [:])
         old.tensionRaw = ["shoulders:5", "core:2"]
         #expect(old.tension[.sideDelts] == 5)
-        #expect(old.tension[.abs] == 2)
+        #expect(old.tension[.upperAbs] == 2)
     }
 
     /// The split is only worth having if the catalogue actually uses it — a
@@ -146,7 +182,7 @@ struct ExerciseAliasTests {
 
         // A vertical pull is lats; a horizontal one is rhomboids and mid-traps.
         #expect(entry("Lat Pulldown").tension[.lats] == 5)
-        #expect(entry("Seated Cable Row").tension[.upperBack] == 5)
+        #expect(entry("Seated Cable Row").tension[.rhomboids] == 5)
     }
 
     @Test func theCatalogueCoversEveryMuscleGroup() {
@@ -154,7 +190,12 @@ struct ExerciseAliasTests {
         for entry in ExerciseLibrary.catalog {
             for (muscle, score) in entry.tension where score >= 4 { covered.insert(muscle) }
         }
-        for muscle in MuscleGroup.allCases {
+        // Two muscles are drawn but have no lift that trains them directly.
+        // They are on the figure because they are visible and because a
+        // compound movement still loads them, not because anyone programmes a
+        // set for them. Exempting them beats inventing exercises nobody does.
+        let noDirectLift: Set<MuscleGroup> = [.sartorius, .pectineus, .peroneals]
+        for muscle in MuscleGroup.allCases where !noDirectLift.contains(muscle) {
             #expect(covered.contains(muscle),
                     "no exercise trains \(muscle.displayName) as a prime mover")
         }

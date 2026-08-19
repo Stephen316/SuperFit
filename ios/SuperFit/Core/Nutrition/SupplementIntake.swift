@@ -32,11 +32,19 @@ enum SupplementIntake {
                       supplements: [Supplement],
                       calendar: Calendar = .current) -> [TakenSupplement] {
         let byID = Dictionary(supplements.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return taken(on: day, entries: entries, supplementsByID: byID, calendar: calendar)
+    }
+
+    private static func taken(on day: Date,
+                              entries: [SupplementEntry],
+                              supplementsByID byID: [UUID: Supplement],
+                              calendar: Calendar) -> [TakenSupplement] {
         let target = calendar.startOfDay(for: day)
+        let bounds = DayBounds(target, calendar: calendar)
 
         let skipped = Set(entries.compactMap { entry -> UUID? in
             guard entry.kind == .skipped, let d = entry.date,
-                  calendar.isDate(d, inSameDayAs: target) else { return nil }
+                  bounds.contains(d) else { return nil }
             return entry.supplementID
         })
 
@@ -56,7 +64,7 @@ enum SupplementIntake {
                       seenDaily.insert(supplementID).inserted
                 else { continue }
             case .once:
-                guard let d = entry.date, calendar.isDate(d, inSameDayAs: target) else { continue }
+                guard let d = entry.date, bounds.contains(d) else { continue }
             case .skipped:
                 continue
             }
@@ -77,7 +85,15 @@ enum SupplementIntake {
                       entries: [SupplementEntry],
                       supplements: [Supplement],
                       calendar: Calendar = .current) -> NutrientProfile {
-        taken(on: day, entries: entries, supplements: supplements, calendar: calendar)
+        let byID = Dictionary(supplements.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return total(on: day, entries: entries, supplementsByID: byID, calendar: calendar)
+    }
+
+    private static func total(on day: Date,
+                              entries: [SupplementEntry],
+                              supplementsByID: [UUID: Supplement],
+                              calendar: Calendar) -> NutrientProfile {
+        taken(on: day, entries: entries, supplementsByID: supplementsByID, calendar: calendar)
             .reduce(into: NutrientProfile()) { sum, item in
                 let t = item.total
                 sum.kcal += t.kcal
@@ -122,14 +138,32 @@ enum SupplementIntake {
                           from start: Date,
                           to end: Date,
                           calendar: Calendar = .current) -> [Date: Double] {
+        let byID = Dictionary(supplements.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var out: [Date: Double] = [:]
         var day = calendar.startOfDay(for: start)
         let last = calendar.startOfDay(for: end)
         while day <= last {
-            let kcal = total(on: day, entries: entries, supplements: supplements,
+            let kcal = total(on: day, entries: entries, supplementsByID: byID,
                              calendar: calendar).kcal
             if kcal > 0 { out[day] = kcal }
             day = calendar.date(byAdding: .day, value: 1, to: day) ?? last.addingTimeInterval(1)
+        }
+        return out
+    }
+
+    /// Totals for a known set of days while building the supplement lookup once.
+    /// History and seven-day nutrition views used to rebuild the same UUID map
+    /// for every date they displayed.
+    static func totals(on days: some Sequence<Date>,
+                       entries: [SupplementEntry],
+                       supplements: [Supplement],
+                       calendar: Calendar = .current) -> [Date: NutrientProfile] {
+        let byID = Dictionary(supplements.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var out: [Date: NutrientProfile] = [:]
+        for date in days {
+            let day = calendar.startOfDay(for: date)
+            out[day] = total(on: day, entries: entries,
+                             supplementsByID: byID, calendar: calendar)
         }
         return out
     }

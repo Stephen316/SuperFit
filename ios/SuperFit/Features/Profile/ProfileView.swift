@@ -10,20 +10,37 @@ struct ProfileView: View {
 
     @State private var bodyFatEntry = ""
 
+    init() {
+        var latest = FetchDescriptor<BodyMetrics>(
+            sortBy: [SortDescriptor(\BodyMetrics.date, order: .reverse)])
+        latest.fetchLimit = 1
+        _metrics = Query(latest)
+    }
+
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
     private var profile: UserProfile? { profiles.first }
     private var latest: BodyMetrics? { metrics.first }
 
     var body: some View {
         if let profile {
-            Form {
+            List {
                 Section("Goal") {
                     Picker("Goal", selection: bind(profile, \.goal)) {
                         ForEach(FitnessGoal.allCases, id: \.self) { g in
                             Text(g.displayName).tag(g)
                         }
                     }
+                    // The section header already reads "Goal"; a visible picker
+                    // label repeats it. Hide the label (kept for VoiceOver) so
+                    // the row shows only the selected goal.
+                    .labelsHidden()
+
+                    // Goal-specific nudge (#28) — what this goal most depends on.
+                    Text(GoalGuidance.tip(for: profile.goal))
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textSecondary)
                 }
+                .listRowBackground(Theme.surface)
 
                 Section("About you") {
                     Picker("Sex", selection: bind(profile, \.sex)) {
@@ -44,8 +61,10 @@ struct ProfileView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .listRowBackground(Theme.surface)
 
                 bodyCompositionSection
+                    .listRowBackground(Theme.surface)
 
                 Section("Activity baseline") {
                     Picker("Baseline", selection: bind(profile, \.activity)) {
@@ -57,11 +76,12 @@ struct ProfileView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .listRowBackground(Theme.surface)
             }
             .navigationTitle("Profile")
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .themedList()
+            .featureList(bottomPadding: 24)
             .keyboardDoneButton()
         } else {
             ProgressView()
@@ -121,7 +141,9 @@ struct ProfileView: View {
         latest.bodyFatPct = pct
         latest.leanMassKg = latest.weightKg * (1 - pct / 100)
         try? context.save()
-        AggregationService(context: context).runAll()
+        // Body composition changes the metabolic prior, not the raw weight
+        // series, so rebuilding every stored trend point here is unnecessary.
+        AggregationService(context: context).runAll(refreshWeightTrend: false)
     }
 
     private func bind<V>(_ profile: UserProfile, _ key: ReferenceWritableKeyPath<UserProfile, V>) -> Binding<V> {
@@ -137,6 +159,7 @@ extension FitnessGoal {
         case .maintenance: return "Maintenance"
         case .muscleGain: return "Muscle gain"
         case .recomposition: return "Recomposition"
+        case .strength: return "Strength"
         }
     }
 }

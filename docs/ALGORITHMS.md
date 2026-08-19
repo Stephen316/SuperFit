@@ -310,6 +310,56 @@ from lifting tonnage, and every stored recovery score was computed that way;
 introducing a second load source would move historical scores with no real logged
 cardio yet to validate against. It stands as its own number until there is.
 
+### Daily strain (`StrainEngine`)
+
+The exertion counterpart to recovery, on a 0–100 scale. Recovery answers "how
+ready are you"; strain answers "how hard was today". It uses the strongest signal
+available **once per workout**, in this order:
+
+1. **Minute-level Banister TRIMP.** Every measured minute is scored separately,
+   preserving intervals that a session-average heart rate smooths away. Older and
+   Garmin records without the series retain the session-average fallback.
+2. **Session RPE × duration.** A user rating from 1–10 supplies internal load for
+   phone-only cardio and lifting without useful heart rate.
+3. **Completed set effort.** If RPE is skipped, working sets are weighted by reps
+   and reps-in-reserve. This is explicitly an estimate rather than a validated
+   physiological measurement; missing RIR assumes 2, a neutral working-set value.
+
+Watch and SuperFit recordings are reconciled when at least half of the shorter
+recording overlaps in time. Cardio becomes one stored workout carrying the phone's
+RPE/location and the watch's heart-rate metrics. For strength, the set-by-set
+session and watch record remain separately stored but form one strain input: sets,
+RIR and RPE come from SuperFit while heart rate comes from the watch. Each recording
+can match only once, preventing one long watch session from absorbing two workouts.
+
+Minute heart rate must cover at least **50%** of the merged workout to outrank a
+complete RPE or set-based fallback. This prevents a single isolated watch minute
+from turning an otherwise fully logged hard session into near-zero strain.
+Heart-rate samples are restricted to those HealthKit associates with that workout;
+third-party workouts that omit the association fall back to the same source and
+device within the workout's time range, never every overlapping HR stream.
+
+Heart-rate load and fallback effort remain separate currencies. TRIMP uses a
+**300** anchor. RPE uses **600** (one hour at RPE 10); twenty hard-set equivalents
+map to the same fallback anchor. Each is divided by its own reference before the
+normalised shares are combined, so raw TRIMP is never added to arbitrary set
+units.
+
+**Personal normalisation.** Once there are at least ten measured training days in
+the trailing 42 days, each reference can rise to that load family's 95th
+percentile. A percentile is robust to one freak event where the previous maximum
+made every later day look artificially easy. Before ten days, the fixed anchors
+prevent sparse data from personalising the scale prematurely.
+
+Bands (on the rounded value, so the label agrees with the number): `<34` Light,
+`<67` Moderate, `<90` Hard, else All out.
+
+**Workout-based, and honest about it.** With no all-day heart rate it cannot see a
+rest day's background exertion, so a day without a scorable workout reports **no
+data**, not a zero. Resting heart rate is required for TRIMP, but RPE and logged
+strength can still be scored when that watch-derived input is absent. Data
+completeness reflects minute-HR coverage or a complete fallback signal.
+
 ### Recommendation bands
 ```
 90–100 : Push intensity — add load or a top set
@@ -431,10 +481,37 @@ the user knows the score is partial.
 
 ## 4. Sleep Analytics
 
-Sleep is stored per wake-day with duration, stages, and — from `SleepSampleBuilder`
-— the clock bounds of the *asleep* segments. In-bed bounds are deliberately not
-used for bedtime: they include lying awake reading, which blurs the consistency
-signal.
+Sleep is stored per wake-day with duration, stages, and the clock bounds of the
+*asleep* segments. Intervals separated by less than three hours form one night,
+including stages either side of midnight. Overlapping phone, watch and third-party
+intervals are unioned rather than summed, preventing one eight-hour night becoming
+sixteen hours. Stage composition comes from the source with the richest staged
+coverage so conflicting source classifications are not mixed. In-bed bounds are
+deliberately not used for bedtime: they include lying awake reading, which blurs
+the consistency signal.
+
+### Overall sleep score
+
+The dashboard Sleep gauge is a quality score, not the raw sleep-efficiency
+percentage. It uses the Bevel-style contributors SuperFit can actually read from
+Apple Health and publishes its weights instead of presenting a black box:
+
+| component | weight | scoring |
+|---|---:|---|
+| Duration | 50% | `min(time asleep / 8 h need, 1)` |
+| Efficiency | 20% | time asleep / time in bed, clamped to 0…1 |
+| REM | 15% | REM share / 20% target, capped at 1 |
+| Deep | 15% | deep share / 13% target, capped at 1 |
+
+`score = round(100 × Σ(weight × component) / Σ(available weights))`
+
+The REM and deep reference shares are pragmatic adult targets, not diagnostic
+thresholds. More than the target earns no bonus and is not penalised. Heart-rate
+dip and interruption count are contributors in Bevel but are not stored by
+SuperFit, so the app does not fabricate them. Phone-only tracking therefore
+scores duration alone; missing efficiency or stages are removed and the measured
+weights renormalize. Bands use the displayed rounded score: under 60 Poor, 60–74
+Fair, 75–89 Good, and 90–100 Excellent.
 
 - **Debt** is one-directional: `Σ max(0, need − asleep)`. A long Sunday cannot
   repay a short Monday, because sleep loss is not a bank balance.

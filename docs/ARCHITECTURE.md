@@ -17,7 +17,7 @@ between logged intake and the smoothed bodyweight trend over rolling windows.
 ┌──────────────────────────────────────────────────────────────┐
 │  Presentation (SwiftUI)                                        │
 │  Dashboard · Profile · Weight · Nutrition · Training · Recovery│
-│  MVVM: Views + @Observable ViewModels                          │
+│  Views + focused feature-local loaders/repositories             │
 ├──────────────────────────────────────────────────────────────┤
 │  Domain / Engines (pure Swift, no I/O — fully unit-testable)   │
 │  MetabolismEngine · MacroCalculator · RecoveryEngine           │
@@ -103,6 +103,7 @@ SuperFit/
     Recovery/       RecoveryEngine
     Training/       volume + progression analyzers
     Nutrition/      API clients, barcode
+  UI/               shared SwiftUI/UIKit components and design tokens
   Features/
     Dashboard/  Profile/  Weight/  Nutrition/  Training/  Recovery/
   Support/          formatters, units, extensions

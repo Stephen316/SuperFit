@@ -69,20 +69,28 @@ struct MacroAdherenceView: View {
 
     @State private var range = HistoryRange.quarter
 
+    init(macro: TrackedMacro) {
+        self.macro = macro
+        let cutoff = Calendar.current.date(byAdding: .day, value: -396, to: .now) ?? .now
+        _logs = Query(filter: #Predicate { $0.date >= cutoff })
+        _energy = Query(filter: #Predicate { $0.date >= cutoff })
+    }
+
     private var start: Date { range.start }
 
     var body: some View {
+        let allPoints = points
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
                     VStack(spacing: 14) {
-                        ThemeSegmentedControl(
+                        FeatureTabControl(
                             options: HistoryRange.allCases.map { ($0, $0.label) },
                             selection: $range)
 
-                        summaryCard
-                        chartCard
+                        summaryCard(allPoints)
+                        chartCard(allPoints)
                         explanationCard
                     }
                     .padding(.horizontal, 18)
@@ -94,7 +102,6 @@ struct MacroAdherenceView: View {
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
@@ -111,9 +118,10 @@ struct MacroAdherenceView: View {
         for log in logs where log.date >= start {
             out[cal.startOfDay(for: log.date), default: 0] += macro.grams(log)
         }
+        let supplementTotals = SupplementIntake.totals(
+            on: out.keys, entries: supplementEntries, supplements: supplements)
         for day in out.keys {
-            let supplement = SupplementIntake.total(on: day, entries: supplementEntries,
-                                                    supplements: supplements)
+            let supplement = supplementTotals[cal.startOfDay(for: day)] ?? NutrientProfile()
             let grams = macro.grams(supplement)
             if grams > 0 { out[day, default: 0] += grams }
         }
@@ -134,17 +142,30 @@ struct MacroAdherenceView: View {
                 entries: supplementEntries, supplements: supplements,
                 from: start, to: .now))
         let activeEnergy = MetabolicRecordAssembler.avgActiveEnergy(energy: energy)
-
-        var out: [Date: Double] = [:]
-        for day in dailyIntake.keys {
-            // The weigh-in in force on that day, not today's.
-            guard let weight = metrics.last(where: { $0.date <= day }) else { continue }
-            let prior = MetabolismEngine.Prior(
+        let sortedMetrics = metrics.sorted { $0.date < $1.date }
+        let days = Array(dailyIntake.keys)
+        var metricIndex = 0
+        var currentWeight: BodyMetrics?
+        var weightByDay: [Date: BodyMetrics] = [:]
+        let estimates = HistorySeries.metabolismEstimates(
+            records: records, windowDays: 30, on: days, calendar: cal
+        ) { day in
+            while metricIndex < sortedMetrics.count,
+                  sortedMetrics[metricIndex].date <= day {
+                currentWeight = sortedMetrics[metricIndex]
+                metricIndex += 1
+            }
+            guard let weight = currentWeight else { return nil }
+            weightByDay[cal.startOfDay(for: day)] = weight
+            return MetabolismEngine.Prior(
                 sex: profile.sex, ageYears: profile.ageYears,
                 heightCm: profile.heightCm, activity: profile.activity,
                 avgActiveEnergyKcal: activeEnergy, leanMassKg: weight.leanMassKg)
-            let estimate = engine.estimate(records: records, windowDays: 30,
-                                           prior: prior, asOf: day)
+        }
+
+        var out: [Date: Double] = [:]
+        for (day, estimate) in estimates {
+            guard let weight = weightByDay[cal.startOfDay(for: day)] else { continue }
             let kcal = engine.calorieTarget(tdee: estimate, goal: profile.goal,
                                             bodyweightKg: weight.basisWeightKg)
             let override = profile.proteinPerKgOverride > 0 ? profile.proteinPerKgOverride : nil
@@ -160,32 +181,27 @@ struct MacroAdherenceView: View {
         HistorySeries.proteinAdherence(dailyProtein: dailyIntake, dailyTarget: dailyTarget)
     }
 
-    private var hitRate: Double? {
-        let all = points
+    private func hitRate(_ all: [HistorySeries.AdherencePoint]) -> Double? {
         guard !all.isEmpty else { return nil }
         return Double(all.filter { $0.hit(macro.rule) }.count) / Double(all.count)
     }
 
     // MARK: - Cards
 
-    private var summaryCard: some View {
-        let all = points
+    private func summaryCard(_ all: [HistorySeries.AdherencePoint]) -> some View {
         let average = all.isEmpty ? nil
             : all.reduce(0) { $0 + $1.actual } / Double(all.count)
         let target = all.last?.target
 
         return HStack(spacing: 0) {
-            stat("Days on target", hitRate.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
+            stat("Days on target", hitRate(all).map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
             Rectangle().fill(Theme.divider).frame(width: 1, height: 44)
             stat("Daily average", average.map { "\(Int($0.rounded())) g" } ?? "—")
             Rectangle().fill(Theme.divider).frame(width: 1, height: 44)
             stat("Target now", target.map { "\(Int($0.rounded())) g" } ?? "—")
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
@@ -201,8 +217,7 @@ struct MacroAdherenceView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var chartCard: some View {
-        let all = points
+    private func chartCard(_ all: [HistorySeries.AdherencePoint]) -> some View {
         let rule = macro.rule
         return HistoryChartCard(
             title: "\(macro.title) vs target",
@@ -245,14 +260,11 @@ struct MacroAdherenceView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var explanation: String {
-        let usingLean = metrics.last?.leanMassKg != nil
+        let usingLean = BodyComposition.recentLeanMassKg(metrics) != nil
         let basis = usingLean ? "lean mass" : "bodyweight"
         switch macro {
         case .protein:

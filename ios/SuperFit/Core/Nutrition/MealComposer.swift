@@ -49,6 +49,7 @@ enum MealComposer {
             sum.carbsG += t.carbsG
             sum.fatG += t.fatG
             sum.fibreG += t.fibreG
+            if let water = t.waterG { sum.waterG = (sum.waterG ?? 0) + water }
             for (key, value) in t.micros { sum.micros[key, default: 0] += value }
         }
     }
@@ -64,6 +65,7 @@ extension NutrientProfile {
                                carbsG: per100g.carbsG * f,
                                fatG: per100g.fatG * f,
                                fibreG: per100g.fibreG * f,
+                               waterG: per100g.waterG.map { $0 * f },
                                micros: per100g.micros.mapValues { $0 * f })
     }
 }

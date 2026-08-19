@@ -12,9 +12,17 @@ import Charts
 /// moves it — so the daily points are drawn faintly under a trailing mean.
 struct RestingHRHistoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \DailyVitals.date) private var vitals: [DailyVitals]
+    @Query private var vitals: [DailyVitals]
 
     static let windowDays = 90
+
+    init() {
+        let cutoff = Calendar.current.date(byAdding: .day,
+                                           value: -Self.windowDays,
+                                           to: .now) ?? .now
+        _vitals = Query(filter: #Predicate { $0.date >= cutoff },
+                        sort: \DailyVitals.date)
+    }
     private var start: Date {
         Calendar.current.date(byAdding: .day, value: -Self.windowDays, to: .now) ?? .now
     }
@@ -27,7 +35,7 @@ struct RestingHRHistoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.background
+                FeatureBackground()
                 ScrollView {
                     VStack(spacing: 14) {
                         summaryCard
@@ -43,7 +51,6 @@ struct RestingHRHistoryView: View {
             .themedChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
                 .withoutGlassBackground()
@@ -65,10 +72,7 @@ struct RestingHRHistoryView: View {
             stat("Change", change.map { String(format: "%+.1f", $0) } ?? "—")
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
@@ -126,9 +130,6 @@ struct RestingHRHistoryView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 }

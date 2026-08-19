@@ -1,10 +1,10 @@
 # SuperFit — Data Model
 
-Persistence: **SwiftData** (`@Model` classes) backed by a CloudKit-synced
-`ModelContainer`. SwiftData is the modern equivalent of Core Data; on iOS < 17 the
-same schema maps 1:1 to a Core Data `NSPersistentCloudKitContainer` model.
+Persistence: **SwiftData** (`@Model` classes) backed by a local SQLite store.
+CloudKit support is gated behind the `SUPERFIT_CLOUDKIT` build condition because
+the current personal-team build has no iCloud entitlement.
 
-CloudKit requirements shape the schema: every relationship is **optional**, every
+CloudKit compatibility shapes the schema: every relationship is **optional**, every
 non-optional scalar has a **default**, and there are **no unique constraints**
 (CloudKit doesn't enforce them — we dedupe in code by a `remoteID`/natural key).
 
@@ -127,13 +127,15 @@ secondary=0.5).
 | date | kcal | proteinG | fatG | carbG | goal |
 
 ## Indexing & query patterns
-- Time-series entities keyed by `date` with `#Index` on `date` → range scans for
-  the 7/14/30-day windows are O(window).
-- `NutritionLog` indexed on `(date, meal)` for the daily food list.
-- `SetEntry` indexed on `(session)` and exercise for progression lookups.
+- Screens and sync services use date predicates and fetch limits so only their
+  visible or computational window is materialised in memory.
+- The deployment target is iOS 17; SwiftData's `#Index` macro is iOS 18-only, so
+  the current schema declares no explicit model indexes. SQLite may still scan
+  to satisfy a bounded predicate, but the app no longer decodes an unlimited
+  result set. Add date/session indexes when the minimum OS moves to iOS 18.
 
 ## Privacy at rest
-- Store lives in the app container; SwiftData/CloudKit data is protected by
-  `NSFileProtectionComplete` (encrypted, unreadable while device locked).
-- Health-derived fields never leave the device except via the user's **private**
-  CloudKit DB. No analytics SDK sees health values.
+- The SwiftData store lives in the app container and uses iOS data protection.
+- A user can explicitly upload a full encrypted-in-transit archive to their
+  authenticated Supabase account for backup. No analytics SDK receives health
+  values.

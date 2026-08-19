@@ -20,6 +20,8 @@ struct DataArchiveTests {
         profile.goal = .recomposition
         context.insert(profile)
 
+        context.insert(HydrationSettings(dailyGoalMl: 2_800))
+
         context.insert(BodyMetrics(date: Date(timeIntervalSince1970: 1_700_000_000),
                                    weightKg: 82.4))
 
@@ -28,11 +30,22 @@ struct DataArchiveTests {
         log.servingGrams = 180
         log.kcal = 297
         log.proteinG = 56
+        log.waterMl = 117
         log.micros = [.iron: 1.9, .potassium: 460]
         context.insert(log)
 
+        let milk = Food(name: "Whole milk", source: .custom)
+        milk.kcalPer100g = 61
+        milk.waterGPer100g = 87.7
+        milk.gramsPerMillilitre = 1.03
+        context.insert(milk)
+
+        context.insert(HydrationLog(
+            date: Date(timeIntervalSince1970: 1_700_000_000),
+            millilitres: 1_750))
+
         let exercise = Exercise(name: "My Custom Press", category: .barbell,
-                                tension: [.chest: 5, .triceps: 3], isCustom: true)
+                                tension: [.chest: 5, .tricepsLateral: 3], isCustom: true)
         context.insert(exercise)
 
         let session = TrainingSession(startedAt: Date(timeIntervalSince1970: 1_700_100_000),
@@ -52,6 +65,22 @@ struct DataArchiveTests {
         entry.startedOn = Date(timeIntervalSince1970: 1_700_000_000)
         context.insert(entry)
 
+        let run = WorkoutRecord(startedAt: Date(timeIntervalSince1970: 1_700_050_000),
+                                endedAt: Date(timeIntervalSince1970: 1_700_052_400),
+                                activity: .running, source: .appleHealth)
+        run.externalID = "HK-RUN-1"
+        run.activeEnergyKcal = 512
+        run.distanceMetres = 8_200
+        run.avgHeartRate = 148
+        context.insert(run)
+
+        let mealTemplate = SavedMeal(name: "Post-workout shake")
+        context.insert(mealTemplate)
+        let mealItem = SavedMealItem(foodID: milk.id, servingGrams: 400,
+                                     foodName: "Whole milk")
+        mealItem.meal = mealTemplate
+        context.insert(mealItem)
+
         try? context.save()
     }
 
@@ -65,11 +94,27 @@ struct DataArchiveTests {
         #expect(archive.profile?.heightCm == 183)
         #expect(archive.bodyMetrics.count == 1)
         #expect(archive.nutritionLogs.count == 1)
+        #expect(archive.hydration?.count == 1)
+        #expect(archive.hydrationGoalMl == 2_800)
         #expect(archive.exercises.count == 1)
         #expect(archive.sessions.count == 1)
         #expect(archive.sessions.first?.sets.count == 1)
         #expect(archive.supplements.count == 1)
         #expect(archive.supplementEntries.count == 1)
+        #expect(archive.workouts?.count == 1)
+        #expect(archive.workouts?.first?.distanceMetres == 8_200)
+        #expect(archive.savedMeals?.count == 1)
+        #expect(archive.savedMeals?.first?.items.count == 1)
+    }
+
+    @Test func backgroundExporterCapturesSavedData() async throws {
+        let context = try makeContext()
+        seed(context)
+
+        let archive = await DataArchiveExporter(modelContainer: context.container).export()
+        #expect(archive.profile?.heightCm == 183)
+        #expect(archive.nutritionLogs.first?.foodName == "Chicken breast")
+        #expect(archive.sessions.first?.sets.first?.weightKg == 100)
     }
 
     @Test func encodeDecodeSurvivesDatesAndNestedValues() throws {
@@ -83,6 +128,10 @@ struct DataArchiveTests {
         #expect(restored.bodyMetrics.first?.weightKg == 82.4)
         #expect(restored.sessions.first?.sets.first?.rir == 2)
         #expect(restored.nutritionLogs.first?.micros.isEmpty == false)
+        #expect(restored.nutritionLogs.first?.waterMl == 117)
+        #expect(restored.foods.first?.waterGPer100g == 87.7)
+        #expect(restored.foods.first?.gramsPerMillilitre == 1.03)
+        #expect(restored.hydration?.first?.millilitres == 1_750)
     }
 
     /// The whole point: a backup restored into an empty install must reproduce
@@ -100,7 +149,12 @@ struct DataArchiveTests {
         #expect(logs.count == 1)
         #expect(logs.first?.foodName == "Chicken breast")
         #expect(logs.first?.kcal == 297)
+        #expect(logs.first?.waterMl == 117)
         #expect(logs.first?.micros[.iron] == 1.9)
+
+        let foods = try fresh.fetch(FetchDescriptor<Food>())
+        #expect(foods.first?.waterGPer100g == 87.7)
+        #expect(foods.first?.gramsPerMillilitre == 1.03)
 
         let sessions = try fresh.fetch(FetchDescriptor<TrainingSession>())
         #expect(sessions.count == 1)
@@ -109,6 +163,23 @@ struct DataArchiveTests {
 
         let weights = try fresh.fetch(FetchDescriptor<BodyMetrics>())
         #expect(weights.first?.weightKg == 82.4)
+        let hydration = try fresh.fetch(FetchDescriptor<HydrationLog>())
+        #expect(hydration.count == 1)
+        #expect(hydration.first?.millilitres == 1_750)
+        #expect(try fresh.fetch(FetchDescriptor<HydrationSettings>()).first?.dailyGoalMl == 2_800)
+
+        let workouts = try fresh.fetch(FetchDescriptor<WorkoutRecord>())
+        #expect(workouts.count == 1)
+        #expect(workouts.first?.externalID == "HK-RUN-1")
+        #expect(workouts.first?.activity == .running)
+        #expect(workouts.first?.distanceMetres == 8_200)
+        #expect(workouts.first?.avgHeartRate == 148)
+
+        let meals = try fresh.fetch(FetchDescriptor<SavedMeal>())
+        #expect(meals.count == 1)
+        #expect(meals.first?.name == "Post-workout shake")
+        #expect(meals.first?.orderedItems.first?.servingGrams == 400)
+        #expect(meals.first?.orderedItems.first?.foodName == "Whole milk")
     }
 
     // MARK: Merge safety
@@ -124,12 +195,50 @@ struct DataArchiveTests {
         DataArchiveService.restore(archive, mode: .merge, context: fresh)
         let afterFirst = try fresh.fetch(FetchDescriptor<NutritionLog>()).count
         let weightsFirst = try fresh.fetch(FetchDescriptor<BodyMetrics>()).count
+        let hydrationFirst = try fresh.fetch(FetchDescriptor<HydrationLog>()).count
 
         DataArchiveService.restore(archive, mode: .merge, context: fresh)
         #expect(try fresh.fetch(FetchDescriptor<NutritionLog>()).count == afterFirst)
         #expect(try fresh.fetch(FetchDescriptor<BodyMetrics>()).count == weightsFirst)
         #expect(try fresh.fetch(FetchDescriptor<TrainingSession>()).count == 1)
         #expect(try fresh.fetch(FetchDescriptor<Supplement>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<HydrationLog>()).count == hydrationFirst)
+        #expect(try fresh.fetch(FetchDescriptor<WorkoutRecord>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<SavedMeal>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<SavedMealItem>()).count == 1)
+    }
+
+    /// A HealthKit workout restored from a backup and then re-synced by the
+    /// import path share an `externalID`; the restore must recognise it and not
+    /// leave two rows for one run.
+    @Test func restoredWorkoutDoesNotDuplicateAnExistingExternalID() throws {
+        var archive = DataArchive()
+        archive.workouts = [.init(
+            id: UUID(),
+            externalID: "HK-RUN-1",
+            startedAt: Date(timeIntervalSince1970: 1_700_050_000),
+            endedAt: Date(timeIntervalSince1970: 1_700_052_400),
+            activity: WorkoutActivity.running.rawValue,
+            source: WorkoutSource.appleHealth.rawValue,
+            sourceName: nil, activeEnergyKcal: 512, totalEnergyKcal: nil,
+            distanceMetres: 8_200, avgHeartRate: 148, maxHeartRate: nil,
+            minHeartRate: nil, elevationGainMetres: nil, avgCadence: nil,
+            avgPowerWatts: nil, swimStrokeCount: nil, swimStrokeStyle: nil,
+            lapsJSON: nil, heartRateSegmentsJSON: nil, perceivedExertion: 0, notes: nil)]
+
+        let context = try makeContext()
+        // The same run already present under its own local id but same externalID.
+        let synced = WorkoutRecord(startedAt: Date(timeIntervalSince1970: 1_700_050_000),
+                                   endedAt: Date(timeIntervalSince1970: 1_700_052_400),
+                                   activity: .running, source: .appleHealth)
+        synced.externalID = "HK-RUN-1"
+        context.insert(synced)
+        try context.save()
+
+        let result = DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        #expect(try context.fetch(FetchDescriptor<WorkoutRecord>()).count == 1)
+        #expect(result.skipped == 1)
     }
 
     @Test func mergeKeepsDataThatIsNotInTheArchive() throws {
@@ -150,6 +259,68 @@ struct DataArchiveTests {
         #expect(names.contains("Chicken breast"))
     }
 
+    /// A stale merge previously overwrote all 6 archived profile fields; the
+    /// current profile must survive merge, while replace must restore all 6.
+    @Test func mergePreservesCurrentProfileAndReplaceRestoresArchivedProfile() throws {
+        var archive = DataArchive()
+        archive.profile = .init(
+            birthDate: Date(timeIntervalSince1970: 315_532_800),
+            heightCm: 164,
+            sex: BiologicalSex.female.rawValue,
+            goal: FitnessGoal.fatLoss.rawValue,
+            activity: ActivityBaseline.light.rawValue,
+            proteinPerKgOverride: 1.8)
+
+        let context = try makeContext()
+        let current = UserProfile()
+        current.birthDate = Date(timeIntervalSince1970: 631_152_000)
+        current.heightCm = 191
+        current.sex = .male
+        current.goal = .muscleGain
+        current.activity = .athlete
+        current.proteinPerKgOverride = 2.2
+        context.insert(current)
+        try context.save()
+
+        DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        var profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.birthDate == current.birthDate)
+        #expect(profiles.first?.heightCm == 191)
+        #expect(profiles.first?.sex == .male)
+        #expect(profiles.first?.goal == .muscleGain)
+        #expect(profiles.first?.activity == .athlete)
+        #expect(profiles.first?.proteinPerKgOverride == 2.2)
+
+        DataArchiveService.restore(archive, mode: .replace, context: context)
+
+        profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.birthDate == archive.profile?.birthDate)
+        #expect(profiles.first?.heightCm == 164)
+        #expect(profiles.first?.sex == .female)
+        #expect(profiles.first?.goal == .fatLoss)
+        #expect(profiles.first?.activity == .light)
+        #expect(profiles.first?.proteinPerKgOverride == 1.8)
+    }
+
+    /// Replace accepts version-1 archives whose optional profile is absent;
+    /// it must still leave the app with an operable empty profile screen.
+    @Test func replaceWithoutAnArchivedProfileCreatesAnEmptyProfile() throws {
+        let context = try makeContext()
+        let current = UserProfile()
+        current.heightCm = 190
+        context.insert(current)
+        try context.save()
+
+        DataArchiveService.restore(DataArchive(), mode: .replace, context: context)
+
+        let profiles = try context.fetch(FetchDescriptor<UserProfile>())
+        #expect(profiles.count == 1)
+        #expect(profiles.first?.heightCm == 175)
+    }
+
     @Test func replaceClearsExistingDataFirst() throws {
         let context = try makeContext()
         seed(context)
@@ -165,6 +336,10 @@ struct DataArchiveTests {
         let names = try fresh.fetch(FetchDescriptor<NutritionLog>()).compactMap(\.foodName)
         #expect(!names.contains("From the other account"))
         #expect(names.contains("Chicken breast"))
+        // A replace erases first, so the archived workout and saved meal are the
+        // only reason either survives — the exact case this fix exists for.
+        #expect(try fresh.fetch(FetchDescriptor<WorkoutRecord>()).count == 1)
+        #expect(try fresh.fetch(FetchDescriptor<SavedMeal>()).count == 1)
     }
 
     /// Built-in exercises are re-seeded on every launch with fresh ids, so an
@@ -181,6 +356,111 @@ struct DataArchiveTests {
         DataArchiveService.restore(archive, mode: .merge, context: fresh)
 
         #expect(try fresh.fetch(FetchDescriptor<Exercise>()).count == seededCount)
+    }
+
+    /// Seeding changes 1 exercise UUID between installs; both dependent IDs in
+    /// an archived session and template must point at the local seeded row.
+    @Test func nameDedupedExerciseReferencesUseTheSeededID() throws {
+        let context = try makeContext()
+        ExerciseLibrary.seedIfNeeded(context: context)
+        let exercises = try context.fetch(FetchDescriptor<Exercise>())
+        let local = try #require(exercises.first { $0.name == "Barbell Bench Press" })
+        let archivedID = UUID()
+
+        var archive = DataArchive()
+        archive.exercises = [.init(
+            id: archivedID,
+            name: local.name,
+            category: local.categoryRaw,
+            tension: local.tensionRaw,
+            bodyweightFraction: local.bodyweightFraction,
+            isCustom: false,
+            aliases: local.aliases)]
+        archive.sessions = [.init(
+            id: UUID(),
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            endedAt: nil,
+            templateName: "Archived push",
+            sets: [.init(order: 0, exerciseID: archivedID, weightKg: 80,
+                         reps: 8, rir: 2, isWarmup: false, completedAt: nil)])]
+        archive.templates = [.init(
+            id: UUID(),
+            name: "Archived push",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            exerciseIDs: [archivedID])]
+
+        DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        let sessions = try context.fetch(FetchDescriptor<TrainingSession>())
+        let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+        let session = try #require(sessions.first)
+        let template = try #require(templates.first)
+        #expect(session.sets?.first?.exerciseID == local.id)
+        #expect(template.orderedExerciseIDs == [local.id])
+        #expect(!(try context.fetch(FetchDescriptor<Exercise>())).contains { $0.id == archivedID })
+    }
+
+    /// Seeding changes 1 supplement UUID between installs; its archived daily
+    /// entry must follow the name-deduped local row rather than become orphaned.
+    @Test func nameDedupedSupplementEntryUsesTheSeededID() throws {
+        let context = try makeContext()
+        SupplementCatalog.seedIfNeeded(context: context)
+        let supplements = try context.fetch(FetchDescriptor<Supplement>())
+        let local = try #require(supplements.first { $0.name == "Whey Protein Isolate" })
+        let archivedID = UUID()
+
+        var archive = DataArchive()
+        archive.supplements = [.init(
+            id: archivedID,
+            name: local.name,
+            category: local.categoryRaw,
+            servingLabel: local.servingLabel,
+            servingGrams: local.servingGrams,
+            kcal: local.kcal,
+            protein: local.proteinG,
+            carbs: local.carbsG,
+            fat: local.fatG,
+            fibre: local.fibreG,
+            micros: local.microsRaw,
+            isCustom: false)]
+        archive.supplementEntries = [.init(
+            id: UUID(),
+            supplementID: archivedID,
+            kind: SupplementEntryKind.daily.rawValue,
+            servings: 1,
+            date: nil,
+            startedOn: Date(timeIntervalSince1970: 1_700_000_000),
+            stoppedOn: nil)]
+
+        DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        let entries = try context.fetch(FetchDescriptor<SupplementEntry>())
+        let entry = try #require(entries.first)
+        #expect(entry.supplementID == local.id)
+        #expect(!(try context.fetch(FetchDescriptor<Supplement>())).contains { $0.id == archivedID })
+    }
+
+    /// Two weights inside 1 archive can share a day; the mutable day index must
+    /// keep the first and report exactly 1 added row plus 1 skipped duplicate.
+    @Test func duplicateWeightDaysInsideOneArchiveRestoreOnce() throws {
+        let day = Calendar.current.startOfDay(
+            for: Date(timeIntervalSince1970: 1_700_000_000)).addingTimeInterval(3_600)
+        var archive = DataArchive()
+        archive.bodyMetrics = [
+            .init(date: day, weightKg: 80, bodyFatPct: nil,
+                  leanMassKg: nil, source: MetricSource.manual.rawValue),
+            .init(date: day.addingTimeInterval(3_600), weightKg: 81,
+                  bodyFatPct: nil, leanMassKg: nil, source: MetricSource.manual.rawValue),
+        ]
+        let context = try makeContext()
+
+        let result = DataArchiveService.restore(archive, mode: .merge, context: context)
+
+        let weights = try context.fetch(FetchDescriptor<BodyMetrics>())
+        #expect(weights.count == 1)
+        #expect(weights.first?.weightKg == 80)
+        #expect(result.added == 1)
+        #expect(result.skipped == 1)
     }
 
     // MARK: Guards
@@ -206,21 +486,11 @@ struct DataArchiveTests {
         #expect(try context.fetch(FetchDescriptor<TrainingSession>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<BodyMetrics>()).isEmpty)
         #expect(try context.fetch(FetchDescriptor<Supplement>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<HydrationLog>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<HydrationSettings>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<WorkoutRecord>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<SavedMeal>()).isEmpty)
+        #expect(try context.fetch(FetchDescriptor<SavedMealItem>()).isEmpty)
     }
 
-    // MARK: Sign-out must not touch data
-
-    @Test func signingOutLeavesDataIntact() throws {
-        let context = try makeContext()
-        seed(context)
-        let before = try context.fetch(FetchDescriptor<NutritionLog>()).count
-
-        let account = AccountManager()
-        account.completeSignIn(userID: "test.user.id", fullName: nil)
-        #expect(account.isSignedIn)
-        account.signOut()
-        #expect(!account.isSignedIn)
-
-        #expect(try context.fetch(FetchDescriptor<NutritionLog>()).count == before)
-    }
 }

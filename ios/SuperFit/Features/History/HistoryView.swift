@@ -9,68 +9,88 @@ import Charts
 /// thermogenesis during a cut, the thing this engine exists to detect, was
 /// invisible.
 struct HistoryView: View {
-    @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
 
     @Query private var profiles: [UserProfile]
-    @Query(sort: \BodyMetrics.date) private var metrics: [BodyMetrics]
+    @Query private var metrics: [BodyMetrics]
     @Query private var logs: [NutritionLog]
     @Query private var energy: [DailyEnergy]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
-    @Query(sort: \RecoveryScoreRecord.date) private var recoveries: [RecoveryScoreRecord]
-    @Query(sort: \DailyVitals.date) private var vitals: [DailyVitals]
-    @Query(sort: \SleepData.date) private var sleep: [SleepData]
+    @Query private var recoveries: [RecoveryScoreRecord]
+    @Query private var vitals: [DailyVitals]
+    @Query private var sleep: [SleepData]
     @Query private var sessions: [TrainingSession]
     @Query private var exercises: [Exercise]
+    @Query private var workouts: [WorkoutRecord]
 
     @State private var range = HistoryRange.quarter
     @State private var selectedMuscle = MuscleGroup.chest
     @State private var selectedExerciseID: UUID?
+    @State private var selectedActivity: WorkoutActivity?
     @State private var showingRate = false
+
+    init() {
+        // The largest selectable range is one year. Metabolism needs the thirty
+        // preceding days to calculate the first visible point, hence the buffer.
+        let chartCutoff = Calendar.current.date(byAdding: .day, value: -365, to: .now) ?? .now
+        let metabolismCutoff = Calendar.current.date(byAdding: .day, value: -396, to: .now) ?? .now
+        _metrics = Query(filter: #Predicate { $0.date >= metabolismCutoff },
+                         sort: \BodyMetrics.date)
+        _logs = Query(filter: #Predicate { $0.date >= metabolismCutoff })
+        _energy = Query(filter: #Predicate { $0.date >= metabolismCutoff })
+        _recoveries = Query(filter: #Predicate { $0.date >= chartCutoff },
+                            sort: \RecoveryScoreRecord.date)
+        _vitals = Query(filter: #Predicate { $0.date >= chartCutoff },
+                        sort: \DailyVitals.date)
+        _sleep = Query(filter: #Predicate { $0.date >= chartCutoff },
+                       sort: \SleepData.date)
+        _sessions = Query(filter: #Predicate { $0.startedAt >= chartCutoff })
+        _workouts = Query(filter: #Predicate { $0.startedAt >= chartCutoff },
+                          sort: \WorkoutRecord.startedAt)
+    }
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
     private var start: Date { range.start }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Theme.background
-                ScrollView {
-                    VStack(spacing: 14) {
-                        rangePicker
-                        energyCard
-                        weightCard
-                        rateDisclosure
-                        if !compositionPoints.isEmpty { compositionCard }
-                        recoveryCard
-                        vitalsCard
-                        sleepCard
-                        volumeCard
-                        if selectedExerciseID != nil { strengthCard }
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
+        ZStack {
+            FeatureBackground()
+            ScrollView {
+                LazyVStack(spacing: 14) {
+                    rangePicker
+                    energyCard
+                    weightCard
+                    rateDisclosure
+                    if !compositionPoints.isEmpty { compositionCard }
+                    recoveryCard
+                    vitalsCard
+                    stepsCard
+                    activeEnergyCard
+                    sleepCard
+                    sleepStagesCard
+                    bedtimeCard
+                    if !distanceActivities.isEmpty { distanceCard }
+                    volumeCard
+                    trainingLoadCard
+                    if selectedExerciseID != nil { strengthCard }
                 }
-                .scrollIndicators(.hidden)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
             }
-            .navigationTitle("Trends")
-            .themedChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.themedToolbarButton()
-                }
-                .withoutGlassBackground()
-            }
-            .task { if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID } }
+            .scrollIndicators(.hidden)
+        }
+        .navigationTitle("Trends")
+        .navigationBarTitleDisplayMode(.inline)
+        .themedChrome()
+        .task {
+            if selectedExerciseID == nil { selectedExerciseID = mostTrainedExerciseID }
+            if selectedActivity == nil { selectedActivity = distanceActivities.first }
         }
     }
 
     private var rangePicker: some View {
-        ThemeSegmentedControl(
+        FeatureTabControl(
             options: HistoryRange.allCases.map { ($0, $0.label) },
             selection: $range)
     }
@@ -91,7 +111,7 @@ struct HistoryView: View {
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
             avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
-            leanMassKg: metrics.last?.leanMassKg)
+            leanMassKg: BodyComposition.recentLeanMassKg(metrics))
         return HistorySeries.tdee(records: dailyRecords, prior: prior,
                                   from: start, to: .now)
     }
@@ -139,7 +159,7 @@ struct HistoryView: View {
                 if range.showsDailyPoints {
                     ForEach(intake) { p in
                         PointMark(x: .value("Date", p.date), y: .value("Intake", p.value))
-                            .foregroundStyle(Color.white.opacity(0.20))
+                            .foregroundStyle(Theme.textSecondary.opacity(0.55))
                             .symbolSize(12)
                     }
                 }
@@ -178,15 +198,22 @@ struct HistoryView: View {
 
     // MARK: - Body
 
+    /// One point per day, at the lowest reading — the same value every
+    /// calculation uses. See `DailyWeight`.
     private var weightPoints: [HistoryPoint] {
-        metrics.filter { $0.date >= start }
-            .map { HistoryPoint(date: $0.date, value: units.displayWeight($0.weightKg)) }
+        DailyWeight.byDay(metrics.filter { $0.date >= start },
+                          date: \.date, weightKg: \.weightKg, calendar: .current)
+            .map { HistoryPoint(date: $0.key, value: units.displayWeight($0.value)) }
+            .sorted { $0.date < $1.date }
     }
 
+    /// Also one per day: every row of a day now carries that day's trend, so
+    /// mapping each row would stack identical points on one date.
     private var trendPoints: [HistoryPoint] {
-        metrics.filter { $0.date >= start }
-            .compactMap { m in m.trendWeightKg.map {
-                HistoryPoint(date: m.date, value: units.displayWeight($0)) } }
+        DailyWeight.byDay(metrics.filter { $0.date >= start },
+                          date: \.date, weightKg: \.trendWeightKg, calendar: .current)
+            .map { HistoryPoint(date: $0.key, value: units.displayWeight($0.value)) }
+            .sorted { $0.date < $1.date }
     }
 
     private var weightCard: some View {
@@ -201,7 +228,7 @@ struct HistoryView: View {
             content: {
                 ForEach(points) { p in
                     PointMark(x: .value("Date", p.date), y: .value("Weight", p.value))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
                         .symbolSize(14)
                 }
                 ForEach(trend) { p in
@@ -237,10 +264,7 @@ struct HistoryView: View {
         .tint(Theme.gold)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadiusCompact, style: .continuous)
-                .stroke(Theme.hairline, lineWidth: 1)
-        )
+        .featurePanel()
     }
 
     private var ratePoints: [HistoryPoint] {
@@ -248,7 +272,7 @@ struct HistoryView: View {
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
-            leanMassKg: metrics.last?.leanMassKg)
+            leanMassKg: BodyComposition.recentLeanMassKg(metrics))
         return HistorySeries.rateOfChange(records: dailyRecords, prior: prior,
                                           from: start, to: .now)
     }
@@ -264,13 +288,14 @@ struct HistoryView: View {
     /// The shaded band is the same 1%/0.5% of bodyweight the calorie target is
     /// clamped to, so the chart and the target agree on what "too fast" means.
     private var rateCard: some View {
-        let points = ratePoints.map {
+        let rawPoints = ratePoints
+        let points = rawPoints.map {
             HistoryPoint(date: $0.date, value: units.displayWeight($0.value))
         }
         let rails = guardrails
         return HistoryChartCard(
             title: "Weekly change",
-            headline: points.last.map { units.weightDeltaString($0.value) },
+            headline: rawPoints.last.map { units.weightDeltaString($0.value) },
             height: 150,
             yLabel: { String(format: "%+.1f", $0) },
             content: {
@@ -315,7 +340,7 @@ struct HistoryView: View {
                 ForEach(total) { p in
                     LineMark(x: .value("Date", p.date), y: .value("Weight", p.value),
                              series: .value("Series", "Total"))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.75))
                         .interpolationMethod(.monotone)
                 }
                 ForEach(lean) { p in
@@ -350,7 +375,7 @@ struct HistoryView: View {
                     .foregroundStyle(Theme.divider)
                 ForEach(points) { p in
                     PointMark(x: .value("Date", p.date), y: .value("Score", p.value))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
                         .symbolSize(14)
                 }
                 ForEach(mean) { p in
@@ -382,7 +407,7 @@ struct HistoryView: View {
                 ForEach(HistorySeries.rollingMean(rhr)) { p in
                     LineMark(x: .value("Date", p.date), y: .value("RHR", p.value),
                              series: .value("Series", "Resting HR"))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(Theme.textSecondary)
                         .interpolationMethod(.monotone)
                 }
             },
@@ -416,8 +441,205 @@ struct HistoryView: View {
                         .interpolationMethod(.monotone)
                 }
             },
-            isEmpty: points.count < 2,
+            isEmpty: range.showsDailyPoints ? points.count < 2 : mean.isEmpty,
             emptyMessage: "No sleep recorded in this period."
+        )
+    }
+
+    // MARK: - Cardio
+
+    private var cardioRecords: [CardioDistanceRecord] {
+        workouts.map {
+            CardioDistanceRecord(date: $0.startedAt, activity: $0.activity,
+                                 distanceMetres: $0.distanceMetres ?? 0)
+        }
+    }
+
+    /// Only activities with a logged distance, so the picker never offers an
+    /// activity with nothing to plot.
+    private var distanceActivities: [WorkoutActivity] {
+        HistorySeries.loggedDistanceActivities(cardioRecords, from: start, to: .now)
+    }
+
+    /// Per-session distance for the chosen activity — the trend that says whether
+    /// the runs (or swims, rides) are getting longer.
+    private var distanceCard: some View {
+        let activity = selectedActivity ?? distanceActivities.first ?? .running
+        let points = HistorySeries.distanceTrend(cardioRecords, activity: activity,
+                                                 from: start, to: .now)
+            .map { HistoryPoint(date: $0.date, value: units.displayDistance($0.value)) }
+        let delta = HistorySeries.change(points, edgeDays: 14)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Picker("Activity", selection: $selectedActivity) {
+                ForEach(distanceActivities, id: \.self) { a in
+                    Text(a.displayName).tag(Optional(a))
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(Theme.gold)
+
+            HistoryChartCard(
+                title: "Distance — \(activity.displayName)",
+                headline: points.last.map {
+                    String(format: "%.2f %@", $0.value, units.distanceUnit) },
+                change: delta.map { String(format: "%+.2f %@", $0, units.distanceUnit) },
+                changeIsGood: delta.map { $0 >= 0 },
+                yLabel: { String(format: "%.1f", $0) },
+                content: {
+                    ForEach(points) { p in
+                        LineMark(x: .value("Date", p.date), y: .value("Distance", p.value))
+                            .foregroundStyle(Theme.gold)
+                            .interpolationMethod(.monotone)
+                        PointMark(x: .value("Date", p.date), y: .value("Distance", p.value))
+                            .foregroundStyle(Theme.gold)
+                            .symbolSize(20)
+                    }
+                },
+                isEmpty: points.count < 2,
+                emptyMessage: "Log a couple of \(activity.displayName.lowercased()) sessions with distance to see a trend."
+            )
+        }
+    }
+
+    // MARK: - Fundamental trends (#11)
+
+    private var stepsCard: some View {
+        let points = HistorySeries.daily(energy.filter { $0.date >= start && $0.steps > 0 },
+                                         date: \.date, value: { Double($0.steps) })
+        let mean = HistorySeries.rollingMean(points)
+        return HistoryChartCard(
+            title: "Steps",
+            headline: mean.last.map { "\(Int($0.value.rounded())) /day avg" },
+            content: {
+                if range.showsDailyPoints {
+                    ForEach(points) { p in
+                        BarMark(x: .value("Date", p.date, unit: .day), y: .value("Steps", p.value))
+                            .foregroundStyle(Theme.gold.opacity(0.3))
+                    }
+                }
+                ForEach(mean) { p in
+                    LineMark(x: .value("Date", p.date), y: .value("Average", p.value))
+                        .foregroundStyle(Theme.gold).interpolationMethod(.monotone)
+                }
+            },
+            isEmpty: points.count < 2,
+            emptyMessage: "No step data in this period."
+        )
+    }
+
+    private var activeEnergyCard: some View {
+        let points = HistorySeries.daily(energy.filter { $0.date >= start && $0.activeEnergyKcal > 0 },
+                                         date: \.date, value: { $0.activeEnergyKcal })
+        let mean = HistorySeries.rollingMean(points)
+        return HistoryChartCard(
+            title: "Active energy",
+            headline: mean.last.map { "\(Int($0.value.rounded())) kcal/day avg" },
+            content: {
+                if range.showsDailyPoints {
+                    ForEach(points) { p in
+                        BarMark(x: .value("Date", p.date, unit: .day), y: .value("kcal", p.value))
+                            .foregroundStyle(Theme.strain.opacity(0.3))
+                    }
+                }
+                ForEach(mean) { p in
+                    LineMark(x: .value("Date", p.date), y: .value("Average", p.value))
+                        .foregroundStyle(Theme.strain).interpolationMethod(.monotone)
+                }
+            },
+            isEmpty: points.count < 2,
+            emptyMessage: "No active-energy data in this period."
+        )
+    }
+
+    /// Deep + REM are what recovery leans on, so stages are stacked rather than
+    /// hidden inside a single "asleep" total.
+    private struct StageArea: Identifiable {
+        let date: Date, stage: String, hours: Double
+        var id: String { "\(date.timeIntervalSince1970)-\(stage)" }
+    }
+
+    private var sleepStagesCard: some View {
+        let nights = sleep.filter { $0.date >= start && $0.asleepMinutes > 0 }
+            .sorted { $0.date < $1.date }
+        let areas = nights.flatMap { n in
+            [("Deep", n.deepMinutes), ("REM", n.remMinutes), ("Core", n.coreMinutes)]
+                .map { StageArea(date: n.date, stage: $0.0, hours: Double($0.1) / 60) }
+        }
+        return HistoryChartCard(
+            title: "Sleep stages",
+            headline: nights.last.map {
+                String(format: "%.1f h deep + REM", Double($0.deepMinutes + $0.remMinutes) / 60) },
+            yLabel: { "\(Int($0))h" },
+            content: {
+                ForEach(areas) { seg in
+                    AreaMark(x: .value("Date", seg.date), y: .value("Hours", seg.hours))
+                        .foregroundStyle(by: .value("Stage", seg.stage))
+                }
+            },
+            isEmpty: nights.count < 2,
+            emptyMessage: "Needs a few nights of stage data from a watch."
+        )
+    }
+
+    private var bedtimePoints: [HistoryPoint] {
+        sleep.filter { $0.date >= start }
+            .compactMap { s in s.bedtime.map {
+                HistoryPoint(date: s.date, value: HistorySeries.bedtimeOffsetMinutes($0)) } }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// Bedtime plotted per night with its rolling mean; the spread *is* the
+    /// consistency the SD headline names. See `HistorySeries.bedtimeOffsetMinutes`.
+    private var bedtimeCard: some View {
+        let points = bedtimePoints
+        let sd = HistorySeries.standardDeviation(points.map(\.value))
+        return HistoryChartCard(
+            title: "Bedtime consistency",
+            headline: sd.map { "±\(Int($0.rounded())) min" },
+            yLabel: { clockFromOffset($0) },
+            content: {
+                ForEach(points) { p in
+                    PointMark(x: .value("Date", p.date), y: .value("Bedtime", p.value))
+                        .foregroundStyle(Theme.sleep.opacity(0.6)).symbolSize(14)
+                }
+                ForEach(HistorySeries.rollingMean(points)) { p in
+                    LineMark(x: .value("Date", p.date), y: .value("Average", p.value))
+                        .foregroundStyle(Theme.sleep).interpolationMethod(.monotone)
+                }
+            },
+            isEmpty: points.count < 2,
+            emptyMessage: "Needs a few nights with a recorded bedtime."
+        )
+    }
+
+    private func clockFromOffset(_ offset: Double) -> String {
+        let m = ((Int(offset.rounded()) % 1440) + 1440) % 1440
+        return String(format: "%02d:%02d", m / 60, m % 60)
+    }
+
+    /// Overall weekly load — tonnage moved and how often — complementing the
+    /// per-muscle set volume below. Frequency rides in the corner metric.
+    private var trainingLoadCard: some View {
+        let tonnage = HistorySeries.weeklyTonnage(records: liftRecords, from: start, to: .now)
+            .map { HistoryPoint(date: $0.date, value: units.displayWeight($0.value)) }
+        let sessions = HistorySeries.weeklySessionCount(records: liftRecords, from: start, to: .now)
+        let lastSessions = Int(sessions.last?.value ?? 0)
+        return HistoryChartCard(
+            title: "Training load",
+            headline: tonnage.last.map {
+                String(format: "%.0f %@ this week", $0.value, units.weightUnit) },
+            change: "\(lastSessions) session\(lastSessions == 1 ? "" : "s")/wk",
+            yLabel: { "\(Int($0))" },
+            content: {
+                ForEach(tonnage) { p in
+                    BarMark(x: .value("Week", p.date, unit: .weekOfYear),
+                            y: .value("Tonnage", p.value))
+                        .foregroundStyle(Theme.gold.opacity(0.8))
+                }
+            },
+            isEmpty: tonnage.allSatisfy { $0.value == 0 },
+            emptyMessage: "Log some weighted sets to see weekly tonnage."
         )
     }
 
@@ -426,15 +648,7 @@ struct HistoryView: View {
     private var liftRecords: [LiftRecord] {
         let fractions = Dictionary(exercises.map { ($0.id, $0.bodyweightFraction) },
                                    uniquingKeysWith: { a, _ in a })
-        return sessions.flatMap { s in
-            (s.sets ?? []).compactMap { set in
-                set.exerciseID.map {
-                    LiftRecord(date: s.startedAt, exerciseID: $0, weightKg: set.weightKg,
-                               reps: set.reps, isWarmup: set.isWarmup,
-                               bodyweightFraction: fractions[$0] ?? 0)
-                }
-            }
-        }
+        return TrainingRecords.completed(sessions, fractions: fractions)
     }
 
     private var volumeCard: some View {
@@ -457,8 +671,10 @@ struct HistoryView: View {
                     RectangleMark(
                         xStart: .value("Start", start),
                         xEnd: .value("End", Date.now),
-                        yStart: .value("Low", VolumeAggregator.weeklySetTargets.lowerBound),
-                        yEnd: .value("High", VolumeAggregator.weeklySetTargets.upperBound))
+                        // The recommended band for *this* muscle — a shared one
+                        // would be wrong for two thirds of the body.
+                        yStart: .value("Low", selectedMuscle.weeklyTargets.productiveFrom),
+                        yEnd: .value("High", selectedMuscle.weeklyTargets.highFrom))
                         .foregroundStyle(Theme.gold.opacity(0.10))
                     ForEach(points) { p in
                         BarMark(x: .value("Week", p.date, unit: .weekOfYear),

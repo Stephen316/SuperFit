@@ -40,6 +40,40 @@ struct HistorySeriesTests {
         #expect(bands.last?.value == direct.tdeeKcal)
     }
 
+    /// The moving-window implementation must be numerically identical to the
+    /// original independent engine call for every requested day, including
+    /// sparse intake and multiple records on a day.
+    @Test func movingWindowMatchesIndependentEngineCallsExactly() {
+        var records: [DailyRecord] = []
+        for i in 0..<365 {
+            let date = day(-364 + i).addingTimeInterval(Double(i % 4) * 1_800)
+            let intake: Double? = i.isMultiple(of: 5)
+                ? nil : 2_100 + Double(i % 11) * 37
+            let weight: Double? = i.isMultiple(of: 3)
+                ? nil : 88 - Double(i) * 0.015
+            records.append(DailyRecord(date: date, intakeKcal: intake,
+                                       weightKg: weight))
+        }
+        records.append(DailyRecord(date: day(-20).addingTimeInterval(7_200),
+                                   intakeKcal: nil, weightKg: 84.2))
+        let requested = stride(from: -330, through: 0, by: 3).map(day)
+        let optimized = HistorySeries.metabolismEstimates(
+            records: records, windowDays: 30, on: requested, calendar: cal) { _ in prior }
+        let engine = MetabolismEngine()
+
+        #expect(optimized.count == requested.count)
+        for (date, estimate) in optimized {
+            let direct = engine.estimate(records: records, windowDays: 30,
+                                         prior: prior, asOf: date)
+            #expect(estimate.tdeeKcal == direct.tdeeKcal)
+            #expect(estimate.confidence == direct.confidence)
+            #expect(estimate.trendSlopeKgPerWeek == direct.trendSlopeKgPerWeek)
+            #expect(estimate.avgIntakeKcal == direct.avgIntakeKcal)
+            #expect(estimate.smoothedWeightKg == direct.smoothedWeightKg)
+            #expect(estimate.standardErrorKcal == direct.standardErrorKcal)
+        }
+    }
+
     /// Steady intake with steady loss should recover ~2500 + 550 = 3050.
     @Test func tdeeRecoversTheTrueValueOnCleanData() {
         let bands = HistorySeries.tdee(records: steadyRecords(), prior: prior,
@@ -273,6 +307,88 @@ struct HistorySeriesTests {
         ]
         #expect(HistorySeries.hitRate(points) == 0.5)
         #expect(HistorySeries.hitRate([]) == nil)
+    }
+
+    // MARK: Cardio distance
+
+    private func cardioRecords() -> [CardioDistanceRecord] {
+        [
+            .init(date: day(-20), activity: .running, distanceMetres: 5_000),
+            .init(date: day(-10), activity: .running, distanceMetres: 8_000),
+            .init(date: day(-30), activity: .running, distanceMetres: 3_000),
+            .init(date: day(-5), activity: .poolSwimming, distanceMetres: 1_500),
+            .init(date: day(-3), activity: .running, distanceMetres: 0),      // no distance
+            .init(date: day(-100), activity: .running, distanceMetres: 9_000), // out of range
+        ]
+    }
+
+    @Test func distanceTrendFiltersSortsAndDropsZeroAndOutOfRange() {
+        let points = HistorySeries.distanceTrend(cardioRecords(), activity: .running,
+                                                 from: day(-40), to: day(0))
+        #expect(points.map(\.value) == [3_000, 5_000, 8_000])
+        #expect(points.map(\.date) == [day(-30), day(-20), day(-10)])
+    }
+
+    @Test func distanceTrendIsActivitySpecific() {
+        let points = HistorySeries.distanceTrend(cardioRecords(), activity: .poolSwimming,
+                                                 from: day(-40), to: day(0))
+        #expect(points.map(\.value) == [1_500])
+    }
+
+    @Test func loggedDistanceActivitiesRankByFrequencyAndExcludeEmpty() {
+        let activities = HistorySeries.loggedDistanceActivities(cardioRecords(),
+                                                                from: day(-40), to: day(0))
+        // Running (3 distance-bearing sessions in range) before swimming (1);
+        // the 0 m run adds no running count.
+        #expect(activities == [.running, .poolSwimming])
+    }
+
+    // MARK: Training load
+
+    private func lift(_ dayOffset: Int, weight: Double, reps: Int,
+                      warmup: Bool = false, at date: Date? = nil) -> LiftRecord {
+        LiftRecord(date: date ?? day(dayOffset), exerciseID: UUID(), weightKg: weight,
+                   reps: reps, isWarmup: warmup, bodyweightFraction: 0)
+    }
+
+    @Test func weeklyTonnageSumsWorkingSetsAndIgnoresWarmups() {
+        let records = [
+            lift(-3, weight: 100, reps: 5),                 // 500
+            lift(-3, weight: 80, reps: 5),                  // 400
+            lift(-3, weight: 60, reps: 10, warmup: true),   // excluded
+            lift(-1, weight: 0, reps: 12),                  // bodyweight → 0
+        ]
+        let points = HistorySeries.weeklyTonnage(records: records, from: day(-10), to: day(0))
+        #expect(points.map(\.value).reduce(0, +) == 900)
+    }
+
+    @Test func weeklySessionCountCountsDistinctSessionsNotSets() {
+        let a = day(-3), b = day(-1)
+        let records = [
+            lift(0, weight: 100, reps: 5, at: a),
+            lift(0, weight: 90, reps: 5, at: a),   // same session as the first
+            lift(0, weight: 80, reps: 5, at: b),
+        ]
+        let points = HistorySeries.weeklySessionCount(records: records, from: day(-10), to: day(0))
+        #expect(points.map(\.value).reduce(0, +) == 2)
+    }
+
+    // MARK: Sleep
+
+    private func clock(_ h: Int, _ m: Int) -> Date {
+        cal.date(bySettingHour: h, minute: m, second: 0, of: today)!
+    }
+
+    @Test func bedtimeOffsetWrapsAroundMidnight() {
+        // 23:50 → -10, 00:10 → +10 — 20 minutes apart, not 23h40m.
+        #expect(HistorySeries.bedtimeOffsetMinutes(clock(23, 50), calendar: cal) == -10)
+        #expect(HistorySeries.bedtimeOffsetMinutes(clock(0, 10), calendar: cal) == 10)
+    }
+
+    @Test func standardDeviationOfBedtimes() {
+        let sd = HistorySeries.standardDeviation([2, 4, 6])   // mean 4, sd = √(8/3)
+        #expect(sd != nil && abs(sd! - 1.632993) < 0.0001)
+        #expect(HistorySeries.standardDeviation([5]) == nil)
     }
 }
 

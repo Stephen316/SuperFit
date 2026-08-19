@@ -51,12 +51,29 @@ final class AggregationService {
         self.context = context
     }
 
-    func runAll() {
-        fillWeightTrend()
+    func runAll(refreshWeightTrend: Bool = true) {
+        if refreshWeightTrend { fillWeightTrend() }
         upsertMetabolicEstimates()
         refreshCyclicalPatterns()
         upsertTodayRecovery()
+        upsertTodayStrain()
         try? context.save()
+    }
+
+    /// One-time repair for stores written before weight-derived values were kept
+    /// consistently in sync. It replaces the unconditional launch rebuild: once
+    /// repaired, ordinary launches only touch the trend when sync inserted a new
+    /// weight or the user edited one.
+    @discardableResult
+    func repairWeightTrendIfNeeded(defaults: UserDefaults = .standard) -> Bool {
+        let key = "superfit.weight-trend-repair-v2"
+        guard !defaults.bool(forKey: key) else { return false }
+        // The stored estimate is downstream of the trend and must be repaired
+        // in the same pass; otherwise the chart changes while the target stays
+        // stale until Health access returns.
+        refreshWeightDerived()
+        defaults.set(true, forKey: key)
+        return true
     }
 
     /// Everything downstream of a change to the weight series.
@@ -76,42 +93,80 @@ final class AggregationService {
 
     // MARK: - Weight trend
 
+    /// Smoothed over one value per day — the lowest — rather than over every
+    /// reading. See `DailyWeight`.
+    ///
+    /// Feeding raw readings in was its own bug, separate from the choice of
+    /// rule. Two weigh-ins on one day entered the EWMA as two successive points,
+    /// and `TrendFill`'s time-aware decay floors the gap at one day, so a second
+    /// weigh-in aged the trend a full day *and* dragged it toward the heavier
+    /// number. Stepping on the scale twice moved the trend; the body hadn't.
+    ///
+    /// Every row of a day is then given that day's trend, so `basisWeightKg`
+    /// answers the same thing whichever of the day's rows a caller reaches for.
     func fillWeightTrend() {
-        let metrics = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
-            .sorted { $0.date < $1.date }
-        let smoothed = TrendFill.ewma(metrics.map(\.weightKg), dates: metrics.map(\.date))
-        for (m, t) in zip(metrics, smoothed) { m.trendWeightKg = t }
+        let metrics = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
+        let byDay = DailyWeight.byDay(metrics, date: \.date,
+                                      weightKg: \.weightKg, calendar: cal)
+        let days = byDay.keys.sorted()
+        let smoothed = TrendFill.ewma(days.compactMap { byDay[$0] }, dates: days)
+
+        var trendByDay: [Date: Double] = [:]
+        for (day, trend) in zip(days, smoothed) { trendByDay[day] = trend }
+        for m in metrics {
+            let value = trendByDay[cal.startOfDay(for: m.date)]
+            if m.trendWeightKg != value { m.trendWeightKg = value }
+        }
     }
 
     // MARK: - Metabolic estimates
 
     func upsertMetabolicEstimates() {
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first else { return }
-        let logs = (try? context.fetch(FetchDescriptor<NutritionLog>())) ?? []
-        let metrics = (try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? []
+        let now = Date.now
+        let start = cal.date(byAdding: .day, value: -31, to: now) ?? now
+        let logsQuery = FetchDescriptor<NutritionLog>(
+            predicate: #Predicate { $0.date >= start && $0.date <= now })
+        let logs = (try? context.fetch(logsQuery)) ?? []
+        let metricsQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date >= start && $0.date <= now },
+            sortBy: [SortDescriptor(\.date)])
+        var metrics = (try? context.fetch(metricsQuery)) ?? []
+        // A user who weighs infrequently still needs the latest known weight for
+        // the BMR prior even when it predates the 30-day measurement window.
+        if metrics.isEmpty {
+            var latest = FetchDescriptor<BodyMetrics>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+            latest.fetchLimit = 1
+            metrics = (try? context.fetch(latest)) ?? []
+        }
         guard !metrics.isEmpty else { return }
 
         let supplements = (try? context.fetch(FetchDescriptor<Supplement>())) ?? []
         let entries = (try? context.fetch(FetchDescriptor<SupplementEntry>())) ?? []
-        let earliest = metrics.map(\.date).min() ?? .now
         let supplementKcal = SupplementIntake.dailyKcal(
             entries: entries, supplements: supplements,
-            from: max(earliest, Date.now.addingTimeInterval(-120 * 86_400)), to: .now)
+            from: start, to: now)
 
         let records = MetabolicRecordAssembler.dailyRecords(
             logs: logs, metrics: metrics, supplementKcal: supplementKcal)
-        let energy = (try? context.fetch(FetchDescriptor<DailyEnergy>())) ?? []
+        let energyQuery = FetchDescriptor<DailyEnergy>(
+            predicate: #Predicate { $0.date >= start && $0.date <= now })
+        let energy = (try? context.fetch(energyQuery)) ?? []
         let prior = MetabolismEngine.Prior(
             sex: profile.sex, ageYears: profile.ageYears,
             heightCm: profile.heightCm, activity: profile.activity,
             avgActiveEnergyKcal: MetabolicRecordAssembler.avgActiveEnergy(energy: energy),
-            leanMassKg: metrics.sorted { $0.date > $1.date }.first?.leanMassKg)
-        let today = cal.startOfDay(for: .now)
-        let existing = (try? context.fetch(FetchDescriptor<MetabolicEstimateRecord>())) ?? []
+            leanMassKg: BodyComposition.recentLeanMassKg(metrics))
+        let today = cal.startOfDay(for: now)
+        let bounds = DayBounds(today, calendar: cal)
+        let dayEnd = bounds.end
+        let existingQuery = FetchDescriptor<MetabolicEstimateRecord>(
+            predicate: #Predicate { $0.date >= today && $0.date < dayEnd })
+        let existing = (try? context.fetch(existingQuery)) ?? []
 
         for window in [7, 14, 30] {
             let est = MetabolismEngine().estimate(records: records, windowDays: window, prior: prior)
-            let row = existing.first { cal.isDate($0.date, inSameDayAs: today) && $0.windowDays == window }
+            let row = existing.first { bounds.contains($0.date) && $0.windowDays == window }
                 ?? {
                     let r = MetabolicEstimateRecord(date: today, window: window)
                     context.insert(r)
@@ -140,11 +195,15 @@ final class AggregationService {
     /// and running it for everyone keeps one code path. Whether the correction is
     /// *applied* is decided in `recoveryInputs`.
     func refreshCyclicalPatterns() {
-        let vitals = ((try? context.fetch(FetchDescriptor<DailyVitals>())) ?? [])
-            .sorted { $0.date < $1.date }
-        guard let origin = vitals.first?.date else { return }
+        var originQuery = FetchDescriptor<DailyVitals>(
+            sortBy: [SortDescriptor(\.date)])
+        originQuery.fetchLimit = 1
+        guard let origin = try? context.fetch(originQuery).first?.date else { return }
         let cutoff = Date.now.addingTimeInterval(-240 * 86_400)
-        let window = vitals.filter { $0.date >= cutoff }
+        let windowQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= cutoff },
+            sortBy: [SortDescriptor(\.date)])
+        let window = (try? context.fetch(windowQuery)) ?? []
 
         func samples(_ value: (DailyVitals) -> Double?) -> [CyclicalSample] {
             window.compactMap { row in
@@ -161,8 +220,11 @@ final class AggregationService {
     }
 
     private func store(_ pattern: CyclicalPattern?, marker: String) {
-        let existing = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
-            .first { $0.markerRaw == marker }
+        let matches = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
+            .filter { $0.markerRaw == marker }
+            .sorted { $0.detectedAt > $1.detectedAt }
+        let existing = matches.first
+        for duplicate in matches.dropFirst() { context.delete(duplicate) }
         guard let pattern else {
             existing?.isActive = false     // kept, so a flickering pattern is visible
             return
@@ -181,8 +243,9 @@ final class AggregationService {
         row.isActive = true
     }
 
-    /// The stored pattern for a marker, if it currently qualifies *and* applies
-    /// to this user.
+    /// Stored patterns that currently qualify and apply to this user. Both
+    /// recovery markers are loaded together so one recovery pass does not fetch
+    /// the same profile and tiny table twice.
     ///
     /// Gated on a female profile by product decision. The detector itself is
     /// blind — a 21–35 day rhythm could show up in anyone's data from shift work
@@ -191,18 +254,25 @@ final class AggregationService {
     /// expected. `.other` is excluded because it carries no information either
     /// way, and silently reshaping someone's recovery scores on an assumption is
     /// worse than leaving them alone.
-    private func activePattern(_ marker: String) -> CyclicalPattern? {
+    private func activePatterns() -> [String: CyclicalPattern] {
         guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first,
-              profile.sex == .female,
-              let row = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
-                  .first(where: { $0.markerRaw == marker && $0.isActive }),
-              row.profile.count == row.periodDays, row.periodDays > 0
-        else { return nil }
-        return CyclicalPattern(periodDays: row.periodDays,
-                               cyclesObserved: row.cyclesObserved,
-                               strength: row.strength,
-                               amplitude: row.amplitude,
-                               profile: row.profile)
+              profile.sex == .female else { return [:] }
+        let rows = ((try? context.fetch(FetchDescriptor<CyclicalPatternRecord>())) ?? [])
+            .sorted { $0.detectedAt < $1.detectedAt }
+        var patterns: [String: CyclicalPattern] = [:]
+        for row in rows {
+            guard row.isActive, row.profile.count == row.periodDays, row.periodDays > 0
+            else { continue }
+            // Newest valid row wins until the next refresh physically removes
+            // duplicates left by a CloudKit merge.
+            patterns[row.markerRaw] = CyclicalPattern(
+                periodDays: row.periodDays,
+                cyclesObserved: row.cyclesObserved,
+                strength: row.strength,
+                amplitude: row.amplitude,
+                profile: row.profile)
+        }
+        return patterns
     }
 
     // MARK: - Recovery
@@ -211,8 +281,12 @@ final class AggregationService {
         let today = cal.startOfDay(for: .now)
         let result = RecoveryEngine().evaluate(recoveryInputs(for: today))
 
-        let existing = (try? context.fetch(FetchDescriptor<RecoveryScoreRecord>())) ?? []
-        let row = existing.first { cal.isDate($0.date, inSameDayAs: today) }
+        let bounds = DayBounds(today, calendar: cal)
+        let dayEnd = bounds.end
+        let query = FetchDescriptor<RecoveryScoreRecord>(
+            predicate: #Predicate { $0.date >= today && $0.date < dayEnd })
+        let existing = (try? context.fetch(query)) ?? []
+        let row = existing.first { bounds.contains($0.date) }
             ?? {
                 let r = RecoveryScoreRecord(date: today, score: 0, recommendation: "")
                 context.insert(r)
@@ -223,25 +297,134 @@ final class AggregationService {
         row.dataCompleteness = result.dataCompleteness
     }
 
+    // MARK: - Strain
+
+    /// Today's total workout strain. Heart-rate sessions use minute TRIMP;
+    /// unrated strength and phone-only sessions fall back through RPE and logged
+    /// set effort, so a missing watch no longer erases work the user recorded.
+    func upsertTodayStrain() {
+        let today = cal.startOfDay(for: .now)
+        guard let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first else { return }
+
+        let vitals = (try? context.fetch(FetchDescriptor<DailyVitals>())) ?? []
+        let restingHR = vitals.sorted { $0.date > $1.date }.compactMap(\.restingHR).first
+
+        let windowStart = cal.date(byAdding: .day, value: -StrainEngine.referenceWindowDays,
+                                   to: today) ?? today
+        let workoutQuery = FetchDescriptor<WorkoutRecord>(
+            predicate: #Predicate { $0.startedAt >= windowStart })
+        let workoutRecords = (try? context.fetch(workoutQuery)) ?? []
+
+        let sessionQuery = FetchDescriptor<TrainingSession>(
+            predicate: #Predicate { $0.startedAt >= windowStart })
+        let localSessions: [(interval: DateInterval, input: StrainWorkout)] =
+            ((try? context.fetch(sessionQuery)) ?? []).compactMap { session in
+            guard let endedAt = session.endedAt, endedAt > session.startedAt else { return nil }
+            let sets = (session.sets ?? []).filter {
+                $0.completedAt != nil && !$0.isWarmup && $0.reps > 0
+            }.map { StrainStrengthSet(reps: $0.reps, rir: $0.rir) }
+            let input = StrainWorkout(
+                date: session.startedAt,
+                durationMinutes: endedAt.timeIntervalSince(session.startedAt) / 60,
+                sessionRPE: session.sessionRPE,
+                strengthSets: sets)
+            return (DateInterval(start: session.startedAt, end: endedAt), input)
+        }
+
+        let strengthRecordIndices = workoutRecords.indices.filter {
+            workoutRecords[$0].activity.isStrength && workoutRecords[$0].durationSeconds > 0
+        }
+        let matches = WorkoutTimeMatcher.matches(
+            workouts: strengthRecordIndices.map {
+                DateInterval(start: workoutRecords[$0].startedAt,
+                             end: workoutRecords[$0].endedAt)
+            },
+            sessions: localSessions.map(\.interval))
+        let recordToSession = Dictionary(uniqueKeysWithValues: matches.map {
+            (strengthRecordIndices[$0.key], $0.value)
+        })
+        let sessionToRecord = Dictionary(uniqueKeysWithValues: recordToSession.map {
+            ($0.value, $0.key)
+        })
+
+        // Unmatched imports stand alone. A matched watch workout is represented
+        // below by its richer phone session, carrying the watch's HR signal.
+        var inputs: [StrainWorkout] = workoutRecords.enumerated().compactMap { pair in
+            let (index, record) = pair
+            guard recordToSession[index] == nil else { return nil }
+            return StrainWorkout(date: record.startedAt,
+                                 durationMinutes: record.durationSeconds / 60,
+                                 avgHeartRate: record.avgHeartRate,
+                                 heartRateSegments: record.heartRateSegments,
+                                 sessionRPE: record.sessionRPE)
+        }
+        inputs += localSessions.enumerated().map { pair in
+            let (index, local) = pair
+            guard let recordIndex = sessionToRecord[index] else { return local.input }
+            let watch = workoutRecords[recordIndex]
+            let hasWatchHR = watch.avgHeartRate != nil || !watch.heartRateSegments.isEmpty
+            return StrainWorkout(
+                date: local.input.date,
+                durationMinutes: hasWatchHR ? watch.durationSeconds / 60
+                                            : local.input.durationMinutes,
+                avgHeartRate: watch.avgHeartRate,
+                heartRateSegments: watch.heartRateSegments,
+                sessionRPE: local.input.sessionRPE ?? watch.sessionRPE,
+                strengthSets: local.input.strengthSets)
+        }
+
+        let result = StrainEngine().evaluate(workouts: inputs, on: today,
+                                             restingHR: restingHR,
+                                             age: Double(profile.ageYears),
+                                             isFemale: profile.sex == .female,
+                                             calendar: cal)
+
+        let bounds = DayBounds(today, calendar: cal)
+        let dayEnd = bounds.end
+        let query = FetchDescriptor<StrainRecord>(
+            predicate: #Predicate { $0.date >= today && $0.date < dayEnd })
+        let existing = (try? context.fetch(query)) ?? []
+        let row = existing.first { bounds.contains($0.date) }
+            ?? {
+                let r = StrainRecord(date: today, strain: 0, rawTrimp: 0,
+                                     bandRaw: "", dataCompleteness: 0)
+                context.insert(r)
+                return r
+            }()
+        row.strain = result?.strain ?? 0
+        row.rawTrimp = result?.rawTrimp ?? 0
+        row.bandRaw = result?.band.rawValue ?? ""
+        row.dataCompleteness = result?.dataCompleteness ?? 0
+    }
+
     func recoveryInputs(for day: Date) -> RecoveryInputs {
         var inputs = RecoveryInputs()
 
-        let sleep = (try? context.fetch(FetchDescriptor<SleepData>())) ?? []
-        if let last = sleep.first(where: { cal.isDate($0.date, inSameDayAs: day) }) {
+        let bounds = DayBounds(day, calendar: cal)
+        let dayStart = bounds.start
+        let dayEnd = bounds.end
+        let sleepQuery = FetchDescriptor<SleepData>(
+            predicate: #Predicate { $0.date >= dayStart && $0.date < dayEnd })
+        if let last = try? context.fetch(sleepQuery).first {
             inputs.asleepMinutes = last.asleepMinutes
             inputs.sleepEfficiency = last.efficiency
         }
 
-        let vitals = ((try? context.fetch(FetchDescriptor<DailyVitals>())) ?? [])
-            .sorted { $0.date < $1.date }
         let baselineStart = day.addingTimeInterval(-60 * 86_400)
-        let baseline = vitals.filter { $0.date >= baselineStart && $0.date < day }
-        let todayVitals = vitals.first { cal.isDate($0.date, inSameDayAs: day) }
+        let vitalsQuery = FetchDescriptor<DailyVitals>(
+            predicate: #Predicate { $0.date >= baselineStart && $0.date < dayEnd },
+            sortBy: [SortDescriptor(\.date)])
+        let vitals = (try? context.fetch(vitalsQuery)) ?? []
+        let baseline = vitals.filter { $0.date < day }
+        let todayVitals = vitals.first { bounds.contains($0.date) }
 
         // Level both sides by the same rhythm before comparing. Correcting only
         // today's reading would shift it against an uncorrected baseline and
         // invert the very error being fixed.
-        let origin = vitals.first.map { cal.startOfDay(for: $0.date) }
+        var originQuery = FetchDescriptor<DailyVitals>(sortBy: [SortDescriptor(\.date)])
+        originQuery.fetchLimit = 1
+        let origin = (try? context.fetch(originQuery).first)
+            .map { cal.startOfDay(for: $0.date) }
         func dayIndex(_ date: Date) -> Int {
             guard let origin else { return 0 }
             return Int(cal.startOfDay(for: date).timeIntervalSince(origin) / 86_400)
@@ -252,8 +435,9 @@ final class AggregationService {
             return values.map { $0.1 - pattern.offset(forDay: dayIndex($0.0)) }
         }
 
-        let hrvPattern = activePattern(Marker.hrv)
-        let rhrPattern = activePattern(Marker.restingHR)
+        let patterns = activePatterns()
+        let hrvPattern = patterns[Marker.hrv]
+        let rhrPattern = patterns[Marker.restingHR]
 
         if let todayVitals {
             inputs.hrv = todayVitals.hrvSDNN.map {
@@ -285,19 +469,14 @@ final class AggregationService {
             ((try? context.fetch(FetchDescriptor<Exercise>())) ?? [])
                 .map { ($0.id, $0.bodyweightFraction) },
             uniquingKeysWith: { a, _ in a })
-        let records = sessions.flatMap { s in
-            (s.sets ?? []).compactMap { set -> LiftRecord? in
-                guard let id = set.exerciseID else { return nil }
-                return LiftRecord(date: s.startedAt, exerciseID: id,
-                                  weightKg: set.weightKg, reps: set.reps, isWarmup: set.isWarmup,
-                                  bodyweightFraction: fractions[id] ?? 0)
-            }
-        }
+        let records = TrainingRecords.completed(sessions, fractions: fractions)
         // Bodyweight makes unweighted work count toward load. Trend weight, not
         // the latest reading, so a water-weight spike can't move training load.
-        let bodyweight = ((try? context.fetch(FetchDescriptor<BodyMetrics>())) ?? [])
-            .sorted { $0.date > $1.date }
-            .first
+        var weightQuery = FetchDescriptor<BodyMetrics>(
+            predicate: #Predicate { $0.date <= day },
+            sortBy: [SortDescriptor(\.date, order: .reverse)])
+        weightQuery.fetchLimit = 1
+        let bodyweight = (try? context.fetch(weightQuery).first)
             .map { $0.trendWeightKg ?? $0.weightKg } ?? 0
 
         let agg = VolumeAggregator()
