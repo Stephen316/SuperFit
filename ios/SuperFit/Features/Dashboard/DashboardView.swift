@@ -22,6 +22,11 @@ struct DashboardView: View {
     @Query private var profiles: [UserProfile]
     @Query private var supplements: [Supplement]
     @Query private var supplementEntries: [SupplementEntry]
+    /// A strength session left in progress today (endedAt == nil). Narrow and
+    /// filtered, so unlike the windowed fetches below it can stay reactive at no
+    /// cost: the "Continue workout" tab must appear the moment one is left open
+    /// and vanish the moment it's finished.
+    @Query private var openSessions: [TrainingSession]
 
     // Explicit, windowed fetches rather than reactive whole-table queries. The
     // dashboard needs one selected day plus a year for its streak; retaining every
@@ -48,7 +53,22 @@ struct DashboardView: View {
     @State private var showingSettings = false
     @State private var showingWatchHelp = false
     @State private var syncFailure: String?
+    /// The in-progress workout the "Continue workout" tab reopens.
+    @State private var resumeSession: TrainingSession?
     @AppStorage(UnitSystem.storageKey) private var unitsRaw = UnitSystem.metric.rawValue
+
+    init(tab: Binding<AppTab>) {
+        _tab = tab
+        // Captured at init: the predicate needs a concrete cutoff. Good enough —
+        // the view is rebuilt each launch, and a session spanning midnight is
+        // rare and still reachable from the Training tab.
+        let startOfToday = Calendar.current.startOfDay(for: .now)
+        _openSessions = Query(
+            filter: #Predicate<TrainingSession> {
+                $0.endedAt == nil && $0.startedAt >= startOfToday
+            },
+            sort: \.startedAt, order: .reverse)
+    }
 
     private var units: UnitSystem { UnitSystem(rawValue: unitsRaw) ?? .metric }
 
@@ -204,6 +224,9 @@ struct DashboardView: View {
                 Theme.background
                 VStack(spacing: 0) {
                     headerRow
+                    if let session = openSessions.first {
+                        continueWorkoutTab(session)
+                    }
                     ScrollView {
                         VStack(spacing: 20) {          // dashboard-content, gap 20
                             recoverySection
@@ -236,6 +259,11 @@ struct DashboardView: View {
             .sheet(isPresented: $showingWatchHelp) { WatchSetupHelpView() }
             .sheet(item: $addingTo, onDismiss: loadDashboardData) { slot in
                 FoodSearchView(day: day, meal: slot)
+            }
+            // Reopen the left-in-progress workout straight from home, without a
+            // detour through the Training tab.
+            .fullScreenCover(item: $resumeSession) { session in
+                ActiveWorkoutView(session: session)
             }
             .alert("Refresh incomplete", isPresented: Binding(
                 get: { syncFailure != nil },
@@ -309,6 +337,49 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    /// Pinned at the top of home while a strength session is left in progress —
+    /// a segmented-style tab that reopens it straight from here (see the
+    /// `resumeSession` cover), so you skip the trip through the Training tab.
+    /// Elapsed is a live system clock, so it needs no ticking timer.
+    private func continueWorkoutTab(_ session: TrainingSession) -> some View {
+        Button { resumeSession = session } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Theme.gold)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Continue workout")
+                        .font(Theme.text(14, .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(session.templateName ?? "Workout")
+                        .font(Theme.text(12))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Spacer(minLength: 8)
+                Text(session.startedAt, style: .timer)
+                    .font(Theme.text(13))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textSecondary)
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.gold)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.gold.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Theme.gold.opacity(0.45), lineWidth: 1))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 10)
     }
 
     /// Consecutive days of food logged, with a weigh-in every third day.

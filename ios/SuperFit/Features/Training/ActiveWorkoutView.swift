@@ -94,7 +94,11 @@ struct ActiveWorkoutView: View {
             .keyboardDoneButton()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
+                    // "Leave", not "Close": it dismisses without ending the
+                    // session (endedAt stays nil), so the workout keeps going and
+                    // reappears as the "Continue workout" tab on home. Finishing
+                    // is the trailing button; discarding is its own confirmed path.
+                    Button("Leave") { dismiss() }
                 }
                 .withoutGlassBackground()
                 ToolbarItem(placement: .topBarTrailing) {
