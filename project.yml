@@ -78,11 +78,13 @@ targets:
       - package: Supabase
         product: Supabase
       - target: SuperFitWidgets
-      # Embeds the watch app so it installs and pairs with the phone. Building
-      # the iOS app therefore also builds the watch app, which needs the watchOS
-      # platform installed (Xcode > Settings > Components > watchOS).
-      - target: SuperFitWatch
-        embed: true
+      # The watch app is NOT embedded. With no Apple Watch paired, Xcode builds
+      # SuperFitWatch.app as an executable-less placeholder, and iOS install then
+      # rejects the whole app ("InvalidWatchKitApp / MissingBundleExecutable").
+      # The watch target still builds on its own; to ship/pair it, re-add:
+      #   - target: SuperFitWatch
+      #     embed: true
+      # then `xcodegen generate` — do that once a watch is paired to test on.
     # The entitlements file is hand-maintained and referenced by
     # CODE_SIGN_ENTITLEMENTS above. Do not add an `entitlements:` block here —
     # that makes XcodeGen *generate* the file from `properties:`, and with none
